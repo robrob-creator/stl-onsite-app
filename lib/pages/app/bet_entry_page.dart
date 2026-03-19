@@ -15,18 +15,21 @@ class _BetEntryPageState extends State<BetEntryPage> {
   String _lottoNumbers = '';
   late TextEditingController _targetAmountController;
   late TextEditingController _rambolAmountController;
+  late FocusNode _targetAmountFocusNode;
 
   @override
   void initState() {
     super.initState();
     _targetAmountController = TextEditingController();
     _rambolAmountController = TextEditingController();
+    _targetAmountFocusNode = FocusNode();
   }
 
   @override
   void dispose() {
     _targetAmountController.dispose();
     _rambolAmountController.dispose();
+    _targetAmountFocusNode.dispose();
     super.dispose();
   }
 
@@ -145,6 +148,12 @@ class _BetEntryPageState extends State<BetEntryPage> {
                         });
                       },
                       initialValue: _lottoNumbers,
+                      onLastNumberEntered: () {
+                        // Move focus to target amount field when last number is entered
+                        FocusScope.of(
+                          context,
+                        ).requestFocus(_targetAmountFocusNode);
+                      },
                     ),
                     // Play Type Selector (Only for games that enable both straight and ramble)
                   ],
@@ -231,6 +240,7 @@ class _BetEntryPageState extends State<BetEntryPage> {
                         const SizedBox(height: 8),
                         TextField(
                           controller: _targetAmountController,
+                          focusNode: _targetAmountFocusNode,
                           onChanged: (value) {
                             ctrl.targetAmount.value = int.tryParse(value) ?? 0;
                           },

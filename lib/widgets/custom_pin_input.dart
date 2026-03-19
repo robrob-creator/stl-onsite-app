@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 
 class CustomPinInput extends StatefulWidget {
   final int length;
@@ -31,8 +32,18 @@ class _CustomPinInputState extends State<CustomPinInput> {
     super.initState();
     _controller = widget.controller ?? TextEditingController();
     _focusNode = FocusNode();
+
+    // Request focus and show keyboard after frame is built
     WidgetsBinding.instance.addPostFrameCallback((_) {
       _focusNode.requestFocus();
+      SystemChannels.textInput.invokeMethod('TextInput.show');
+    });
+
+    // Listen to focus changes to show keyboard when focus is gained
+    _focusNode.addListener(() {
+      if (_focusNode.hasFocus) {
+        SystemChannels.textInput.invokeMethod('TextInput.show');
+      }
     });
   }
 
@@ -79,6 +90,8 @@ class _CustomPinInputState extends State<CustomPinInput> {
           onTap: () {
             _focusNode.requestFocus();
             FocusScope.of(context).requestFocus(_focusNode);
+            // Explicitly show the keyboard
+            SystemChannels.textInput.invokeMethod('TextInput.show');
           },
           child: Row(
             mainAxisAlignment: MainAxisAlignment.spaceEvenly,

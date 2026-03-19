@@ -61,10 +61,10 @@ class _HomePageState extends State<HomePage> {
       bottomNavItems: [
         BottomNavigationBarItem(
           icon: Image.asset(
-            'assets/images/icons/reciept1.png',
+            'assets/images/logos/home.png',
             width: 24,
             height: 24,
-            color: _currentIndex == 0 ? AppColors.primary : null,
+            color: _currentIndex == 0 ? AppColors.primary : Colors.grey,
           ),
           label: 'Dashboard',
         ),

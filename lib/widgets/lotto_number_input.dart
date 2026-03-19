@@ -8,6 +8,8 @@ class LottoNumberInput extends StatefulWidget {
   final int maxNumber; // Maximum allowed number
   final ValueChanged<String> onChanged;
   final String initialValue;
+  final VoidCallback?
+  onLastNumberEntered; // Callback when last number is entered
 
   const LottoNumberInput({
     Key? key,
@@ -17,6 +19,7 @@ class LottoNumberInput extends StatefulWidget {
     required this.maxNumber,
     required this.onChanged,
     this.initialValue = '',
+    this.onLastNumberEntered,
   }) : super(key: key);
 
   @override
@@ -102,9 +105,16 @@ class _LottoNumberInputState extends State<LottoNumberInput> {
       }
     }
 
-    // Auto-move to next cell when full
-    if (currentLength == _digitsPerCell && index < _cellCount - 1) {
-      FocusScope.of(context).requestFocus(_focusNodes[index + 1]);
+    // Auto-move to next cell when full, or trigger callback for last cell
+    if (currentLength == _digitsPerCell) {
+      if (index < _cellCount - 1) {
+        FocusScope.of(context).requestFocus(_focusNodes[index + 1]);
+      } else if (index == _cellCount - 1) {
+        // Last cell is filled, trigger callback
+        if (widget.onLastNumberEntered != null) {
+          Future.microtask(() => widget.onLastNumberEntered!());
+        }
+      }
     }
 
     _previousLengths[index] = currentLength;
@@ -177,7 +187,7 @@ class _LottoNumberInputState extends State<LottoNumberInput> {
         maxLength: _digitsPerCell,
         decoration: InputDecoration(
           counterText: '',
-          hintText: widget.gameType == '2D Lotto' ? 'XX' : 'X',
+          hintText: widget.gameType == '2D Lotto' ? '--' : '-',
           hintStyle: TextStyle(
             color: Colors.grey[300],
             fontSize: widget.gameType == '2D Lotto' ? 18 : 24,
