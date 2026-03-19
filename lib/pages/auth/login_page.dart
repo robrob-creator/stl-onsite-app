@@ -23,102 +23,123 @@ class _LoginPageState extends State<LoginPage> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: Colors.white,
-      body: SafeArea(
-        child: SingleChildScrollView(
-          child: Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 24.0),
-            child: Column(
-              mainAxisAlignment: MainAxisAlignment.start,
-              children: [
-                const SizedBox(height: 40),
-                // Logo
-                Image.asset(
-                  'assets/images/logos/logo.png',
-                  width: 120,
-                  height: 120,
-                ),
-                const SizedBox(height: 40),
-                // Sign in text
-                Text(
-                  'Enter Your PIN',
-                  style: Theme.of(context).textTheme.headlineSmall?.copyWith(
-                    fontWeight: FontWeight.w600,
-                    color: Colors.black87,
-                  ),
-                ),
-                const SizedBox(height: 12),
-                // Subtitle with IMEI
-                Text(
-                  'Please enter your 6-digit PIN',
-                  style: Theme.of(
-                    context,
-                  ).textTheme.bodyMedium?.copyWith(color: Colors.grey),
-                ),
-                //   if (authController.imei.value.isNotEmpty) ...[
-                //     const SizedBox(height: 12),
-                //     Container(
-                //       padding: const EdgeInsets.symmetric(
-                //         horizontal: 12,
-                //         vertical: 8,
-                //       ),
-                //       decoration: BoxDecoration(
-                //         color: Colors.grey[100],
-                //         borderRadius: BorderRadius.circular(8),
-                //       ),
-                //       child: Text(
-                //         'Device: ${authController.imei.value}',
-                //         style: TextStyle(
-                //           fontSize: 12,
-                //           color: Colors.grey[600],
-                //           fontFamily: 'monospace',
-                //         ),
-                //       ),
-                //     ),
-                //   ],
-                const SizedBox(height: 24),
-                // PIN Input Field
-                CustomPinInput(
-                  length: 6,
-                  onChanged: (value) {
-                    authController.mpin.value = value;
-                  },
-                  onComplete: () {
-                    authController.login();
-                  },
-                ),
-                const SizedBox(height: 24),
-                // Loading indicator while logging in
-                Obx(
-                  () => authController.isLoading.value
-                      ? const Column(
-                          children: [
-                            SizedBox(
-                              height: 24,
-                              width: 24,
-                              child: CircularProgressIndicator(
-                                valueColor: AlwaysStoppedAnimation<Color>(
-                                  Color(0xFF2563EB),
-                                ),
-                                strokeWidth: 2.5,
-                              ),
-                            ),
-                            SizedBox(height: 12),
-                            Text(
-                              'Logging in...',
-                              style: TextStyle(
-                                fontSize: 14,
-                                color: Colors.grey,
-                              ),
-                            ),
-                          ],
-                        )
-                      : const SizedBox.shrink(),
-                ),
-              ],
+      body: Stack(
+        children: [
+          Container(
+            width: MediaQuery.of(context).size.width,
+            height: MediaQuery.of(context).size.height,
+            decoration: const BoxDecoration(
+              image: DecorationImage(
+                image: AssetImage('assets/images/backgrounds/login-bg.png'),
+                fit: BoxFit.fill,
+              ),
             ),
           ),
-        ),
+          SafeArea(
+            child: SingleChildScrollView(
+              child: Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 24.0),
+                child: Column(
+                  mainAxisAlignment: MainAxisAlignment.start,
+                  children: [
+                    const SizedBox(height: 40),
+                    // Logo
+                    Image.asset(
+                      'assets/images/logos/logo.png',
+                      width: 120,
+                      height: 120,
+                    ),
+                    const SizedBox(height: 40),
+                    // Sign in text
+                    SizedBox(
+                      width: MediaQuery.of(context).size.width,
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            'Sign In to your Account',
+                            style: Theme.of(context).textTheme.headlineSmall
+                                ?.copyWith(
+                                  fontWeight: FontWeight.w600,
+                                  color: Colors.black87,
+                                ),
+                          ),
+                          const SizedBox(height: 12),
+                          // Subtitle with IMEI
+                          Text(
+                            'Please enter your 6-digit MPIN',
+                            style: Theme.of(context).textTheme.bodyMedium
+                                ?.copyWith(color: Colors.grey),
+                          ),
+                        ],
+                      ),
+                    ),
+                    //   if (authController.imei.value.isNotEmpty) ...[
+                    //     const SizedBox(height: 12),
+                    //     Container(
+                    //       padding: const EdgeInsets.symmetric(
+                    //         horizontal: 12,
+                    //         vertical: 8,
+                    //       ),
+                    //       decoration: BoxDecoration(
+                    //         color: Colors.grey[100],
+                    //         borderRadius: BorderRadius.circular(8),
+                    //       ),
+                    //       child: Text(
+                    //         'Device: ${authController.imei.value}',
+                    //         style: TextStyle(
+                    //           fontSize: 12,
+                    //           color: Colors.grey[600],
+                    //           fontFamily: 'monospace',
+                    //         ),
+                    //       ),
+                    //     ),
+                    //   ],
+                    const SizedBox(height: 24),
+                    // PIN Input Field
+                    CustomPinInput(
+                      length: 6,
+                      onChanged: (value) {
+                        authController.mpin.value = value;
+                      },
+                      onComplete: () {
+                        authController.login();
+                      },
+                    ),
+                    const SizedBox(height: 24),
+                    // Loading indicator while logging in
+                    Obx(
+                      () => authController.isLoading.value
+                          ? const Column(
+                              children: [
+                                SizedBox(
+                                  height: 24,
+                                  width: 24,
+                                  child: CircularProgressIndicator(
+                                    valueColor: AlwaysStoppedAnimation<Color>(
+                                      Color(0xFF2563EB),
+                                    ),
+                                    strokeWidth: 2.5,
+                                  ),
+                                ),
+                                SizedBox(height: 12),
+                                Text(
+                                  'Logging in...',
+                                  style: TextStyle(
+                                    fontSize: 14,
+                                    color: Colors.grey,
+                                  ),
+                                ),
+                              ],
+                            )
+                          : const SizedBox.shrink(),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ),
+        ],
       ),
     );
   }
