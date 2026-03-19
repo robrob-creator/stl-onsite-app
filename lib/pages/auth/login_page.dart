@@ -23,7 +23,7 @@ class _LoginPageState extends State<LoginPage> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: AppColors.background,
+      backgroundColor: Colors.white,
       body: SafeArea(
         child: SingleChildScrollView(
           child: Padding(
@@ -31,132 +31,90 @@ class _LoginPageState extends State<LoginPage> {
             child: Column(
               mainAxisAlignment: MainAxisAlignment.start,
               children: [
-                // Top spacing
-                const SizedBox(height: 48),
-                
-                // Logo with subtle shadow
-                Container(
-                  decoration: BoxDecoration(
-                    shape: BoxShape.circle,
-                    boxShadow: [
-                      BoxShadow(
-                        color: AppColors.primary.withOpacity(0.15),
-                        blurRadius: 20,
-                        offset: const Offset(0, 10),
-                      ),
-                    ],
-                  ),
-                  child: Image.asset(
-                    'assets/images/logos/logo.png',
-                    width: 120,
-                    height: 120,
-                  ),
+                const SizedBox(height: 40),
+                // Logo
+                Image.asset(
+                  'assets/images/logos/logo.png',
+                  width: 120,
+                  height: 120,
                 ),
-                
-                const SizedBox(height: 48),
-                
-                // Main heading
+                const SizedBox(height: 40),
+                // Sign in text
                 Text(
                   'Enter Your PIN',
-                  style: AppTextStyles.headlineLarge.copyWith(
-                    color: AppColors.text,
-                    fontWeight: FontWeight.bold,
+                  style: Theme.of(context).textTheme.headlineSmall?.copyWith(
+                    fontWeight: FontWeight.w600,
+                    color: Colors.black87,
                   ),
-                  textAlign: TextAlign.center,
                 ),
-                
                 const SizedBox(height: 12),
-                
-                // Subtitle description
+                // Subtitle with IMEI
                 Text(
-                  'Please enter your 6-digit PIN to continue',
-                  style: AppTextStyles.bodyMedium.copyWith(
-                    color: AppColors.textSecondary,
-                  ),
-                  textAlign: TextAlign.center,
+                  'Please enter your 6-digit PIN',
+                  style: Theme.of(
+                    context,
+                  ).textTheme.bodyMedium?.copyWith(color: Colors.grey),
                 ),
-                
-                const SizedBox(height: 40),
-                
-                // PIN Input Field Container with subtle background
-                Container(
-                  padding: const EdgeInsets.all(20),
-                  decoration: BoxDecoration(
-                    color: AppColors.backgroundSecondary,
-                    borderRadius: BorderRadius.circular(AppLayout.largeBorderRadius),
-                    border: Border.all(
-                      color: AppColors.border,
-                      width: 1,
-                    ),
-                  ),
-                  child: Obx(
-                    () => AbsorbPointer(
-                      absorbing: authController.isLoading.value,
-                      child: Opacity(
-                        opacity: authController.isLoading.value ? 0.5 : 1.0,
-                        child: CustomPinInput(
-                          length: 6,
-                          onChanged: (value) {
-                            authController.mpin.value = value;
-                          },
-                          onComplete: () {
-                            if (!authController.isLoading.value) {
-                              authController.login();
-                            }
-                          },
-                        ),
-                      ),
-                    ),
-                  ),
+                //   if (authController.imei.value.isNotEmpty) ...[
+                //     const SizedBox(height: 12),
+                //     Container(
+                //       padding: const EdgeInsets.symmetric(
+                //         horizontal: 12,
+                //         vertical: 8,
+                //       ),
+                //       decoration: BoxDecoration(
+                //         color: Colors.grey[100],
+                //         borderRadius: BorderRadius.circular(8),
+                //       ),
+                //       child: Text(
+                //         'Device: ${authController.imei.value}',
+                //         style: TextStyle(
+                //           fontSize: 12,
+                //           color: Colors.grey[600],
+                //           fontFamily: 'monospace',
+                //         ),
+                //       ),
+                //     ),
+                //   ],
+                const SizedBox(height: 24),
+                // PIN Input Field
+                CustomPinInput(
+                  length: 6,
+                  onChanged: (value) {
+                    authController.mpin.value = value;
+                  },
+                  onComplete: () {
+                    authController.login();
+                  },
                 ),
-                
-                const SizedBox(height: 48),
-                
-                // Loading indicator section - Enhanced visibility
+                const SizedBox(height: 24),
+                // Loading indicator while logging in
                 Obx(
                   () => authController.isLoading.value
-                      ? Column(
+                      ? const Column(
                           children: [
-                            // Animated loading circle
-                            Container(
-                              padding: const EdgeInsets.all(24),
-                              decoration: BoxDecoration(
-                                shape: BoxShape.circle,
-                                color: AppColors.primary.withOpacity(0.1),
-                              ),
-                              child: const SizedBox(
-                                height: 40,
-                                width: 40,
-                                child: CircularProgressIndicator(
-                                  valueColor: AlwaysStoppedAnimation<Color>(
-                                    AppColors.primary,
-                                  ),
-                                  strokeWidth: 3.5,
+                            SizedBox(
+                              height: 24,
+                              width: 24,
+                              child: CircularProgressIndicator(
+                                valueColor: AlwaysStoppedAnimation<Color>(
+                                  Color(0xFF2563EB),
                                 ),
+                                strokeWidth: 2.5,
                               ),
                             ),
-                            const SizedBox(height: 20),
+                            SizedBox(height: 12),
                             Text(
-                              'Authenticating...',
-                              style: AppTextStyles.titleLarge.copyWith(
-                                color: AppColors.primary,
-                                fontWeight: FontWeight.w600,
+                              'Logging in...',
+                              style: TextStyle(
+                                fontSize: 14,
+                                color: Colors.grey,
                               ),
-                            ),
-                            const SizedBox(height: 8),
-                            Text(
-                              'Verifying your device and PIN',
-                              style: AppTextStyles.bodySmall.copyWith(
-                                color: AppColors.textSecondary,
-                              ),
-                              textAlign: TextAlign.center,
                             ),
                           ],
                         )
                       : const SizedBox.shrink(),
                 ),
-                
-                const SizedBox(height: 32),
               ],
             ),
           ),
