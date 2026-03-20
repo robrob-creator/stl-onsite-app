@@ -164,7 +164,30 @@ class _BetEntryPageState extends State<BetEntryPage> {
               // Draw Time Selector
               GetBuilder<LotteryController>(
                 builder: (ctrl) {
-                  final drawTimes = ctrl.currentDrawTimes;
+                  final drawTimes = ctrl.currentDrawTimes
+                      .where((dt) => dt.isAvailable())
+                      .toList();
+
+                  // If no draw times are available, show message
+                  if (drawTimes.isEmpty) {
+                    return Container(
+                      padding: const EdgeInsets.all(16),
+                      decoration: BoxDecoration(
+                        color: Colors.orange[50],
+                        borderRadius: BorderRadius.circular(12),
+                        border: Border.all(color: Colors.orange[200]!),
+                      ),
+                      child: Text(
+                        'No draw times available at this moment. Please try again later.',
+                        textAlign: TextAlign.center,
+                        style: TextStyle(
+                          fontSize: 14,
+                          color: Colors.orange[700],
+                          fontWeight: FontWeight.w500,
+                        ),
+                      ),
+                    );
+                  }
 
                   return Container(
                     padding: const EdgeInsets.all(2),

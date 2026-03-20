@@ -420,4 +420,63 @@ class LotteryController extends GetxController {
       return {'success': false, 'error': 'Failed to create claim: $e'};
     }
   }
+
+  /// Fetch ticket details by ticket number
+  /// Returns: {success: bool, data?: Ticket, error?: String, statusCode?: int}
+  Future<Map<String, dynamic>> getTicketByNumber(String ticketNumber) async {
+    try {
+      final authController = Get.find<AuthController>();
+
+      if (!authController.isLoggedIn) {
+        return {'success': false, 'error': 'Please log in first'};
+      }
+
+      final token = authController.token.value;
+      final uri = Uri.parse(
+        'https://stl-backend-mws9.onrender.com/api/tickets',
+      ).replace(queryParameters: {'ticket_no': ticketNumber});
+
+      final response = await http
+          .get(
+            uri,
+            headers: {
+              'Content-Type': 'application/json',
+              'Authorization': 'Bearer $token',
+            },
+          )
+          .timeout(const Duration(seconds: 30));
+
+      if (response.statusCode != 200) {
+        try {
+          final errorBody = jsonDecode(response.body);
+          final message = errorBody['message'] ?? 'Ticket not found';
+          return {
+            'success': false,
+            'error': message,
+            'statusCode': response.statusCode,
+          };
+        } catch (e) {
+          return {
+            'success': false,
+            'error': 'Failed to fetch ticket (Status: ${response.statusCode})',
+            'statusCode': response.statusCode,
+          };
+        }
+      }
+
+      // Parse successful response
+      final responseBody = jsonDecode(response.body);
+      final ticketsData = responseBody['data'] as List?;
+
+      // Get the first ticket from the results
+      if (ticketsData != null && ticketsData.isNotEmpty) {
+        final ticketData = ticketsData[0] as Map<String, dynamic>;
+        return {'success': true, 'data': ticketData};
+      } else {
+        return {'success': false, 'error': 'No ticket found with this number'};
+      }
+    } catch (e) {
+      return {'success': false, 'error': 'Failed to fetch ticket: $e'};
+    }
+  }
 }

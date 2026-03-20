@@ -222,4 +222,46 @@ class DrawTime {
     }
     return drawTime;
   }
+
+  /// Check if draw time is still available based on current time and cutoff
+  bool isAvailable() {
+    try {
+      // Parse the ISO 8601 format: "0000-01-01T10:30:00Z"
+      final now = DateTime.now();
+      final parts = drawTime.split('T');
+
+      if (parts.length < 2) return false;
+
+      // Extract time parts
+      final timeParts = parts[1].substring(0, 5).split(':');
+      if (timeParts.length != 2) return false;
+
+      final hour = int.parse(timeParts[0]);
+      final minute = int.parse(timeParts[1]);
+
+      // Create a DateTime for today's draw time
+      DateTime drawDateTime = DateTime(
+        now.year,
+        now.month,
+        now.day,
+        hour,
+        minute,
+      );
+
+      // If draw time is in the past, move to tomorrow
+      if (drawDateTime.isBefore(now)) {
+        drawDateTime = drawDateTime.add(const Duration(days: 1));
+      }
+
+      // Calculate cutoff time
+      final cutoffDateTime = drawDateTime.subtract(
+        Duration(minutes: cutoffMinutes),
+      );
+
+      // Draw time is available if current time is before cutoff
+      return now.isBefore(cutoffDateTime);
+    } catch (e) {
+      return true; // Default to available if parsing fails
+    }
+  }
 }

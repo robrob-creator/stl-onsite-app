@@ -64,6 +64,21 @@ class Bet {
   });
 
   factory Bet.fromJson(Map<String, dynamic> json) {
+    // Parse digits - handle both string and list formats
+    List<String>? parsedDigits;
+    if (json['digits'] != null) {
+      if (json['digits'] is String) {
+        // Format: "{31,14}" -> ["31", "14"]
+        String digitsStr = (json['digits'] as String)
+            .replaceAll('{', '')
+            .replaceAll('}', '')
+            .trim();
+        parsedDigits = digitsStr.split(',').map((d) => d.trim()).toList();
+      } else if (json['digits'] is List) {
+        parsedDigits = List<String>.from(json['digits']);
+      }
+    }
+
     return Bet(
       id: json['id'],
       agentId: json['agent_id'],
@@ -80,7 +95,7 @@ class Bet {
       customerId: json['customer_id'],
       ticketNo: json['ticket_no'],
       drawDate: json['draw_date'],
-      digits: json['digits'] != null ? List<String>.from(json['digits']) : null,
+      digits: parsedDigits,
       ipAddress: json['ip_address'],
       areaId: json['area_id'],
       makerId: json['maker_id'],

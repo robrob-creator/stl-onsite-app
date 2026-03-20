@@ -1,3 +1,65 @@
+import 'bet.dart';
+
+class Ticket {
+  final String? id;
+  final String? ticketNo;
+  final String? batchId;
+  final String? clusterId;
+  final String? customerId;
+  final String? drawId;
+  final String? paymentMethod;
+  final String? accountNumber;
+  final String? createdAt;
+  final String? updatedAt;
+  final String? deletedAt;
+
+  Ticket({
+    this.id,
+    this.ticketNo,
+    this.batchId,
+    this.clusterId,
+    this.customerId,
+    this.drawId,
+    this.paymentMethod,
+    this.accountNumber,
+    this.createdAt,
+    this.updatedAt,
+    this.deletedAt,
+  });
+
+  factory Ticket.fromJson(Map<String, dynamic> json) {
+    return Ticket(
+      id: json['id'] as String?,
+      ticketNo: json['ticket_no'] as String?,
+      batchId: json['batch_id'] as String?,
+      clusterId: json['cluster_id'] as String?,
+      customerId: json['customer_id'] as String?,
+      drawId: json['draw_id'] as String?,
+      paymentMethod: json['payment_method'] as String?,
+      accountNumber: json['account_number'] as String?,
+      createdAt: json['created_at'] as String?,
+      updatedAt: json['updated_at'] as String?,
+      deletedAt: json['deleted_at'] as String?,
+    );
+  }
+
+  Map<String, dynamic> toJson() {
+    return {
+      'id': id,
+      'ticket_no': ticketNo,
+      'batch_id': batchId,
+      'cluster_id': clusterId,
+      'customer_id': customerId,
+      'draw_id': drawId,
+      'payment_method': paymentMethod,
+      'account_number': accountNumber,
+      'created_at': createdAt,
+      'updated_at': updatedAt,
+      'deleted_at': deletedAt,
+    };
+  }
+}
+
 class Claim {
   final String? id;
   final String? ticketId;
@@ -12,6 +74,8 @@ class Claim {
   final String? createdAt;
   final String? updatedAt;
   final String? deletedAt;
+  final Bet? bet;
+  final Ticket? ticket;
 
   Claim({
     this.id,
@@ -27,6 +91,8 @@ class Claim {
     this.createdAt,
     this.updatedAt,
     this.deletedAt,
+    this.bet,
+    this.ticket,
   });
 
   factory Claim.fromJson(Map<String, dynamic> json) {
@@ -44,6 +110,8 @@ class Claim {
       createdAt: json['created_at'] as String?,
       updatedAt: json['updated_at'] as String?,
       deletedAt: json['deleted_at'] as String?,
+      bet: json['bet'] != null ? Bet.fromJson(json['bet']) : null,
+      ticket: json['ticket'] != null ? Ticket.fromJson(json['ticket']) : null,
     );
   }
 
@@ -62,6 +130,8 @@ class Claim {
       'created_at': createdAt,
       'updated_at': updatedAt,
       'deleted_at': deletedAt,
+      'bet': bet?.toJson(),
+      'ticket': ticket?.toJson(),
     };
   }
 }

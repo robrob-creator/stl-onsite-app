@@ -23,13 +23,14 @@ class _ClaimPageState extends State<ClaimPage> {
   late AuthController authController;
   QRViewController? controller;
   final GlobalKey qrKey = GlobalKey(debugLabel: 'QR');
-  bool _showQRScanner = false;
+  bool _showQRScanner = true; // Show QR scanner first
   String _searchQuery = '';
   final TextEditingController _searchController = TextEditingController();
   List<Claim> _claims = [];
   bool _isLoadingClaims = false;
   String? _errorMessage;
   StreamSubscription? _qrSubscription;
+  Map<String, dynamic>? _scannedTicketData; // Store scanned ticket data
 
   @override
   void initState() {
@@ -124,13 +125,184 @@ class _ClaimPageState extends State<ClaimPage> {
     _qrSubscription?.cancel();
     _qrSubscription = null;
 
-    // Close the scanner
-    setState(() {
-      _showQRScanner = false;
-    });
+    // Fetch ticket details and verify validity
+    _fetchAndVerifyTicket(ticketId);
+  }
 
-    // Create claim with the scanned ticket ID
-    _createClaimFromQRCode(ticketId);
+  Future<void> _fetchAndVerifyTicket(String ticketNumber) async {
+    try {
+      Get.snackbar(
+        'Loading',
+        'Verifying ticket...',
+        duration: const Duration(seconds: 1),
+      );
+
+      final result = await lotteryController.getTicketByNumber(ticketNumber);
+
+      if (result['success'] as bool) {
+        final ticketData = result['data'] as Map<String, dynamic>?;
+
+        if (ticketData != null) {
+          // Check if ticket is within 1 year validity period
+          final isValid = _isTicketValidForClaim(ticketData);
+
+          if (isValid) {
+            // Store ticket data and show details dialog
+            setState(() {
+              _scannedTicketData = ticketData;
+              _showQRScanner = false;
+            });
+
+            // Show ticket details for verification
+            _showTicketDetailsForVerification(ticketData);
+          } else {
+            // Show error - ticket expired
+            _showErrorModal(
+              'Ticket Expired',
+              'This ticket is no longer valid for claiming. Tickets can only be claimed within one (1) year from the date of issuance.',
+            );
+
+            // Resume camera for another scan
+            if (mounted) {
+              setState(() {
+                _showQRScanner = true;
+              });
+              controller?.resumeCamera();
+            }
+          }
+        } else {
+          _showErrorModal(
+            'Invalid Ticket',
+            'Could not retrieve ticket data. Please try again.',
+          );
+
+          // Resume camera for another scan
+          if (mounted) {
+            setState(() {
+              _showQRScanner = true;
+            });
+            controller?.resumeCamera();
+          }
+        }
+      } else {
+        final error = result['error'] as String?;
+        _showErrorModal(
+          'Ticket Not Found',
+          error ??
+              'No ticket found for this QR code. Please verify and try again.',
+        );
+
+        // Resume camera for another scan
+        if (mounted) {
+          setState(() {
+            _showQRScanner = true;
+          });
+          controller?.resumeCamera();
+        }
+      }
+    } catch (e) {
+      _showErrorModal('Error', 'Failed to verify ticket: $e');
+
+      // Resume camera for another scan
+      if (mounted) {
+        setState(() {
+          _showQRScanner = true;
+        });
+        controller?.resumeCamera();
+      }
+    }
+  }
+
+  /// Check if ticket is valid for claiming (within 1 year from issuance)
+  bool _isTicketValidForClaim(Map<String, dynamic> ticketData) {
+    try {
+      final createdAtStr = ticketData['created_at'] as String?;
+      if (createdAtStr == null || createdAtStr.isEmpty) {
+        return false;
+      }
+
+      final createdAt = DateTime.parse(createdAtStr);
+      final now = DateTime.now();
+      final daysDifference = now.difference(createdAt).inDays;
+
+      // Valid if claiming within 365 days (1 year)
+      return daysDifference <= 365;
+    } catch (e) {
+      // If we can't parse the date, mark as invalid for safety
+      return false;
+    }
+  }
+
+  void _showTicketDetailsForVerification(Map<String, dynamic> ticketData) {
+    Get.dialog(
+      AlertDialog(
+        title: const Text('Verify Ticket Details'),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              'Ticket: ${ticketData['ticket_no'] ?? 'N/A'}',
+              style: Theme.of(context).textTheme.bodyMedium,
+            ),
+            const SizedBox(height: 8),
+            if (ticketData['created_at'] != null)
+              Text(
+                'Issued: ${_formatDate(ticketData['created_at'])}',
+                style: Theme.of(
+                  context,
+                ).textTheme.bodySmall?.copyWith(color: Colors.grey[600]),
+              ),
+            const SizedBox(height: 12),
+            Container(
+              padding: const EdgeInsets.all(12),
+              decoration: BoxDecoration(
+                color: Colors.blue[50],
+                borderRadius: BorderRadius.circular(8),
+              ),
+              child: Text(
+                'Please confirm this is the correct ticket before proceeding with the claim.',
+                style: Theme.of(context).textTheme.bodySmall,
+              ),
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () {
+              Get.back();
+              // Resume QR scanner for retry
+              setState(() {
+                _showQRScanner = true;
+              });
+              controller?.resumeCamera();
+            },
+            child: const Text('Cancel'),
+          ),
+          ElevatedButton(
+            style: ElevatedButton.styleFrom(backgroundColor: AppColors.primary),
+            onPressed: () {
+              Get.back();
+              // Create claim with the scanned ticket
+              if (_scannedTicketData != null) {
+                _createClaimFromQRCode(_scannedTicketData!['ticket_no']);
+              }
+            },
+            child: const Text('Claim Winnings'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  String _formatDate(String? dateStr) {
+    if (dateStr == null || dateStr.isEmpty) return 'N/A';
+    try {
+      final date = DateTime.parse(dateStr);
+      return '${date.year}-${date.month.toString().padLeft(2, '0')}-${date.day.toString().padLeft(2, '0')}';
+    } catch (e) {
+      return dateStr;
+    }
   }
 
   Future<void> _createClaimFromQRCode(String ticketId) async {
@@ -225,7 +397,7 @@ class _ClaimPageState extends State<ClaimPage> {
         queryParams['status'] = status;
       }
       if (ticketId != null && ticketId.isNotEmpty) {
-        queryParams['ticket_id'] = ticketId;
+        queryParams['ticket_no'] = ticketId;
       }
       if (customerId != null && customerId.isNotEmpty) {
         queryParams['customer_id'] = customerId;
@@ -295,6 +467,18 @@ class _ClaimPageState extends State<ClaimPage> {
             fontWeight: FontWeight.w600,
           ),
         ),
+        actions: [
+          if (!_showQRScanner)
+            TextButton(
+              onPressed: () {
+                setState(() {
+                  _showQRScanner = true;
+                  _scannedTicketData = null;
+                });
+              },
+              child: const Text('Scan QR'),
+            ),
+        ],
       ),
       body: _showQRScanner ? _buildQRScanner() : _buildClaimsList(),
     );
@@ -362,6 +546,25 @@ class _ClaimPageState extends State<ClaimPage> {
                       context,
                     ).textTheme.bodyMedium?.copyWith(color: Colors.white70),
                   ),
+                  const SizedBox(height: 24),
+                  ElevatedButton(
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: Colors.white,
+                      foregroundColor: AppColors.primary,
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 24,
+                        vertical: 12,
+                      ),
+                    ),
+                    onPressed: () {
+                      _qrSubscription?.cancel();
+                      _qrSubscription = null;
+                      setState(() {
+                        _showQRScanner = false;
+                      });
+                    },
+                    child: const Text('View Claims History'),
+                  ),
                 ],
               ),
             ),
@@ -378,11 +581,11 @@ class _ClaimPageState extends State<ClaimPage> {
       filteredClaims = _claims
           .where(
             (claim) =>
-                (claim.ticketId?.toLowerCase().contains(
+                (claim.ticket?.ticketNo?.toLowerCase().contains(
                       _searchQuery.toLowerCase(),
                     ) ??
                     false) ||
-                (claim.winningCombination?.toLowerCase().contains(
+                (claim.ticketId?.toLowerCase().contains(
                       _searchQuery.toLowerCase(),
                     ) ??
                     false),
@@ -391,7 +594,7 @@ class _ClaimPageState extends State<ClaimPage> {
     }
 
     return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 24.0, vertical: 16.0),
+      padding: const EdgeInsets.symmetric(horizontal: 16.0, vertical: 16.0),
       child: Column(
         children: [
           // Search bar and button
@@ -408,6 +611,10 @@ class _ClaimPageState extends State<ClaimPage> {
                   decoration: InputDecoration(
                     hintText: 'Search',
                     hintStyle: TextStyle(color: Colors.grey[400]),
+                    prefixIcon: const Icon(
+                      Icons.search,
+                      color: Color(0xFF6B7280),
+                    ),
                     border: OutlineInputBorder(
                       borderRadius: BorderRadius.circular(8),
                       borderSide: const BorderSide(color: Color(0xFFE5E7EB)),
@@ -457,45 +664,6 @@ class _ClaimPageState extends State<ClaimPage> {
           ),
           const SizedBox(height: 16),
 
-          // Column headers
-          Padding(
-            padding: const EdgeInsets.only(bottom: 12.0),
-            child: Row(
-              children: [
-                Expanded(
-                  flex: 2,
-                  child: Text(
-                    'Status',
-                    style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                      color: AppColors.primary,
-                      fontWeight: FontWeight.w500,
-                    ),
-                  ),
-                ),
-                Expanded(
-                  flex: 2,
-                  child: Text(
-                    'Amount',
-                    style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                      color: AppColors.primary,
-                      fontWeight: FontWeight.w500,
-                    ),
-                  ),
-                ),
-                Expanded(
-                  flex: 2,
-                  child: Text(
-                    'Winning',
-                    style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                      color: AppColors.primary,
-                      fontWeight: FontWeight.w500,
-                    ),
-                  ),
-                ),
-              ],
-            ),
-          ),
-
           // Claims list
           Expanded(
             child: _isLoadingClaims
@@ -522,112 +690,7 @@ class _ClaimPageState extends State<ClaimPage> {
                     itemCount: filteredClaims.length,
                     itemBuilder: (context, index) {
                       final claim = filteredClaims[index];
-                      final isClaimable =
-                          claim.status == 'pending' ||
-                          claim.status == 'approved' ||
-                          claim.status == 'won';
-
-                      return Padding(
-                        padding: const EdgeInsets.only(bottom: 12.0),
-                        child: Container(
-                          padding: const EdgeInsets.all(16),
-                          decoration: BoxDecoration(
-                            border: Border.all(color: const Color(0xFFE5E7EB)),
-                            borderRadius: BorderRadius.circular(8),
-                          ),
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              Row(
-                                children: [
-                                  Expanded(
-                                    flex: 2,
-                                    child: Text(
-                                      (claim.status ?? 'pending').toUpperCase(),
-                                      style: Theme.of(context)
-                                          .textTheme
-                                          .bodyMedium
-                                          ?.copyWith(
-                                            fontWeight: FontWeight.w500,
-                                            color: claim.status == 'paid'
-                                                ? Colors.green
-                                                : AppColors.primary,
-                                          ),
-                                    ),
-                                  ),
-                                  Expanded(
-                                    flex: 2,
-                                    child: Text(
-                                      claim.amount.toStringAsFixed(2),
-                                      style: Theme.of(
-                                        context,
-                                      ).textTheme.bodyMedium,
-                                    ),
-                                  ),
-                                  Expanded(
-                                    flex: 2,
-                                    child: Text(
-                                      claim.winningAmount.toStringAsFixed(2),
-                                      style: Theme.of(
-                                        context,
-                                      ).textTheme.bodyMedium,
-                                    ),
-                                  ),
-                                ],
-                              ),
-                              const SizedBox(height: 8),
-                              Text(
-                                'Ticket: ${claim.ticketId ?? 'N/A'}',
-                                style: Theme.of(context).textTheme.bodySmall
-                                    ?.copyWith(color: Colors.grey[600]),
-                              ),
-                              if (claim.winningCombination != null)
-                                Padding(
-                                  padding: const EdgeInsets.only(top: 4.0),
-                                  child: Text(
-                                    'Combination: ${claim.winningCombination}',
-                                    style: Theme.of(context).textTheme.bodySmall
-                                        ?.copyWith(color: Colors.grey[600]),
-                                  ),
-                                ),
-                              const SizedBox(height: 12),
-                              SizedBox(
-                                width: double.infinity,
-                                child: ElevatedButton(
-                                  style: ElevatedButton.styleFrom(
-                                    backgroundColor: isClaimable
-                                        ? AppColors.primary
-                                        : Colors.grey[300],
-                                    foregroundColor: isClaimable
-                                        ? Colors.white
-                                        : Colors.grey[600],
-                                    padding: const EdgeInsets.symmetric(
-                                      vertical: 12,
-                                    ),
-                                    shape: RoundedRectangleBorder(
-                                      borderRadius: BorderRadius.circular(8),
-                                    ),
-                                  ),
-                                  onPressed: isClaimable
-                                      ? () {
-                                          _showClaimDialog(context, claim);
-                                        }
-                                      : null,
-                                  child: Text(
-                                    isClaimable
-                                        ? 'Claim Winnings'
-                                        : 'Already Claimed',
-                                    style: const TextStyle(
-                                      fontWeight: FontWeight.w500,
-                                      fontSize: 14,
-                                    ),
-                                  ),
-                                ),
-                              ),
-                            ],
-                          ),
-                        ),
-                      );
+                      return _buildClaimCard(context, claim);
                     },
                   ),
           ),
@@ -636,59 +699,528 @@ class _ClaimPageState extends State<ClaimPage> {
     );
   }
 
-  void _showClaimDialog(BuildContext context, Claim claim) {
-    showDialog(
-      context: context,
-      builder: (BuildContext context) {
-        return AlertDialog(
-          title: const Text('Confirm Claim'),
-          content: Column(
-            mainAxisSize: MainAxisSize.min,
+  Widget _buildClaimCard(BuildContext context, Claim claim) {
+    final isClaimable = claim.status != 'claimed' && claim.status != 'paid';
+    final bet = claim.bet;
+    final statusColor = claim.status == 'claimed' || claim.status == 'paid'
+        ? Colors.green
+        : claim.status == 'won'
+        ? Colors.green
+        : AppColors.primary;
+
+    return GestureDetector(
+      onTap: () {
+        _showClaimDetailsModal(context, claim);
+      },
+      child: Card(
+        margin: const EdgeInsets.only(bottom: 12),
+        elevation: 0,
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(12),
+          side: const BorderSide(color: Color(0xFFE5E7EB)),
+        ),
+        child: Padding(
+          padding: const EdgeInsets.all(16),
+          child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Text(
-                'Ticket: ${claim.ticketId ?? 'N/A'}',
-                style: Theme.of(context).textTheme.bodyMedium,
-              ),
-              const SizedBox(height: 8),
-              Text(
-                'Winnings: \$${claim.winningAmount.toStringAsFixed(2)}',
-                style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                  fontWeight: FontWeight.w600,
-                  color: AppColors.primary,
-                ),
+              // Ticket number
+              Row(
+                children: [
+                  Image.asset(
+                    'assets/images/logos/logo.png',
+                    width: 32,
+                    height: 32,
+                  ),
+                  const SizedBox(width: 4),
+                  Text(
+                    claim.ticket?.ticketNo ?? 'N/A',
+                    style: const TextStyle(
+                      fontSize: 14,
+                      fontWeight: FontWeight.w500,
+                      color: Colors.black,
+                    ),
+                  ),
+                ],
               ),
               const SizedBox(height: 12),
-              if (claim.winningCombination != null)
-                Text(
-                  'Combination: ${claim.winningCombination}',
-                  style: Theme.of(context).textTheme.bodySmall,
+
+              // Draw Time and Transaction Details
+              Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        'Draw Time:',
+                        style: TextStyle(fontSize: 12, color: Colors.grey[600]),
+                      ),
+                      const Text(
+                        '3PM',
+                        style: TextStyle(
+                          fontSize: 14,
+                          fontWeight: FontWeight.w500,
+                        ),
+                      ),
+                    ],
+                  ),
+                  Column(
+                    crossAxisAlignment: CrossAxisAlignment.end,
+                    children: [
+                      Text(
+                        'Transaction Date & Time:',
+                        style: TextStyle(fontSize: 12, color: Colors.grey[600]),
+                      ),
+                      Text(
+                        _formatTransactionDate(
+                          bet?.createdAt ?? claim.createdAt,
+                        ),
+                        style: const TextStyle(
+                          fontSize: 12,
+                          fontWeight: FontWeight.w500,
+                        ),
+                      ),
+                    ],
+                  ),
+                ],
+              ),
+              const SizedBox(height: 12),
+
+              // Bets Table Header
+              Container(
+                decoration: BoxDecoration(
+                  color: AppColors.primary,
+                  borderRadius: BorderRadius.circular(4),
                 ),
+                padding: const EdgeInsets.symmetric(
+                  vertical: 8,
+                  horizontal: 12,
+                ),
+                child: Row(
+                  children: [
+                    Expanded(
+                      child: Text(
+                        'BET NO',
+                        style: const TextStyle(
+                          color: Colors.white,
+                          fontWeight: FontWeight.w600,
+                          fontSize: 11,
+                        ),
+                        textAlign: TextAlign.center,
+                      ),
+                    ),
+                    Expanded(
+                      child: Text(
+                        'AMOUNT',
+                        style: const TextStyle(
+                          color: Colors.white,
+                          fontWeight: FontWeight.w600,
+                          fontSize: 11,
+                        ),
+                        textAlign: TextAlign.center,
+                      ),
+                    ),
+                    Expanded(
+                      child: Text(
+                        'TYPE',
+                        style: const TextStyle(
+                          color: Colors.white,
+                          fontWeight: FontWeight.w600,
+                          fontSize: 11,
+                        ),
+                        textAlign: TextAlign.center,
+                      ),
+                    ),
+                    Expanded(
+                      child: Text(
+                        'STATUS',
+                        style: const TextStyle(
+                          color: Colors.white,
+                          fontWeight: FontWeight.w600,
+                          fontSize: 11,
+                        ),
+                        textAlign: TextAlign.center,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+
+              // Bets rows
+              if (bet != null) ...[
+                const SizedBox(height: 8),
+                Container(
+                  padding: const EdgeInsets.symmetric(
+                    vertical: 8,
+                    horizontal: 12,
+                  ),
+                  child: Row(
+                    children: [
+                      Expanded(
+                        child: Text(
+                          bet.digits?.join('-') ?? '-',
+                          style: const TextStyle(fontSize: 12),
+                          textAlign: TextAlign.center,
+                        ),
+                      ),
+                      Expanded(
+                        child: Text(
+                          '${bet.straightBetAmount.toInt()}',
+                          style: const TextStyle(fontSize: 12),
+                          textAlign: TextAlign.center,
+                        ),
+                      ),
+                      Expanded(
+                        child: Text(
+                          bet.straightBetAmount > 0 ? 'Target' : 'Rambol',
+                          style: const TextStyle(fontSize: 12),
+                          textAlign: TextAlign.center,
+                        ),
+                      ),
+                      Expanded(
+                        child: Text(
+                          bet.status.capitalizeFirst ?? 'Pending',
+                          style: TextStyle(
+                            fontSize: 12,
+                            color: statusColor,
+                            fontWeight: FontWeight.w500,
+                          ),
+                          textAlign: TextAlign.center,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ],
+
+              const SizedBox(height: 12),
+
+              // Bet Amount, Status, Price Payout
+              Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        'Bet Amount',
+                        style: TextStyle(fontSize: 12, color: Colors.grey[600]),
+                      ),
+                      Text(
+                        claim.amount.toStringAsFixed(0),
+                        style: const TextStyle(
+                          fontSize: 16,
+                          fontWeight: FontWeight.w600,
+                          color: AppColors.primary,
+                        ),
+                      ),
+                    ],
+                  ),
+                  Column(
+                    crossAxisAlignment: CrossAxisAlignment.center,
+                    children: [
+                      Text(
+                        'Status',
+                        style: TextStyle(fontSize: 12, color: Colors.grey[600]),
+                      ),
+                      Text(
+                        bet != null ? bet.status.toUpperCase() : 'PENDING',
+                        style: TextStyle(
+                          fontSize: 14,
+                          fontWeight: FontWeight.w600,
+                          color: statusColor,
+                        ),
+                      ),
+                    ],
+                  ),
+                  Column(
+                    crossAxisAlignment: CrossAxisAlignment.end,
+                    children: [
+                      Text(
+                        'Price Payout',
+                        style: TextStyle(fontSize: 12, color: Colors.grey[600]),
+                      ),
+                      Text(
+                        'PHP ${claim.winningAmount.toStringAsFixed(2)}',
+                        style: const TextStyle(
+                          fontSize: 14,
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                    ],
+                  ),
+                ],
+              ),
+
+              const SizedBox(height: 16),
+
+              // Claim button
+              SizedBox(
+                width: double.infinity,
+                child: ElevatedButton(
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: isClaimable
+                        ? AppColors.primary
+                        : Colors.grey[300],
+                    foregroundColor: isClaimable
+                        ? Colors.white
+                        : Colors.grey[600],
+                    padding: const EdgeInsets.symmetric(vertical: 12),
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(8),
+                    ),
+                  ),
+                  onPressed: isClaimable
+                      ? () {
+                          _showClaimConfirmation(context, claim);
+                        }
+                      : null,
+                  child: Text(
+                    isClaimable ? 'Claim Winnings' : 'Claimed',
+                    style: const TextStyle(
+                      fontWeight: FontWeight.w600,
+                      fontSize: 14,
+                    ),
+                  ),
+                ),
+              ),
             ],
           ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.of(context).pop(),
-              child: const Text('Cancel'),
-            ),
-            ElevatedButton(
-              style: ElevatedButton.styleFrom(
-                backgroundColor: AppColors.primary,
+        ),
+      ),
+    );
+  }
+
+  String _formatTransactionDate(String? dateStr) {
+    if (dateStr == null || dateStr.isEmpty) return 'N/A';
+    try {
+      final date = DateTime.parse(dateStr);
+      final months = [
+        'Jan',
+        'Feb',
+        'Mar',
+        'Apr',
+        'May',
+        'Jun',
+        'Jul',
+        'Aug',
+        'Sep',
+        'Oct',
+        'Nov',
+        'Dec',
+      ];
+      return '${months[date.month - 1]} ${date.day.toString().padLeft(2, '0')}, ${date.year} @ ${date.hour.toString().padLeft(2, '0')}:${date.minute.toString().padLeft(2, '0')} ${date.hour >= 12 ? 'PM' : 'AM'}';
+    } catch (e) {
+      return dateStr;
+    }
+  }
+
+  void _showClaimDetailsModal(BuildContext context, Claim claim) {
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: Colors.white,
+      isScrollControlled: true,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.only(
+          topLeft: Radius.circular(20),
+          topRight: Radius.circular(20),
+        ),
+      ),
+      builder: (context) => _buildClaimDetailsSheet(context, claim),
+    );
+  }
+
+  Widget _buildClaimDetailsSheet(BuildContext context, Claim claim) {
+    final isClaimable = claim.status != 'claimed' && claim.status != 'paid';
+    final bet = claim.bet;
+    final statusColor = claim.status == 'claimed' || claim.status == 'paid'
+        ? Colors.green
+        : claim.status == 'won'
+        ? Colors.green
+        : AppColors.primary;
+
+    return DraggableScrollableSheet(
+      expand: false,
+      builder: (context, scrollController) => SingleChildScrollView(
+        controller: scrollController,
+        child: Padding(
+          padding: const EdgeInsets.all(20),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Center(
+                child: Container(
+                  width: 40,
+                  height: 4,
+                  decoration: BoxDecoration(
+                    color: Colors.grey[300],
+                    borderRadius: BorderRadius.circular(2),
+                  ),
+                ),
               ),
-              onPressed: () {
-                Navigator.of(context).pop();
-                Get.snackbar(
-                  'Success',
-                  'Winnings claimed successfully!',
-                  backgroundColor: Colors.green[600],
-                  colorText: Colors.white,
-                );
-              },
-              child: const Text('Claim'),
+              const SizedBox(height: 20),
+              Text(
+                'Claim Details',
+                style: Theme.of(context).textTheme.headlineSmall?.copyWith(
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+              const SizedBox(height: 20),
+              _buildDetailRow(
+                'Ticket Number:',
+                claim.ticket?.ticketNo ?? 'N/A',
+              ),
+              _buildDetailRow(
+                'Status:',
+                claim.status?.toUpperCase() ?? 'PENDING',
+                statusColor,
+              ),
+              _buildDetailRow(
+                'Bet Amount:',
+                'PHP ${claim.amount.toStringAsFixed(0)}',
+              ),
+              _buildDetailRow(
+                'Winning Amount:',
+                'PHP ${claim.winningAmount.toStringAsFixed(2)}',
+              ),
+              if (bet != null) ...[
+                _buildDetailRow('Digits:', bet.digits?.join('-') ?? '-'),
+                _buildDetailRow('Draw Date:', _formatDate(bet.drawDate)),
+              ],
+              const SizedBox(height: 24),
+              SizedBox(
+                width: double.infinity,
+                child: ElevatedButton(
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: isClaimable
+                        ? AppColors.primary
+                        : Colors.grey[300],
+                    foregroundColor: isClaimable
+                        ? Colors.white
+                        : Colors.grey[600],
+                    padding: const EdgeInsets.symmetric(vertical: 14),
+                  ),
+                  onPressed: isClaimable
+                      ? () {
+                          Get.back();
+                          _showClaimConfirmation(context, claim);
+                        }
+                      : null,
+                  child: Text(
+                    isClaimable ? 'Claim Winnings' : 'Claimed',
+                    style: const TextStyle(
+                      fontWeight: FontWeight.w600,
+                      fontSize: 16,
+                    ),
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildDetailRow(String label, String value, [Color? valueColor]) {
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 12),
+      child: Row(
+        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+        children: [
+          Text(label, style: TextStyle(fontSize: 14, color: Colors.grey[600])),
+          Text(
+            value,
+            style: TextStyle(
+              fontSize: 14,
+              fontWeight: FontWeight.w500,
+              color: valueColor,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  void _showClaimConfirmation(BuildContext context, Claim claim) {
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Confirm Claim'),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              'Ticket: ${claim.ticket?.ticketNo ?? 'N/A'}',
+              style: Theme.of(context).textTheme.bodyMedium,
+            ),
+            const SizedBox(height: 8),
+            Text(
+              'Winning Amount: PHP ${claim.winningAmount.toStringAsFixed(2)}',
+              style: Theme.of(
+                context,
+              ).textTheme.bodyMedium?.copyWith(fontWeight: FontWeight.w600),
+            ),
+            const SizedBox(height: 12),
+            Text(
+              'Are you sure you want to claim this winning ticket?',
+              style: Theme.of(context).textTheme.bodySmall,
             ),
           ],
-        );
-      },
+        ),
+        actions: [
+          TextButton(onPressed: () => Get.back(), child: const Text('Cancel')),
+          ElevatedButton(
+            style: ElevatedButton.styleFrom(backgroundColor: AppColors.primary),
+            onPressed: () {
+              Get.back();
+              _processClaim(claim);
+            },
+            child: const Text('Confirm'),
+          ),
+        ],
+      ),
     );
+  }
+
+  Future<void> _processClaim(Claim claim) async {
+    try {
+      Get.snackbar(
+        'Processing',
+        'Processing your claim...',
+        duration: const Duration(seconds: 2),
+      );
+
+      final result = await lotteryController.createClaimByTicket(
+        claim.ticket?.ticketNo ?? claim.ticketId ?? '',
+      );
+
+      if (result['success'] as bool) {
+        Get.snackbar(
+          'Success',
+          'Claim submitted successfully!',
+          backgroundColor: Colors.green,
+          colorText: Colors.white,
+        );
+        _fetchClaims();
+      } else {
+        final error = result['error'] as String?;
+        Get.snackbar(
+          'Error',
+          error ?? 'Failed to process claim',
+          backgroundColor: Colors.red,
+          colorText: Colors.white,
+        );
+      }
+    } catch (e) {
+      Get.snackbar(
+        'Error',
+        'Failed to process claim: $e',
+        backgroundColor: Colors.red,
+        colorText: Colors.white,
+      );
+    }
   }
 }
