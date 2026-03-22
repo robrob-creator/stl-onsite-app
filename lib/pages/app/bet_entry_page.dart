@@ -841,7 +841,7 @@ class _BetEntryPageState extends State<BetEntryPage> {
                           )
                         : Row(
                             mainAxisAlignment: MainAxisAlignment.center,
-                            children: const [
+                            children: [
                               Text(
                                 'Submit Bet Entry',
                                 style: TextStyle(
@@ -851,10 +851,10 @@ class _BetEntryPageState extends State<BetEntryPage> {
                                 ),
                               ),
                               SizedBox(width: 8),
-                              Icon(
-                                Icons.receipt_long,
+                              Image.asset(
+                                'assets/images/icons/ticket2.png',
+                                height: 24,
                                 color: Colors.white,
-                                size: 20,
                               ),
                             ],
                           ),
