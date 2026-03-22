@@ -211,8 +211,10 @@ class LotteryController extends GetxController {
       Get.snackbar('Error', 'Please add at least one bet');
       return;
     }
-
-    isLoading.value = true;
+    await Future.delayed(const Duration(milliseconds: 500), () {
+      if (Get.isDialogOpen ?? false) Get.back();
+      isLoading.value = true;
+    }); // Allow UI to update before showing loading
     update();
 
     try {
