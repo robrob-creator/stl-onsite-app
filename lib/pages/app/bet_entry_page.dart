@@ -49,6 +49,18 @@ class _BetEntryPageState extends State<BetEntryPage> {
     super.dispose();
   }
 
+  /// Formats a number with comma separators, e.g. 1000 → "1,000"
+  String _formatNumber(double value) {
+    final intVal = value.toInt();
+    final str = intVal.toString();
+    final buffer = StringBuffer();
+    for (int i = 0; i < str.length; i++) {
+      if (i > 0 && (str.length - i) % 3 == 0) buffer.write(',');
+      buffer.write(str[i]);
+    }
+    return buffer.toString();
+  }
+
   @override
   Widget build(BuildContext context) {
     final controller = Get.put(LotteryController());
@@ -553,16 +565,6 @@ class _BetEntryPageState extends State<BetEntryPage> {
                       }
                     }
 
-                    // Determine bet type based on which amounts are filled
-                    if (targetAmount > 0 && rambolAmount == 0) {
-                      controller.selectedBetType.value = 'Target';
-                    } else if (rambolAmount > 0 && targetAmount == 0) {
-                      controller.selectedBetType.value = 'Rambol';
-                    } else if (targetAmount > 0 && rambolAmount > 0) {
-                      // Both filled: default to Target
-                      controller.selectedBetType.value = 'Target';
-                    }
-
                     // Convert lotto numbers to list for controller by grouping
                     controller.selectedNumbers.clear();
                     for (
@@ -648,7 +650,7 @@ class _BetEntryPageState extends State<BetEntryPage> {
                                 Expanded(
                                   flex: 1,
                                   child: Text(
-                                    'Numbers',
+                                    'Game',
                                     style: const TextStyle(
                                       color: Color(0xFF2563EB),
                                       fontWeight: FontWeight.bold,
@@ -659,7 +661,7 @@ class _BetEntryPageState extends State<BetEntryPage> {
                                 Expanded(
                                   flex: 1,
                                   child: Text(
-                                    'Straight',
+                                    'Type',
                                     style: const TextStyle(
                                       color: Color(0xFF2563EB),
                                       fontWeight: FontWeight.bold,
@@ -670,7 +672,7 @@ class _BetEntryPageState extends State<BetEntryPage> {
                                 Expanded(
                                   flex: 1,
                                   child: Text(
-                                    'Rambol',
+                                    'Amount',
                                     style: const TextStyle(
                                       color: Color(0xFF2563EB),
                                       fontWeight: FontWeight.bold,
@@ -681,7 +683,7 @@ class _BetEntryPageState extends State<BetEntryPage> {
                                 Expanded(
                                   flex: 1,
                                   child: Text(
-                                    'Total',
+                                    'Win',
                                     style: const TextStyle(
                                       color: Color(0xFF2563EB),
                                       fontWeight: FontWeight.bold,
@@ -689,7 +691,7 @@ class _BetEntryPageState extends State<BetEntryPage> {
                                     ),
                                   ),
                                 ),
-                                Expanded(flex: 0, child: SizedBox(width: 30)),
+                                const SizedBox(width: 30),
                               ],
                             ),
                           ),
@@ -719,50 +721,43 @@ class _BetEntryPageState extends State<BetEntryPage> {
                                   Expanded(
                                     flex: 1,
                                     child: Text(
-                                      bet.digits.join('-'),
+                                      bet.game,
                                       style: const TextStyle(fontSize: 12),
                                     ),
                                   ),
                                   Expanded(
                                     flex: 1,
                                     child: Text(
-                                      bet.straightBetAmount > 0
-                                          ? '₱${bet.straightBetAmount.toStringAsFixed(2)}'
-                                          : '-',
+                                      bet.betType,
                                       style: const TextStyle(fontSize: 12),
                                     ),
                                   ),
                                   Expanded(
                                     flex: 1,
                                     child: Text(
-                                      bet.rambleBetAmount > 0
-                                          ? '₱${bet.rambleBetAmount.toStringAsFixed(2)}'
-                                          : '-',
+                                      bet.betAmount.toStringAsFixed(0),
                                       style: const TextStyle(fontSize: 12),
                                     ),
                                   ),
                                   Expanded(
                                     flex: 1,
                                     child: Text(
-                                      '₱${bet.totalBetAmount.toStringAsFixed(2)}',
+                                      _formatNumber(bet.winAmount),
                                       style: const TextStyle(
                                         fontSize: 12,
-                                        fontWeight: FontWeight.bold,
+                                        fontWeight: FontWeight.w500,
                                       ),
                                     ),
                                   ),
-                                  Expanded(
-                                    flex: 0,
-                                    child: IconButton(
-                                      icon: const Icon(
-                                        Icons.delete,
-                                        size: 18,
-                                        color: Color(0xFFC7472D),
-                                      ),
-                                      onPressed: () => ctrl.removeBet(index),
-                                      padding: EdgeInsets.zero,
-                                      constraints: const BoxConstraints(),
+                                  IconButton(
+                                    icon: const Icon(
+                                      Icons.delete,
+                                      size: 18,
+                                      color: Color(0xFFC7472D),
                                     ),
+                                    onPressed: () => ctrl.removeBet(index),
+                                    padding: EdgeInsets.zero,
+                                    constraints: const BoxConstraints(),
                                   ),
                                 ],
                               ),

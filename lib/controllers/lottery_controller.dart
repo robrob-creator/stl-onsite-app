@@ -14,6 +14,7 @@ class BetEntry {
   final String game;
   final double straightBetAmount;
   final double rambleBetAmount;
+  final double winAmount;
   final List<String> digits;
 
   BetEntry({
@@ -21,10 +22,18 @@ class BetEntry {
     required this.game,
     required this.straightBetAmount,
     required this.rambleBetAmount,
+    required this.winAmount,
     required this.digits,
   });
 
   double get totalBetAmount => straightBetAmount + rambleBetAmount;
+
+  /// 'Target' when this is a straight entry, 'Rambol' when it's a ramble entry.
+  String get betType => straightBetAmount > 0 ? 'Target' : 'Rambol';
+
+  /// The non-zero bet amount for this entry.
+  double get betAmount =>
+      straightBetAmount > 0 ? straightBetAmount : rambleBetAmount;
 }
 
 class LotteryController extends GetxController {
@@ -155,16 +164,35 @@ class LotteryController extends GetxController {
       return;
     }
 
-    final bet = BetEntry(
-      betNumber: betCounter.value,
-      game: game.name,
-      straightBetAmount: straightAmount,
-      rambleBetAmount: rambleAmount,
-      digits: List<String>.from(selectedNumbers),
-    );
+    // When both amounts are provided, create two separate bet entries.
+    if (straightAmount > 0) {
+      betList.add(
+        BetEntry(
+          betNumber: betCounter.value,
+          game: game.name,
+          straightBetAmount: straightAmount,
+          rambleBetAmount: 0,
+          winAmount: straightAmount * game.straightMultiplier,
+          digits: List<String>.from(selectedNumbers),
+        ),
+      );
+      betCounter.value++;
+    }
 
-    betList.add(bet);
-    betCounter.value++;
+    if (rambleAmount > 0) {
+      betList.add(
+        BetEntry(
+          betNumber: betCounter.value,
+          game: game.name,
+          straightBetAmount: 0,
+          rambleBetAmount: rambleAmount,
+          winAmount: rambleAmount * (game.rambleMultiplier ?? 0),
+          digits: List<String>.from(selectedNumbers),
+        ),
+      );
+      betCounter.value++;
+    }
+
     clearNumbers();
     targetAmount.value = 0;
     rambolAmount.value = 0;
