@@ -41,16 +41,27 @@ class TicketService {
           )
           .timeout(const Duration(seconds: 30));
 
+      print('[TicketService] Raw response: ${response.body}');
+
       if (response.statusCode == 200) {
         final jsonResponse = jsonDecode(response.body);
         final List<dynamic> data = jsonResponse['data'] as List<dynamic>;
-        return data
-            .map((item) => Ticket.fromJson(item as Map<String, dynamic>))
-            .toList();
+        final List<Ticket> tickets = [];
+        for (final item in data) {
+          try {
+            tickets.add(Ticket.fromJson(item as Map<String, dynamic>));
+          } catch (err) {
+            print('[TicketService] Error parsing ticket: $err');
+            print('[TicketService] Offending item: $item');
+          }
+        }
+        return tickets;
       } else {
+        print('[TicketService] HTTP error: ${response.statusCode}');
         throw Exception('Failed to load tickets: ${response.statusCode}');
       }
     } catch (e) {
+      print('[TicketService] Exception: $e');
       throw Exception('Error fetching tickets: $e');
     }
   }

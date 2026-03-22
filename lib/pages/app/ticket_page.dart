@@ -47,10 +47,10 @@ class _TicketPageState extends State<TicketPage> {
     );
   }
 
-  String _formatDate(String dateStr) {
+  String _formatDate(String? dateStr) {
+    if (dateStr == null || dateStr.isEmpty) return 'N/A';
     try {
       final utcDate = DateTime.parse(dateStr);
-      // Convert UTC to local time
       final localDate = utcDate.toLocal();
       final months = [
         'Jan',
@@ -66,7 +66,6 @@ class _TicketPageState extends State<TicketPage> {
         'Nov',
         'Dec',
       ];
-      // Format time in 12-hour format with AM/PM
       int hour = localDate.hour;
       final minute = localDate.minute.toString().padLeft(2, '0');
       final period = hour >= 12 ? 'PM' : 'AM';
@@ -257,7 +256,7 @@ class _TicketPageState extends State<TicketPage> {
 
   Future<void> _voidTicketAction(Ticket ticket, String reason) async {
     try {
-      await TicketService.voidTicket(ticket.id, reason);
+      await TicketService.voidTicket(ticket.id ?? '', reason);
       Get.snackbar(
         'Success',
         'Ticket voided successfully',
@@ -540,7 +539,7 @@ class _TicketPageState extends State<TicketPage> {
                         SizedBox(
                           width: 160,
                           child: Text(
-                            ticket.ticketNo,
+                            ticket.ticketNo ?? 'Unknown Ticket',
                             overflow: TextOverflow.visible,
                             style: const TextStyle(
                               fontSize: 12,
@@ -549,7 +548,7 @@ class _TicketPageState extends State<TicketPage> {
                             ),
                           ),
                         ),
-                        if (ticket.status.toLowerCase() != 'voided')
+                        if ((ticket.status ?? '').toLowerCase() != 'voided')
                           ElevatedButton(
                             style: ElevatedButton.styleFrom(
                               backgroundColor: AppColors.backgroundDark,
@@ -574,7 +573,7 @@ class _TicketPageState extends State<TicketPage> {
                     ),
                     const SizedBox(height: 4),
                     Text(
-                      ticket.cluster.name,
+                      ticket.cluster?.name ?? 'Unknown',
                       style: TextStyle(fontSize: 12, color: Colors.grey[600]),
                     ),
                   ],
@@ -596,7 +595,7 @@ class _TicketPageState extends State<TicketPage> {
                   ),
                   const SizedBox(height: 4),
                   Text(
-                    '${ticket.bets.length} bet${ticket.bets.length != 1 ? 's' : ''}',
+                    '${ticket.betIds?.length ?? 0} bet${(ticket.betIds?.length ?? 0) != 1 ? 's' : ''}',
                     style: const TextStyle(
                       fontSize: 14,
                       fontWeight: FontWeight.w500,
@@ -614,11 +613,11 @@ class _TicketPageState extends State<TicketPage> {
                   ),
                   const SizedBox(height: 4),
                   Text(
-                    ticket.status.toUpperCase(),
+                    (ticket.status ?? 'UNKNOWN').toUpperCase(),
                     style: TextStyle(
                       fontSize: 14,
                       fontWeight: FontWeight.w600,
-                      color: _getStatusColor(ticket.status),
+                      color: _getStatusColor(ticket.status ?? 'unknown'),
                     ),
                   ),
                 ],
@@ -638,8 +637,8 @@ class _TicketPageState extends State<TicketPage> {
           ),
           const SizedBox(height: 16),
           // Bet details table
-          if (ticket.bets.isNotEmpty &&
-                  (ticket.status.toLowerCase() != 'voided')
+          if ((ticket.betIds?.isNotEmpty ?? false) &&
+                  ((ticket.status ?? '').toLowerCase() != 'voided')
               ? true
               : showDetails) ...[
             Text(
@@ -716,8 +715,8 @@ class _TicketPageState extends State<TicketPage> {
                     ),
                   ),
                   // Table rows
-                  ...ticket.bets.map((bet) {
-                    String betType = bet.straightBetAmount > 0
+                  ...?ticket.betIds?.map((bet) {
+                    String betType = (bet.straightBetAmount ?? 0) > 0
                         ? 'Straight'
                         : 'Ramble';
                     return Column(
@@ -730,8 +729,8 @@ class _TicketPageState extends State<TicketPage> {
                               Expanded(
                                 flex: 1,
                                 child: Text(
-                                  bet.digits.isNotEmpty
-                                      ? bet.digits.join('-')
+                                  (bet.digits?.isNotEmpty ?? false)
+                                      ? bet.digits!.join('-')
                                       : 'N/A',
                                   style: const TextStyle(
                                     fontSize: 12,
@@ -742,7 +741,7 @@ class _TicketPageState extends State<TicketPage> {
                               Expanded(
                                 flex: 2,
                                 child: Text(
-                                  '₱ ${bet.totalBetAmount.toStringAsFixed(2)}',
+                                  '₱ ${(bet.totalBetAmount ?? 0).toStringAsFixed(2)}',
                                   style: const TextStyle(
                                     fontSize: 12,
                                     fontWeight: FontWeight.w500,
@@ -771,16 +770,18 @@ class _TicketPageState extends State<TicketPage> {
                                     ),
                                     decoration: BoxDecoration(
                                       color: _getStatusColor(
-                                        bet.status,
+                                        bet.status ?? '',
                                       ).withOpacity(0.1),
                                       borderRadius: BorderRadius.circular(4),
                                     ),
                                     child: Text(
-                                      bet.status.toUpperCase(),
+                                      (bet.status ?? '').toUpperCase(),
                                       style: TextStyle(
                                         fontSize: 10,
                                         fontWeight: FontWeight.w600,
-                                        color: _getStatusColor(bet.status),
+                                        color: _getStatusColor(
+                                          bet.status ?? '',
+                                        ),
                                       ),
                                     ),
                                   ),
@@ -795,8 +796,8 @@ class _TicketPageState extends State<TicketPage> {
                 ],
               ),
             ),
-          ] else if (ticket.bets.isEmpty &&
-              ticket.status.toLowerCase() != 'voided') ...[
+          ] else if ((ticket.betIds?.isEmpty ?? true) &&
+              (ticket.status ?? '').toLowerCase() != 'voided') ...[
             Padding(
               padding: const EdgeInsets.symmetric(vertical: 8),
               child: Text(
@@ -808,7 +809,7 @@ class _TicketPageState extends State<TicketPage> {
           const SizedBox(height: 16),
 
           // Bet Details Summary
-          if (ticket.bets.isNotEmpty) ...[
+          if ((ticket.betIds?.isNotEmpty ?? false)) ...[
             Container(
               padding: const EdgeInsets.all(12),
               decoration: BoxDecoration(
@@ -837,7 +838,7 @@ class _TicketPageState extends State<TicketPage> {
                         ),
                       ),
                       Text(
-                        '₱ ${ticket.bets.fold<double>(0, (prev, bet) => prev + bet.totalBetAmount).toStringAsFixed(2)}',
+                        '₱ ${(ticket.betIds?.fold<double>(0, (prev, bet) => prev + (bet.totalBetAmount ?? 0)) ?? 0).toStringAsFixed(2)}',
                         style: const TextStyle(
                           fontSize: 13,
                           fontWeight: FontWeight.w600,
@@ -874,16 +875,16 @@ class _TicketPageState extends State<TicketPage> {
                         ),
                         decoration: BoxDecoration(
                           color: _getStatusColor(
-                            ticket.status,
+                            ticket.status ?? '',
                           ).withOpacity(0.15),
                           borderRadius: BorderRadius.circular(4),
                         ),
                         child: Text(
-                          ticket.status.toUpperCase(),
+                          (ticket.status ?? '').toUpperCase(),
                           style: TextStyle(
                             fontSize: 12,
                             fontWeight: FontWeight.w600,
-                            color: _getStatusColor(ticket.status),
+                            color: _getStatusColor(ticket.status ?? ''),
                           ),
                         ),
                       ),
@@ -911,8 +912,8 @@ class _TicketPageState extends State<TicketPage> {
                         ),
                       ),
                       Text(
-                        ticket.winningpayout > 0
-                            ? '₱ ${ticket.winningpayout.toStringAsFixed(2)}'
+                        (ticket.winningPayout ?? 0) > 0
+                            ? '₱ ${(ticket.winningPayout ?? 0).toStringAsFixed(2)}'
                             : '-',
                         style: const TextStyle(
                           fontSize: 13,
@@ -929,7 +930,7 @@ class _TicketPageState extends State<TicketPage> {
           const SizedBox(height: 12),
 
           // View bet details button
-          if (ticket.status.toLowerCase() == "voided")
+          if ((ticket.status ?? '').toLowerCase() == "voided")
             GestureDetector(
               onTap: () {
                 setState(() {

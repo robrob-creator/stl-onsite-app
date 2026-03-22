@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:get/get.dart';
+import 'package:onstite/pages/app/eod_report_page.dart';
+import 'package:onstite/pages/app/summary_report_page.dart';
 import '../controllers/auth_controller.dart';
 import 'design_system.dart';
 
@@ -74,6 +76,7 @@ class _MainLayoutState extends State<MainLayout> {
                 : null),
       ),
       drawer: _buildDrawer(),
+
       body: widget.body,
       bottomNavigationBar: widget.bottomNavItems != null
           ? BottomNavigationBar(
@@ -91,117 +94,270 @@ class _MainLayoutState extends State<MainLayout> {
   Widget _buildDrawer() {
     return GetBuilder<AuthController>(
       builder: (authCtrl) => Drawer(
-        child: Column(
-          children: [
-            // Header
-            DrawerHeader(
-              decoration: const BoxDecoration(color: AppColors.primary),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Container(
-                    width: 50,
-                    height: 50,
-                    decoration: BoxDecoration(
-                      color: Colors.white,
-                      borderRadius: BorderRadius.circular(50),
+        backgroundColor: Colors.white,
+        child: SafeArea(
+          child: Column(
+            children: [
+              // Logo and Agent Info
+              Padding(
+                padding: const EdgeInsets.only(
+                  top: 24.0,
+                  left: 16,
+                  right: 16,
+                  bottom: 8,
+                ),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    // Logo
+                    Row(
+                      children: [
+                        Image.asset(
+                          'assets/images/logos/4play-tech.png',
+                          width: MediaQuery.of(context).size.width * 0.7,
+                        ),
+                      ],
                     ),
-                    child: const Icon(
-                      Icons.person,
-                      color: AppColors.primary,
-                      size: 30,
-                    ),
-                  ),
-                  const SizedBox(height: 12),
-                  Text(
-                    authCtrl.currentUser.value?.name ?? 'User',
-                    style: const TextStyle(
-                      color: Colors.white,
-                      fontSize: 16,
-                      fontWeight: FontWeight.w600,
-                    ),
-                  ),
-                  const SizedBox(height: 4),
-                  Text(
-                    authCtrl.currentUser.value?.email ?? 'user@example.com',
-                    style: const TextStyle(color: Colors.white70, fontSize: 12),
-                  ),
-                ],
-              ),
-            ),
-            // Menu Items
-            Expanded(
-              child: ListView(
-                padding: const EdgeInsets.symmetric(vertical: 8),
-                children: [
-                  _buildDrawerItem(
-                    icon: Icons.person_outline,
-                    label: 'Profile',
-                    onTap: () {
-                      Navigator.pop(context);
-                      // TODO: Navigate to profile page
-                    },
-                  ),
-                  _buildDrawerItem(
-                    icon: Icons.notifications_outlined,
-                    label: 'Notifications',
-                    onTap: () {
-                      Navigator.pop(context);
-                      // TODO: Navigate to notifications page
-                    },
-                  ),
-                  _buildDrawerItem(
-                    icon: Icons.help_outline,
-                    label: 'Help & Support',
-                    onTap: () {
-                      Navigator.pop(context);
-                      // TODO: Navigate to help page
-                    },
-                  ),
-                  _buildDrawerItem(
-                    icon: Icons.settings_outlined,
-                    label: 'Settings',
-                    onTap: () {
-                      Navigator.pop(context);
-                      // TODO: Navigate to settings page
-                    },
-                  ),
-                ],
-              ),
-            ),
-            // Logout Button
-            Padding(
-              padding: const EdgeInsets.all(16.0),
-              child: SizedBox(
-                width: double.infinity,
-                child: ElevatedButton(
-                  onPressed: () async {
-                    Navigator.pop(context);
-                    _showLogoutDialog(authCtrl);
-                  },
-                  style: ElevatedButton.styleFrom(
-                    backgroundColor: Colors.red,
-                    padding: const EdgeInsets.symmetric(vertical: 12),
-                  ),
-                  child: const Row(
-                    mainAxisAlignment: MainAxisAlignment.center,
-                    children: [
-                      Icon(Icons.logout, color: Colors.white, size: 18),
-                      SizedBox(width: 8),
-                      Text(
-                        'Logout',
-                        style: TextStyle(
-                          color: Colors.white,
-                          fontSize: 14,
-                          fontWeight: FontWeight.w600,
+                    const SizedBox(height: 18),
+                    // Agent Card
+                    Container(
+                      decoration: BoxDecoration(
+                        color: Colors.white,
+                        borderRadius: BorderRadius.circular(16),
+
+                        border: Border.all(
+                          color: const Color(0xFFE0E0E0),
+                          width: 1,
                         ),
                       ),
-                    ],
-                  ),
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 16,
+                        vertical: 10,
+                      ),
+                      child: Row(
+                        children: [
+                          CircleAvatar(
+                            radius: 22,
+                            backgroundColor: Colors.blue,
+                            child: Text(
+                              (authCtrl.currentUser.value?.name.isNotEmpty ==
+                                      true)
+                                  ? authCtrl.currentUser.value!.name[0]
+                                        .toUpperCase()
+                                  : 'A',
+                              style: const TextStyle(
+                                fontSize: 22,
+                                fontWeight: FontWeight.bold,
+                                color: Colors.white,
+                              ),
+                            ),
+                          ),
+                          const SizedBox(width: 14),
+                          Expanded(
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Text(
+                                  authCtrl.currentUser.value?.name.isNotEmpty ==
+                                          true
+                                      ? authCtrl.currentUser.value!.name
+                                      : 'AGENT',
+                                  style: const TextStyle(
+                                    fontWeight: FontWeight.w700,
+                                    fontSize: 16,
+                                    color: Color(0xFF222222),
+                                  ),
+                                ),
+                                const SizedBox(height: 2),
+                                Text(
+                                  'IMEI No. ${authCtrl.imei.value.isNotEmpty ? authCtrl.imei.value : 'N/A'}',
+                                  style: const TextStyle(
+                                    fontSize: 13,
+                                    color: Color(0xFF888888),
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                          const Icon(
+                            Icons.keyboard_arrow_down_rounded,
+                            color: Color(0xFF888888),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ],
                 ),
               ),
-            ),
-          ],
+              const SizedBox(height: 12),
+              // Menu Items
+              Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 12.0),
+                child: Column(
+                  children: [
+                    // Summary Report (selected)
+                    Container(
+                      decoration: BoxDecoration(
+                        color: const Color(0xFFF3F5F8),
+                        borderRadius: BorderRadius.circular(12),
+                      ),
+                      child: ListTile(
+                        leading: const Icon(
+                          Icons.grid_view_rounded,
+                          color: Color(0xFF222222),
+                        ),
+                        title: const Text(
+                          'Summary Report',
+                          style: TextStyle(
+                            fontWeight: FontWeight.w700,
+                            color: Color(0xFF222222),
+                          ),
+                        ),
+                        onTap: () {
+                          Navigator.pop(context);
+                          final userId = authCtrl.currentUser.value?.id;
+                          if (userId != null && userId.isNotEmpty) {
+                            final today = DateTime.now();
+                            final dateStr =
+                                "${today.year.toString().padLeft(4, '0')}-${today.month.toString().padLeft(2, '0')}-${today.day.toString().padLeft(2, '0')}";
+                            Navigator.of(context).push(
+                              MaterialPageRoute(
+                                builder: (_) => SummaryReportPage(
+                                  date: dateStr,
+                                  makerId: userId,
+                                ),
+                              ),
+                            );
+                          }
+                        },
+                        contentPadding: const EdgeInsets.symmetric(
+                          horizontal: 12,
+                          vertical: 0,
+                        ),
+                        dense: true,
+                        minLeadingWidth: 0,
+                      ),
+                    ),
+                    const SizedBox(height: 2),
+                    // End of Day Report
+                    ListTile(
+                      leading: const Icon(
+                        Icons.table_rows_rounded,
+                        color: Color(0xFF222222),
+                      ),
+                      title: const Text(
+                        'End of Day Report',
+                        style: TextStyle(
+                          fontWeight: FontWeight.w500,
+                          color: Color(0xFF222222),
+                        ),
+                      ),
+                      onTap: () {
+                        Navigator.pop(context);
+                        final userId = authCtrl.currentUser.value?.id;
+                        if (userId != null && userId.isNotEmpty) {
+                          final today = DateTime.now();
+                          final dateStr =
+                              "${today.year.toString().padLeft(4, '0')}-${today.month.toString().padLeft(2, '0')}-${today.day.toString().padLeft(2, '0')}";
+                          Navigator.of(context).push(
+                            MaterialPageRoute(
+                              builder: (_) =>
+                                  EodReportPage(makerId: userId, date: dateStr),
+                            ),
+                          );
+                        }
+                      },
+                      contentPadding: const EdgeInsets.symmetric(
+                        horizontal: 12,
+                        vertical: 0,
+                      ),
+                      dense: true,
+                      minLeadingWidth: 0,
+                    ),
+                    // Notification with badge
+                    ListTile(
+                      leading: const Icon(
+                        Icons.notifications_none_rounded,
+                        color: Color(0xFF222222),
+                      ),
+                      title: Row(
+                        children: [
+                          const Text(
+                            'Notification',
+                            style: TextStyle(
+                              fontWeight: FontWeight.w500,
+                              color: Color(0xFF222222),
+                            ),
+                          ),
+                          const SizedBox(width: 8),
+                          Container(
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 6,
+                              vertical: 2,
+                            ),
+                            decoration: BoxDecoration(
+                              color: Color(0xFFFF2D55),
+                              borderRadius: BorderRadius.circular(12),
+                            ),
+                            child: const Text(
+                              '2',
+                              style: TextStyle(
+                                color: Colors.white,
+                                fontSize: 12,
+                                fontWeight: FontWeight.bold,
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
+                      onTap: () {},
+                      contentPadding: const EdgeInsets.symmetric(
+                        horizontal: 12,
+                        vertical: 0,
+                      ),
+                      dense: true,
+                      minLeadingWidth: 0,
+                    ),
+                  ],
+                ),
+              ),
+              // Spacer
+              const Spacer(),
+              // Logout Button at bottom
+              Padding(
+                padding: const EdgeInsets.only(
+                  left: 16,
+                  right: 16,
+                  bottom: 24,
+                  top: 8,
+                ),
+                child: Row(
+                  children: [
+                    const Icon(
+                      Icons.logout,
+                      color: Color(0xFFFF2D55),
+                      size: 22,
+                    ),
+                    const SizedBox(width: 8),
+                    GestureDetector(
+                      onTap: () {
+                        Navigator.pop(context);
+                        _showLogoutDialog(authCtrl);
+                      },
+                      child: const Text(
+                        'Logout',
+                        style: TextStyle(
+                          color: Color(0xFFFF2D55),
+                          fontWeight: FontWeight.w500,
+                          fontSize: 16,
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
         ),
       ),
     );

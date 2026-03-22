@@ -547,24 +547,24 @@ class _ClaimPageState extends State<ClaimPage> {
                     ).textTheme.bodyMedium?.copyWith(color: Colors.white70),
                   ),
                   const SizedBox(height: 24),
-                  ElevatedButton(
-                    style: ElevatedButton.styleFrom(
-                      backgroundColor: Colors.white,
-                      foregroundColor: AppColors.primary,
-                      padding: const EdgeInsets.symmetric(
-                        horizontal: 24,
-                        vertical: 12,
-                      ),
-                    ),
-                    onPressed: () {
-                      _qrSubscription?.cancel();
-                      _qrSubscription = null;
-                      setState(() {
-                        _showQRScanner = false;
-                      });
-                    },
-                    child: const Text('View Claims History'),
-                  ),
+                  // ElevatedButton(
+                  //   style: ElevatedButton.styleFrom(
+                  //     backgroundColor: Colors.white,
+                  //     foregroundColor: AppColors.primary,
+                  //     padding: const EdgeInsets.symmetric(
+                  //       horizontal: 24,
+                  //       vertical: 12,
+                  //     ),
+                  //   ),
+                  //   onPressed: () {
+                  //     _qrSubscription?.cancel();
+                  //     _qrSubscription = null;
+                  //     setState(() {
+                  //       _showQRScanner = false;
+                  //     });
+                  //   },
+                  //   child: const Text('View Claims History'),
+                  // ),
                 ],
               ),
             ),
