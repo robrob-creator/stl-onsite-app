@@ -16,6 +16,9 @@ class _BetEntryPageState extends State<BetEntryPage> {
   late TextEditingController _targetAmountController;
   late TextEditingController _rambolAmountController;
   late FocusNode _targetAmountFocusNode;
+  late FocusNode _rambolAmountFocusNode;
+  // 'target' | 'rambol' | '' (neither focused)
+  String _activeBetField = 'target';
 
   @override
   void initState() {
@@ -23,6 +26,18 @@ class _BetEntryPageState extends State<BetEntryPage> {
     _targetAmountController = TextEditingController();
     _rambolAmountController = TextEditingController();
     _targetAmountFocusNode = FocusNode();
+    _rambolAmountFocusNode = FocusNode();
+
+    _targetAmountFocusNode.addListener(() {
+      if (_targetAmountFocusNode.hasFocus) {
+        setState(() => _activeBetField = 'target');
+      }
+    });
+    _rambolAmountFocusNode.addListener(() {
+      if (_rambolAmountFocusNode.hasFocus) {
+        setState(() => _activeBetField = 'rambol');
+      }
+    });
   }
 
   @override
@@ -30,6 +45,7 @@ class _BetEntryPageState extends State<BetEntryPage> {
     _targetAmountController.dispose();
     _rambolAmountController.dispose();
     _targetAmountFocusNode.dispose();
+    _rambolAmountFocusNode.dispose();
     super.dispose();
   }
 
@@ -260,107 +276,207 @@ class _BetEntryPageState extends State<BetEntryPage> {
                   final game = ctrl.currentGame;
                   if (game == null) return const SizedBox.shrink();
 
-                  // Build Target field widget
-                  Widget? targetField;
-                  if (game.enableStraight) {
-                    targetField = Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text(
-                          'Target / Straight Bet',
-                          style: TextStyle(
-                            fontSize: 14,
-                            fontWeight: FontWeight.w600,
-                            color: Colors.grey[700],
-                          ),
-                        ),
-                        const SizedBox(height: 8),
-                        TextField(
-                          controller: _targetAmountController,
-                          focusNode: _targetAmountFocusNode,
-                          onChanged: (value) {
-                            ctrl.targetAmount.value = int.tryParse(value) ?? 0;
-                          },
-                          decoration: InputDecoration(
-                            hintText: 'Enter Amount',
-                            hintStyle: TextStyle(color: Colors.grey[400]),
-                            contentPadding: const EdgeInsets.symmetric(
-                              horizontal: 16,
-                              vertical: 14,
-                            ),
-                            border: OutlineInputBorder(
-                              borderRadius: BorderRadius.circular(12),
-                              borderSide: BorderSide(color: Colors.grey[300]!),
-                            ),
-                            enabledBorder: OutlineInputBorder(
-                              borderRadius: BorderRadius.circular(12),
-                              borderSide: BorderSide(color: Colors.grey[300]!),
-                            ),
-                          ),
-                          keyboardType: TextInputType.number,
-                        ),
-                      ],
-                    );
-                  }
+                  final bothEnabled = game.enableStraight && game.enableRamble;
 
-                  // Build Rambol field widget
-                  Widget? rambolField;
-                  if (game.enableRamble) {
-                    rambolField = Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text(
-                          'Rambol / Box Bet',
-                          style: TextStyle(
-                            fontSize: 14,
-                            fontWeight: FontWeight.w600,
-                            color: Colors.grey[700],
+                  return Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      // Target / Rambol toggle (only shown when both are available)
+                      if (bothEnabled) ...[
+                        Container(
+                          padding: const EdgeInsets.all(2),
+                          decoration: BoxDecoration(
+                            color: Colors.grey[100],
+                            borderRadius: BorderRadius.circular(12),
+                          ),
+                          child: Row(
+                            children: [
+                              Expanded(
+                                child: GestureDetector(
+                                  onTap: () {
+                                    setState(() => _activeBetField = 'target');
+                                    FocusScope.of(
+                                      context,
+                                    ).requestFocus(_targetAmountFocusNode);
+                                  },
+                                  child: Container(
+                                    padding: const EdgeInsets.symmetric(
+                                      vertical: 12,
+                                      horizontal: 16,
+                                    ),
+                                    decoration: BoxDecoration(
+                                      color: _activeBetField == 'target'
+                                          ? const Color(0xFF2563EB)
+                                          : Colors.grey[100],
+                                      borderRadius: BorderRadius.circular(12),
+                                    ),
+                                    alignment: Alignment.center,
+                                    child: Text(
+                                      'Target',
+                                      style: TextStyle(
+                                        fontSize: 14,
+                                        fontWeight: FontWeight.w500,
+                                        color: _activeBetField == 'target'
+                                            ? Colors.white
+                                            : Colors.grey[400],
+                                      ),
+                                    ),
+                                  ),
+                                ),
+                              ),
+                              Expanded(
+                                child: GestureDetector(
+                                  onTap: () {
+                                    setState(() => _activeBetField = 'rambol');
+                                    FocusScope.of(
+                                      context,
+                                    ).requestFocus(_rambolAmountFocusNode);
+                                  },
+                                  child: Container(
+                                    padding: const EdgeInsets.symmetric(
+                                      vertical: 12,
+                                      horizontal: 16,
+                                    ),
+                                    decoration: BoxDecoration(
+                                      color: _activeBetField == 'rambol'
+                                          ? const Color(0xFF2563EB)
+                                          : Colors.grey[100],
+                                      borderRadius: BorderRadius.circular(12),
+                                    ),
+                                    alignment: Alignment.center,
+                                    child: Text(
+                                      'Rambol',
+                                      style: TextStyle(
+                                        fontSize: 14,
+                                        fontWeight: FontWeight.w500,
+                                        color: _activeBetField == 'rambol'
+                                            ? Colors.white
+                                            : Colors.grey[400],
+                                      ),
+                                    ),
+                                  ),
+                                ),
+                              ),
+                            ],
                           ),
                         ),
-                        const SizedBox(height: 8),
-                        TextField(
-                          controller: _rambolAmountController,
-                          onChanged: (value) {
-                            ctrl.rambolAmount.value = int.tryParse(value) ?? 0;
-                          },
-                          decoration: InputDecoration(
-                            hintText: 'Enter Amount',
-                            hintStyle: TextStyle(color: Colors.grey[400]),
-                            contentPadding: const EdgeInsets.symmetric(
-                              horizontal: 16,
-                              vertical: 14,
-                            ),
-                            border: OutlineInputBorder(
-                              borderRadius: BorderRadius.circular(12),
-                              borderSide: BorderSide(color: Colors.grey[300]!),
-                            ),
-                            enabledBorder: OutlineInputBorder(
-                              borderRadius: BorderRadius.circular(12),
-                              borderSide: BorderSide(color: Colors.grey[300]!),
-                            ),
-                          ),
-                          keyboardType: TextInputType.number,
-                        ),
+                        const SizedBox(height: 12),
                       ],
-                    );
-                  }
 
-                  // Display in row if both present, column if only one
-                  if (targetField != null && rambolField != null) {
-                    return Row(
-                      children: [
-                        Expanded(child: targetField),
-                        const SizedBox(width: 16),
-                        Expanded(child: rambolField),
-                      ],
-                    );
-                  } else if (targetField != null) {
-                    return targetField;
-                  } else if (rambolField != null) {
-                    return rambolField;
-                  } else {
-                    return const SizedBox.shrink();
-                  }
+                      // Amount input fields
+                      Row(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          if (game.enableStraight)
+                            Expanded(
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  if (!bothEnabled)
+                                    Padding(
+                                      padding: const EdgeInsets.only(bottom: 8),
+                                      child: Text(
+                                        'Target / Straight Bet',
+                                        style: TextStyle(
+                                          fontSize: 14,
+                                          fontWeight: FontWeight.w600,
+                                          color: Colors.grey[700],
+                                        ),
+                                      ),
+                                    ),
+                                  TextField(
+                                    controller: _targetAmountController,
+                                    focusNode: _targetAmountFocusNode,
+                                    onChanged: (value) {
+                                      ctrl.targetAmount.value =
+                                          int.tryParse(value) ?? 0;
+                                    },
+                                    decoration: InputDecoration(
+                                      hintText: 'Target Amount',
+                                      hintStyle: TextStyle(
+                                        color: Colors.grey[400],
+                                      ),
+                                      contentPadding:
+                                          const EdgeInsets.symmetric(
+                                            horizontal: 16,
+                                            vertical: 14,
+                                          ),
+                                      border: OutlineInputBorder(
+                                        borderRadius: BorderRadius.circular(12),
+                                        borderSide: BorderSide(
+                                          color: Colors.grey[300]!,
+                                        ),
+                                      ),
+                                      enabledBorder: OutlineInputBorder(
+                                        borderRadius: BorderRadius.circular(12),
+                                        borderSide: BorderSide(
+                                          color: Colors.grey[300]!,
+                                        ),
+                                      ),
+                                    ),
+                                    keyboardType: TextInputType.number,
+                                  ),
+                                ],
+                              ),
+                            ),
+                          if (game.enableStraight && game.enableRamble)
+                            const SizedBox(width: 16),
+                          if (game.enableRamble)
+                            Expanded(
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  if (!bothEnabled)
+                                    Padding(
+                                      padding: const EdgeInsets.only(bottom: 8),
+                                      child: Text(
+                                        'Rambol / Box Bet',
+                                        style: TextStyle(
+                                          fontSize: 14,
+                                          fontWeight: FontWeight.w600,
+                                          color: Colors.grey[700],
+                                        ),
+                                      ),
+                                    ),
+                                  TextField(
+                                    controller: _rambolAmountController,
+                                    focusNode: _rambolAmountFocusNode,
+                                    onChanged: (value) {
+                                      ctrl.rambolAmount.value =
+                                          int.tryParse(value) ?? 0;
+                                    },
+                                    decoration: InputDecoration(
+                                      hintText: 'Rambol Amount',
+                                      hintStyle: TextStyle(
+                                        color: Colors.grey[400],
+                                      ),
+                                      contentPadding:
+                                          const EdgeInsets.symmetric(
+                                            horizontal: 16,
+                                            vertical: 14,
+                                          ),
+                                      border: OutlineInputBorder(
+                                        borderRadius: BorderRadius.circular(12),
+                                        borderSide: BorderSide(
+                                          color: Colors.grey[300]!,
+                                        ),
+                                      ),
+                                      enabledBorder: OutlineInputBorder(
+                                        borderRadius: BorderRadius.circular(12),
+                                        borderSide: BorderSide(
+                                          color: Colors.grey[300]!,
+                                        ),
+                                      ),
+                                    ),
+                                    keyboardType: TextInputType.number,
+                                  ),
+                                ],
+                              ),
+                            ),
+                        ],
+                      ),
+                    ],
+                  );
                 },
               ),
               const SizedBox(height: 24),
