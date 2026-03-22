@@ -62,9 +62,12 @@ class LotteryController extends GetxController {
       // Set the first game as selected by default
       if (games.isNotEmpty) {
         selectedGameId.value = games[0].id;
-        // Set the first draw time of the selected game
-        if (games[0].drawTimes.isNotEmpty) {
-          selectedTime.value = games[0].drawTimes[0].id;
+        // Set the first *available* draw time of the selected game
+        final firstAvailable = games[0].drawTimes
+            .where((dt) => dt.isAvailable())
+            .firstOrNull;
+        if (firstAvailable != null) {
+          selectedTime.value = firstAvailable.id;
         }
       }
       update();

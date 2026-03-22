@@ -68,10 +68,12 @@ class _BetEntryPageState extends State<BetEntryPage> {
                                   _lottoNumbers = '';
                                 });
                                 ctrl.selectedGameId.value = game.id;
-                                if (game.drawTimes.isNotEmpty) {
-                                  ctrl.selectedTime.value =
-                                      game.drawTimes[0].id;
-                                }
+                                // Select the first available draw time for the newly chosen game
+                                final firstAvailable = game.drawTimes
+                                    .where((dt) => dt.isAvailable())
+                                    .firstOrNull;
+                                ctrl.selectedTime.value =
+                                    firstAvailable?.id ?? '';
                                 ctrl.update();
                               },
                               child: Container(
@@ -167,6 +169,18 @@ class _BetEntryPageState extends State<BetEntryPage> {
                   final drawTimes = ctrl.currentDrawTimes
                       .where((dt) => dt.isAvailable())
                       .toList();
+
+                  // If the previously selected draw time is no longer available,
+                  // auto-select the first one that still is.
+                  if (drawTimes.isNotEmpty &&
+                      !drawTimes.any(
+                        (dt) => dt.id == ctrl.selectedTime.value,
+                      )) {
+                    WidgetsBinding.instance.addPostFrameCallback((_) {
+                      ctrl.selectedTime.value = drawTimes.first.id;
+                      ctrl.update();
+                    });
+                  }
 
                   // If no draw times are available, show message
                   if (drawTimes.isEmpty) {

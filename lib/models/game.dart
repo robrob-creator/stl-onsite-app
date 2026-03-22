@@ -240,25 +240,19 @@ class DrawTime {
       final minute = int.parse(timeParts[1]);
 
       // Create a DateTime for today's draw time
-      DateTime drawDateTime = DateTime(
-        now.year,
-        now.month,
-        now.day,
-        hour,
-        minute,
-      );
+      final drawDateTime = DateTime(now.year, now.month, now.day, hour, minute);
 
-      // If draw time is in the past, move to tomorrow
+      // If the draw time has already passed today, it is no longer available
       if (drawDateTime.isBefore(now)) {
-        drawDateTime = drawDateTime.add(const Duration(days: 1));
+        return false;
       }
 
-      // Calculate cutoff time
+      // Calculate cutoff time (X minutes before the draw)
       final cutoffDateTime = drawDateTime.subtract(
         Duration(minutes: cutoffMinutes),
       );
 
-      // Draw time is available if current time is before cutoff
+      // Draw time is available only if current time is before the cutoff
       return now.isBefore(cutoffDateTime);
     } catch (e) {
       return true; // Default to available if parsing fails
