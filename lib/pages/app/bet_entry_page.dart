@@ -691,7 +691,17 @@ class _BetEntryPageState extends State<BetEntryPage> {
                                     ),
                                   ),
                                 ),
-                                const SizedBox(width: 30),
+                                Expanded(
+                                  flex: 1,
+                                  child: Text(
+                                    'Action',
+                                    style: const TextStyle(
+                                      color: Color(0xFF2563EB),
+                                      fontWeight: FontWeight.bold,
+                                      fontSize: 12,
+                                    ),
+                                  ),
+                                ),
                               ],
                             ),
                           ),
