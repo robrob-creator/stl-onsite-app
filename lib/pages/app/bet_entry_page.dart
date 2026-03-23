@@ -647,116 +647,133 @@ class _BetEntryPageState extends State<BetEntryPage> {
               const SizedBox(height: 24),
 
               // Add Bet Button
-              SizedBox(
-                width: double.infinity,
-                height: 56,
-                child: ElevatedButton(
-                  onPressed: () {
-                    if (_lottoNumbers.isEmpty) {
-                      Get.snackbar('Error', 'Please select numbers');
-                      return;
-                    }
+              GetBuilder<LotteryController>(
+                builder: (ctrl) {
+                  final hasDrawTimes = ctrl.currentDrawTimes
+                      .where((dt) => dt.isAvailable())
+                      .isNotEmpty;
+                  return SizedBox(
+                    width: double.infinity,
+                    height: 56,
+                    child: ElevatedButton(
+                      onPressed: hasDrawTimes
+                          ? () {
+                              if (_lottoNumbers.isEmpty) {
+                                Get.snackbar('Error', 'Please select numbers');
+                                return;
+                              }
 
-                    final controller = Get.find<LotteryController>();
-                    final game = controller.currentGame;
+                              final controller = Get.find<LotteryController>();
+                              final game = controller.currentGame;
 
-                    if (game == null) {
-                      Get.snackbar('Error', 'Please select a game');
-                      return;
-                    }
+                              if (game == null) {
+                                Get.snackbar('Error', 'Please select a game');
+                                return;
+                              }
 
-                    // Calculate digits per cell based on max number
-                    int digitsPerCell = game.maxNumber.toString().length;
-                    int expectedTotalDigits =
-                        game.numberOfCombinations * digitsPerCell;
+                              // Calculate digits per cell based on max number
+                              int digitsPerCell = game.maxNumber
+                                  .toString()
+                                  .length;
+                              int expectedTotalDigits =
+                                  game.numberOfCombinations * digitsPerCell;
 
-                    // Validate input length
-                    if (_lottoNumbers.length != expectedTotalDigits) {
-                      String rangeText = '${game.minNumber}-${game.maxNumber}';
-                      String numberText = game.numberOfCombinations == 1
-                          ? 'number'
-                          : 'numbers';
-                      Get.snackbar(
-                        'Error',
-                        'Please enter ${game.numberOfCombinations} $numberText for ${game.name} (range: $rangeText)',
-                      );
-                      return;
-                    }
+                              // Validate input length
+                              if (_lottoNumbers.length != expectedTotalDigits) {
+                                String rangeText =
+                                    '${game.minNumber}-${game.maxNumber}';
+                                String numberText =
+                                    game.numberOfCombinations == 1
+                                    ? 'number'
+                                    : 'numbers';
+                                Get.snackbar(
+                                  'Error',
+                                  'Please enter ${game.numberOfCombinations} $numberText for ${game.name} (range: $rangeText)',
+                                );
+                                return;
+                              }
 
-                    // Validate that at least one amount is entered based on game settings
-                    int targetAmount =
-                        int.tryParse(_targetAmountController.text) ?? 0;
-                    int rambolAmount =
-                        int.tryParse(_rambolAmountController.text) ?? 0;
+                              // Validate that at least one amount is entered based on game settings
+                              int targetAmount =
+                                  int.tryParse(_targetAmountController.text) ??
+                                  0;
+                              int rambolAmount =
+                                  int.tryParse(_rambolAmountController.text) ??
+                                  0;
 
-                    if (game.enableStraight && game.enableRamble) {
-                      // Both enabled: at least one must be > 0
-                      if (targetAmount == 0 && rambolAmount == 0) {
-                        Get.snackbar(
-                          'Error',
-                          'Please enter at least one bet amount',
-                        );
-                        return;
-                      }
-                    } else if (game.enableStraight) {
-                      // Only Target enabled
-                      if (targetAmount == 0) {
-                        Get.snackbar(
-                          'Error',
-                          'Please enter a Target/Straight bet amount',
-                        );
-                        return;
-                      }
-                    } else if (game.enableRamble) {
-                      // Only Rambol enabled
-                      if (rambolAmount == 0) {
-                        Get.snackbar(
-                          'Error',
-                          'Please enter a Rambol/Box bet amount',
-                        );
-                        return;
-                      }
-                    }
+                              if (game.enableStraight && game.enableRamble) {
+                                // Both enabled: at least one must be > 0
+                                if (targetAmount == 0 && rambolAmount == 0) {
+                                  Get.snackbar(
+                                    'Error',
+                                    'Please enter at least one bet amount',
+                                  );
+                                  return;
+                                }
+                              } else if (game.enableStraight) {
+                                // Only Target enabled
+                                if (targetAmount == 0) {
+                                  Get.snackbar(
+                                    'Error',
+                                    'Please enter a Target/Straight bet amount',
+                                  );
+                                  return;
+                                }
+                              } else if (game.enableRamble) {
+                                // Only Rambol enabled
+                                if (rambolAmount == 0) {
+                                  Get.snackbar(
+                                    'Error',
+                                    'Please enter a Rambol/Box bet amount',
+                                  );
+                                  return;
+                                }
+                              }
 
-                    // Convert lotto numbers to list for controller by grouping
-                    controller.selectedNumbers.clear();
-                    for (
-                      int i = 0;
-                      i < _lottoNumbers.length;
-                      i += digitsPerCell
-                    ) {
-                      controller.selectedNumbers.add(
-                        _lottoNumbers.substring(i, i + digitsPerCell),
-                      );
-                    }
+                              // Convert lotto numbers to list for controller by grouping
+                              controller.selectedNumbers.clear();
+                              for (
+                                int i = 0;
+                                i < _lottoNumbers.length;
+                                i += digitsPerCell
+                              ) {
+                                controller.selectedNumbers.add(
+                                  _lottoNumbers.substring(i, i + digitsPerCell),
+                                );
+                              }
 
-                    controller.addBet();
+                              controller.addBet();
 
-                    // Clear all inputs after successful bet addition
-                    // Use Future.microtask to defer setState until after build completes
-                    Future.microtask(() {
-                      setState(() {
-                        _lottoNumbers = '';
-                        _targetAmountController.clear();
-                        _rambolAmountController.clear();
-                      });
-                    });
-                  },
-                  style: ElevatedButton.styleFrom(
-                    backgroundColor: Colors.orange[400],
-                    shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(12),
+                              // Clear all inputs after successful bet addition
+                              // Use Future.microtask to defer setState until after build completes
+                              Future.microtask(() {
+                                setState(() {
+                                  _lottoNumbers = '';
+                                  _targetAmountController.clear();
+                                  _rambolAmountController.clear();
+                                });
+                              });
+                            }
+                          : null,
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: hasDrawTimes
+                            ? Colors.orange[400]
+                            : Colors.grey[300],
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(12),
+                        ),
+                      ),
+                      child: Text(
+                        'Add Bet',
+                        style: TextStyle(
+                          color: hasDrawTimes ? Colors.white : Colors.grey[500],
+                          fontWeight: FontWeight.bold,
+                          fontSize: 16,
+                        ),
+                      ),
                     ),
-                  ),
-                  child: const Text(
-                    'Add Bet',
-                    style: TextStyle(
-                      color: Colors.white,
-                      fontWeight: FontWeight.bold,
-                      fontSize: 16,
-                    ),
-                  ),
-                ),
+                  );
+                },
               ),
 
               const SizedBox(height: 24),

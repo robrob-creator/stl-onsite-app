@@ -331,29 +331,42 @@ class _MainLayoutState extends State<MainLayout> {
                   bottom: 24,
                   top: 8,
                 ),
-                child: Row(
-                  children: [
-                    const Icon(
-                      Icons.logout,
-                      color: Color(0xFFFF2D55),
-                      size: 22,
+                child: GestureDetector(
+                  behavior: HitTestBehavior.opaque,
+                  onTap: () {
+                    Navigator.pop(context);
+                    _showLogoutDialog(authCtrl);
+                  },
+                  child: Container(
+                    color: const Color.fromARGB(
+                      255,
+                      255,
+                      255,
+                      255,
+                    ).withOpacity(0.1),
+                    padding: const EdgeInsets.symmetric(
+                      vertical: 12,
+                      horizontal: 16,
                     ),
-                    const SizedBox(width: 8),
-                    GestureDetector(
-                      onTap: () {
-                        Navigator.pop(context);
-                        _showLogoutDialog(authCtrl);
-                      },
-                      child: const Text(
-                        'Logout',
-                        style: TextStyle(
+                    child: Row(
+                      children: [
+                        const Icon(
+                          Icons.logout,
                           color: Color(0xFFFF2D55),
-                          fontWeight: FontWeight.w500,
-                          fontSize: 16,
+                          size: 22,
                         ),
-                      ),
+                        const SizedBox(width: 8),
+                        const Text(
+                          'Logout',
+                          style: TextStyle(
+                            color: Color(0xFFFF2D55),
+                            fontWeight: FontWeight.w500,
+                            fontSize: 16,
+                          ),
+                        ),
+                      ],
                     ),
-                  ],
+                  ),
                 ),
               ),
             ],
