@@ -185,13 +185,13 @@ class PrinterService {
     bool logoLoaded = false;
     try {
       final ByteData assetData = await rootBundle.load(
-        'assets/images/logos/logo.png',
+        'assets/images/logos/header.jpeg',
       );
       final Uint8List rawBytes = assetData.buffer.asUint8List();
       img.Image? decoded = img.decodeImage(rawBytes);
       if (decoded != null) {
         // Resize to fit 58mm paper; preserve aspect ratio
-        const int targetWidth = 200;
+        const int targetWidth = 300;
         final int targetHeight = (decoded.height * targetWidth / decoded.width)
             .round();
         final img.Image resized = img.copyResize(

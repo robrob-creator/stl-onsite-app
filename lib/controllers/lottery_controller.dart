@@ -210,10 +210,8 @@ class LotteryController extends GetxController {
       Get.snackbar('Error', 'Please add at least one bet');
       return;
     }
-    await Future.delayed(const Duration(milliseconds: 500), () {
-      if (Get.isDialogOpen ?? false) Get.back();
-      isLoading.value = true;
-    }); // Allow UI to update before showing loading
+
+    isLoading.value = true;
     update();
 
     try {
@@ -339,6 +337,16 @@ class LotteryController extends GetxController {
       selectedNumbers.clear();
       targetAmount.value = 0;
       rambolAmount.value = 0;
+
+      Get.snackbar(
+        'Success',
+        'Bets submitted successfully!',
+        snackPosition: SnackPosition.BOTTOM,
+        backgroundColor: const Color(0xFF10B981),
+        colorText: Colors.white,
+        duration: const Duration(seconds: 3),
+        icon: const Icon(Icons.check_circle, color: Colors.white),
+      );
     } catch (e) {
       Get.snackbar(
         'Error',

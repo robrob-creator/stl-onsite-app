@@ -180,8 +180,12 @@ class _BetEntryPageState extends State<BetEntryPage> {
                     child: ElevatedButton(
                       onPressed: () async {
                         Get.back(); // close confirmation dialog
-                        _showLoadingDialog();
+                        // _showLoadingDialog();
                         await ctrl.submitBets();
+                        // Always dismiss the loading dialog here — the dialog
+                        // is owned by this page so it is the most reliable
+                        // place to close it regardless of GetX routing state.
+                        // if (Get.isDialogOpen ?? false) Get.back();
                       },
                       style: ElevatedButton.styleFrom(
                         backgroundColor: const Color(0xFF3D5A99),

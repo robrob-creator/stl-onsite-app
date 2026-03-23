@@ -10,10 +10,12 @@ class Transaction {
   final String? accountNumber;
   final String? bank;
   final String method;
-  final TransactionReference reference;
+  final TransactionReference? reference;
   final String status;
   final String type;
-  final UserData user;
+  final UserData? user;
+  final String? drawTime;
+  final String? drawTimeId;
 
   Transaction({
     required this.id,
@@ -27,13 +29,19 @@ class Transaction {
     this.accountNumber,
     this.bank,
     required this.method,
-    required this.reference,
+    this.reference,
     required this.status,
     required this.type,
-    required this.user,
+    this.user,
+    this.drawTime,
+    this.drawTimeId,
   });
 
-  factory Transaction.fromJson(Map<String, dynamic> json) {
+  factory Transaction.fromJson(
+    Map<String, dynamic> json, {
+    String? drawTime,
+    String? drawTimeId,
+  }) {
     return Transaction(
       id: json['id'] as String,
       idx: json['idx'] as int,
@@ -46,12 +54,18 @@ class Transaction {
       accountNumber: json['account_number'] as String?,
       bank: json['bank'] as String?,
       method: json['method'] as String,
-      reference: TransactionReference.fromJson(
-        json['reference'] as Map<String, dynamic>,
-      ),
+      reference: json['reference'] is Map<String, dynamic>
+          ? TransactionReference.fromJson(
+              json['reference'] as Map<String, dynamic>,
+            )
+          : null,
       status: json['status'] as String,
       type: json['type'] as String,
-      user: UserData.fromJson(json['user'] as Map<String, dynamic>),
+      user: json['user'] is Map<String, dynamic>
+          ? UserData.fromJson(json['user'] as Map<String, dynamic>)
+          : null,
+      drawTime: drawTime,
+      drawTimeId: drawTimeId,
     );
   }
 
@@ -68,10 +82,12 @@ class Transaction {
       'account_number': accountNumber,
       'bank': bank,
       'method': method,
-      'reference': reference.toJson(),
+      'reference': reference?.toJson(),
       'status': status,
       'type': type,
-      'user': user.toJson(),
+      'user': user?.toJson(),
+      'draw_time': drawTime,
+      'draw_time_id': drawTimeId,
     };
   }
 }
@@ -201,5 +217,68 @@ class UserData {
       'is_active': isActive,
       'is_blocked': isBlocked,
     };
+  }
+}
+
+class TransactionGroup {
+  final String drawTimeId;
+  final String drawTime;
+  final List<Transaction> transactions;
+
+  TransactionGroup({
+    required this.drawTimeId,
+    required this.drawTime,
+    required this.transactions,
+  });
+
+  double get totalAmount => transactions.fold(0.0, (sum, t) => sum + t.amount);
+
+  int get count => transactions.length;
+
+  String get overallStatus {
+    if (transactions.every((t) => t.status == 'completed')) return 'completed';
+    if (transactions.any((t) => t.status == 'failed')) return 'failed';
+    return 'pending';
+  }
+
+  String get createdAt =>
+      transactions.isNotEmpty ? transactions.first.createdAt : '';
+}
+
+class TransactionBet {
+  final String id;
+  final String gameName;
+  final List<String> digits;
+  final double straightBetAmount;
+  final double rambleBetAmount;
+  final double totalBetAmount;
+  final String status;
+  final String ticketNo;
+
+  TransactionBet({
+    required this.id,
+    required this.gameName,
+    required this.digits,
+    required this.straightBetAmount,
+    required this.rambleBetAmount,
+    required this.totalBetAmount,
+    required this.status,
+    required this.ticketNo,
+  });
+
+  String get betType => straightBetAmount > 0 ? 'Target' : 'Rambol';
+
+  factory TransactionBet.fromJson(Map<String, dynamic> json) {
+    return TransactionBet(
+      id: json['id'] as String,
+      gameName: json['game_name'] as String? ?? '',
+      digits:
+          (json['digits'] as List?)?.map((e) => e.toString()).toList() ?? [],
+      straightBetAmount: (json['straight_bet_amount'] as num?)?.toDouble() ?? 0,
+      rambleBetAmount: (json['ramble_bet_amount'] as num?)?.toDouble() ?? 0,
+      totalBetAmount: (json['total_bet_amount'] as num?)?.toDouble() ?? 0,
+      status: json['status'] as String? ?? '',
+      ticketNo: json['ticket_no'] as String? ?? '',
+    );
   }
 }

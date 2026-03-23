@@ -12,19 +12,89 @@ class TransactionPage extends StatefulWidget {
 }
 
 class _TransactionPageState extends State<TransactionPage> {
-  String? selectedFilter = 'All Time';
-  late Future<List<Transaction>> _transactionsFuture;
+  DateTime _selectedDate = DateTime.now();
+  late Future<List<TransactionGroup>> _groupsFuture;
 
   @override
   void initState() {
     super.initState();
-    _transactionsFuture = TransactionService.fetchTransactions();
+    _groupsFuture = TransactionService.fetchTransactions(date: _selectedDate);
+  }
+
+  void _pickDate() async {
+    final picked = await showDatePicker(
+      context: context,
+      initialDate: _selectedDate,
+      firstDate: DateTime(2020),
+      lastDate: DateTime.now(),
+      initialEntryMode: DatePickerEntryMode.calendarOnly,
+      builder: (context, child) {
+        return Theme(
+          data: Theme.of(context).copyWith(
+            colorScheme: const ColorScheme.light(
+              primary: AppColors.primary,
+              onPrimary: Colors.white,
+              onSurface: Colors.black87,
+            ),
+          ),
+          child: child!,
+        );
+      },
+    );
+    if (picked == null) return;
+    setState(() {
+      _selectedDate = picked;
+      _groupsFuture = TransactionService.fetchTransactions(date: picked);
+    });
+  }
+
+  String _formatSelectedDate() {
+    final now = DateTime.now();
+    final today = DateTime(now.year, now.month, now.day);
+    final yesterday = DateTime(now.year, now.month, now.day - 1);
+    final sel = DateTime(
+      _selectedDate.year,
+      _selectedDate.month,
+      _selectedDate.day,
+    );
+    if (sel == today) return 'Today';
+    if (sel == yesterday) return 'Yesterday';
+    const months = [
+      'Jan',
+      'Feb',
+      'Mar',
+      'Apr',
+      'May',
+      'Jun',
+      'Jul',
+      'Aug',
+      'Sep',
+      'Oct',
+      'Nov',
+      'Dec',
+    ];
+    return '${months[_selectedDate.month - 1]} ${_selectedDate.day}, ${_selectedDate.year}';
+  }
+
+  String _formatDrawTimeLabel(String drawTime) {
+    try {
+      final parts = drawTime.split(':');
+      int hour = int.parse(parts[0]);
+      final minute = int.parse(parts[1]);
+      final period = hour >= 12 ? 'PM' : 'AM';
+      hour = hour > 12 ? hour - 12 : (hour == 0 ? 12 : hour);
+      final timeLabel = minute == 0
+          ? '${hour}PM'
+          : '$hour:${minute.toString().padLeft(2, '0')}$period';
+      return '$timeLabel Transaction';
+    } catch (_) {
+      return 'Transaction';
+    }
   }
 
   String _formatDate(String dateStr) {
     try {
       final utcDate = DateTime.parse(dateStr);
-      // Convert UTC to local time
       final localDate = utcDate.toLocal();
       final now = DateTime.now();
       final today = DateTime(now.year, now.month, now.day);
@@ -37,7 +107,7 @@ class _TransactionPageState extends State<TransactionPage> {
       } else if (dateOnly == yesterday) {
         dateLabel = 'Yesterday';
       } else {
-        final months = [
+        const months = [
           'Jan',
           'Feb',
           'Mar',
@@ -54,13 +124,11 @@ class _TransactionPageState extends State<TransactionPage> {
         dateLabel = '${months[localDate.month - 1]} ${localDate.day}';
       }
 
-      // Format time in 12-hour format with AM/PM
       int hour = localDate.hour;
       final minute = localDate.minute.toString().padLeft(2, '0');
       final period = hour >= 12 ? 'PM' : 'AM';
       hour = hour > 12 ? hour - 12 : (hour == 0 ? 12 : hour);
-      final timeStr = '${hour.toString().padLeft(2, '0')}:$minute $period';
-      return '$dateLabel · $timeStr';
+      return '$dateLabel · ${hour.toString().padLeft(2, '0')}:$minute $period';
     } catch (e) {
       return dateStr;
     }
@@ -83,41 +151,68 @@ class _TransactionPageState extends State<TransactionPage> {
   Widget build(BuildContext context) {
     return Column(
       children: [
-        // Header with filter
+        // Header with date picker
         Padding(
-          padding: const EdgeInsets.all(16.0),
+          padding: const EdgeInsets.fromLTRB(16, 12, 16, 4),
           child: Row(
             children: [
-              DropdownButton<String>(
-                value: selectedFilter,
-                items: const [
-                  DropdownMenuItem(value: 'Today', child: Text('Today')),
-                  DropdownMenuItem(
-                    value: 'This Week',
-                    child: Text('This Week'),
-                  ),
-                  DropdownMenuItem(
-                    value: 'This Month',
-                    child: Text('This Month'),
-                  ),
-                  DropdownMenuItem(value: 'All Time', child: Text('All Time')),
-                ],
-                onChanged: (value) {
-                  setState(() {
-                    selectedFilter = value;
-                  });
-                },
-                underline: Container(),
-                icon: const Icon(Icons.expand_more, color: AppColors.primary),
+              const Text(
+                'Transactions',
+                style: TextStyle(
+                  fontSize: 16,
+                  fontWeight: FontWeight.w700,
+                  color: Colors.black87,
+                ),
               ),
-              const Expanded(child: SizedBox()),
+              const Spacer(),
+              GestureDetector(
+                onTap: _pickDate,
+                child: Container(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 12,
+                    vertical: 8,
+                  ),
+                  decoration: BoxDecoration(
+                    color: AppColors.primary.withOpacity(0.08),
+                    borderRadius: BorderRadius.circular(8),
+                    border: Border.all(
+                      color: AppColors.primary.withOpacity(0.25),
+                    ),
+                  ),
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      const Icon(
+                        Icons.calendar_today_outlined,
+                        size: 15,
+                        color: AppColors.primary,
+                      ),
+                      const SizedBox(width: 6),
+                      Text(
+                        _formatSelectedDate(),
+                        style: const TextStyle(
+                          fontSize: 13,
+                          fontWeight: FontWeight.w600,
+                          color: AppColors.primary,
+                        ),
+                      ),
+                      const SizedBox(width: 4),
+                      const Icon(
+                        Icons.expand_more,
+                        size: 16,
+                        color: AppColors.primary,
+                      ),
+                    ],
+                  ),
+                ),
+              ),
             ],
           ),
         ),
         // Transaction list
         Expanded(
-          child: FutureBuilder<List<Transaction>>(
-            future: _transactionsFuture,
+          child: FutureBuilder<List<TransactionGroup>>(
+            future: _groupsFuture,
             builder: (context, snapshot) {
               if (snapshot.connectionState == ConnectionState.waiting) {
                 return const Center(child: CircularProgressIndicator());
@@ -142,8 +237,10 @@ class _TransactionPageState extends State<TransactionPage> {
                       ElevatedButton(
                         onPressed: () {
                           setState(() {
-                            _transactionsFuture =
-                                TransactionService.fetchTransactions();
+                            _groupsFuture =
+                                TransactionService.fetchTransactions(
+                                  date: _selectedDate,
+                                );
                           });
                         },
                         style: ElevatedButton.styleFrom(
@@ -159,9 +256,9 @@ class _TransactionPageState extends State<TransactionPage> {
                 );
               }
 
-              final transactions = snapshot.data ?? [];
+              final groups = snapshot.data ?? [];
 
-              if (transactions.isEmpty) {
+              if (groups.isEmpty) {
                 return Center(
                   child: Text(
                     'No transactions found',
@@ -175,10 +272,9 @@ class _TransactionPageState extends State<TransactionPage> {
                   horizontal: 16,
                   vertical: 8,
                 ),
-                itemCount: transactions.length,
+                itemCount: groups.length,
                 itemBuilder: (context, index) {
-                  final transaction = transactions[index];
-                  return _buildTransactionCard(transaction);
+                  return _buildGroupCard(groups[index]);
                 },
               );
             },
@@ -188,14 +284,13 @@ class _TransactionPageState extends State<TransactionPage> {
     );
   }
 
-  Widget _buildTransactionCard(Transaction transaction) {
+  Widget _buildGroupCard(TransactionGroup group) {
     return GestureDetector(
       onTap: () {
         Navigator.push(
           context,
           MaterialPageRoute(
-            builder: (context) =>
-                TransactionDetailPage(transaction: transaction),
+            builder: (context) => TransactionDetailPage(group: group),
           ),
         );
       },
@@ -214,7 +309,7 @@ class _TransactionPageState extends State<TransactionPage> {
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   Text(
-                    transaction.description,
+                    _formatDrawTimeLabel(group.drawTime),
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
                     style: const TextStyle(
@@ -225,8 +320,15 @@ class _TransactionPageState extends State<TransactionPage> {
                   ),
                   const SizedBox(height: 4),
                   Text(
-                    _formatDate(transaction.createdAt),
+                    group.createdAt.isNotEmpty
+                        ? _formatDate(group.createdAt)
+                        : _formatSelectedDate(),
                     style: TextStyle(fontSize: 12, color: Colors.grey[600]),
+                  ),
+                  const SizedBox(height: 2),
+                  Text(
+                    '${group.count} transaction${group.count == 1 ? '' : 's'}',
+                    style: TextStyle(fontSize: 11, color: Colors.grey[500]),
                   ),
                 ],
               ),
@@ -234,9 +336,8 @@ class _TransactionPageState extends State<TransactionPage> {
             Column(
               crossAxisAlignment: CrossAxisAlignment.end,
               children: [
-                // Amount
                 Text(
-                  '₱${transaction.amount.toStringAsFixed(2)}',
+                  '₱${group.totalAmount.toStringAsFixed(2)}',
                   style: const TextStyle(
                     fontSize: 14,
                     fontWeight: FontWeight.w600,
@@ -244,7 +345,6 @@ class _TransactionPageState extends State<TransactionPage> {
                   ),
                 ),
                 const SizedBox(height: 6),
-                // Status badge
                 Container(
                   padding: const EdgeInsets.symmetric(
                     horizontal: 8,
@@ -252,16 +352,16 @@ class _TransactionPageState extends State<TransactionPage> {
                   ),
                   decoration: BoxDecoration(
                     color: _getStatusColor(
-                      transaction.status,
+                      group.overallStatus,
                     ).withOpacity(0.15),
                     borderRadius: BorderRadius.circular(4),
                   ),
                   child: Text(
-                    transaction.status.toUpperCase(),
+                    group.overallStatus.toUpperCase(),
                     style: TextStyle(
                       fontSize: 10,
                       fontWeight: FontWeight.w600,
-                      color: _getStatusColor(transaction.status),
+                      color: _getStatusColor(group.overallStatus),
                     ),
                   ),
                 ),
