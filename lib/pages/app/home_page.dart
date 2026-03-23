@@ -3,6 +3,7 @@ import 'package:get/get.dart';
 import 'package:onstite/core/design_system.dart';
 import '../../../core/main_layout.dart';
 import '../../../controllers/lottery_controller.dart';
+import '../../../core/services/printer_service.dart';
 import 'bet_entry_page.dart';
 import 'transaction_page.dart';
 import 'dashboard_page.dart';
@@ -18,6 +19,154 @@ class HomePage extends StatefulWidget {
 
 class _HomePageState extends State<HomePage> {
   int _currentIndex = 1; // Default to Bet tab
+
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addPostFrameCallback((_) => _checkPrinter());
+  }
+
+  Future<void> _checkPrinter() async {
+    final mac = PrinterService.savedMac;
+
+    if (mac == null) {
+      // No printer configured — prompt setup
+      _showNoPrinterDialog();
+      return;
+    }
+
+    // MAC is saved — verify the printer is reachable, then disconnect so
+    // printTicket() can establish a fresh session when needed.
+    final connected = await PrinterService.connect(mac);
+    if (connected) {
+      await PrinterService.disconnect();
+    } else {
+      Get.snackbar(
+        'Printer Unreachable',
+        'Could not connect to "${PrinterService.savedName ?? mac}". Make sure the printer is on and in range.',
+        icon: const Icon(Icons.bluetooth_disabled, color: Colors.white),
+        backgroundColor: const Color(0xFFE53E3E),
+        colorText: Colors.white,
+        snackPosition: SnackPosition.BOTTOM,
+        duration: const Duration(seconds: 5),
+        borderRadius: 12,
+        margin: const EdgeInsets.all(16),
+        mainButton: TextButton(
+          onPressed: () {
+            Get.closeCurrentSnackbar();
+            Get.toNamed('/printer-settings');
+          },
+          child: const Text(
+            'Settings',
+            style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold),
+          ),
+        ),
+      );
+    }
+  }
+
+  void _showNoPrinterDialog() {
+    Get.dialog(
+      Dialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+        backgroundColor: Colors.white,
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(24, 32, 24, 24),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Container(
+                width: 72,
+                height: 72,
+                decoration: const BoxDecoration(
+                  color: Color(0xFFFFF3E0),
+                  shape: BoxShape.circle,
+                ),
+                child: const Icon(
+                  Icons.print_outlined,
+                  color: Color(0xFFF59E0B),
+                  size: 36,
+                ),
+              ),
+              const SizedBox(height: 20),
+              const Text(
+                'Printer Required',
+                style: TextStyle(
+                  fontSize: 20,
+                  fontWeight: FontWeight.bold,
+                  color: Colors.black87,
+                ),
+              ),
+              const SizedBox(height: 12),
+              const Text(
+                'No printer is configured. Please connect to a Bluetooth printer before placing bets.',
+                textAlign: TextAlign.center,
+                style: TextStyle(
+                  fontSize: 14,
+                  color: Colors.black54,
+                  height: 1.4,
+                ),
+              ),
+              const SizedBox(height: 24),
+              Row(
+                children: [
+                  Expanded(
+                    child: OutlinedButton(
+                      onPressed: () => Get.back(),
+                      style: OutlinedButton.styleFrom(
+                        padding: const EdgeInsets.symmetric(vertical: 14),
+                        side: const BorderSide(
+                          color: Color(0xFF3D5A99),
+                          width: 1.5,
+                        ),
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(12),
+                        ),
+                      ),
+                      child: const Text(
+                        'Later',
+                        style: TextStyle(
+                          fontSize: 15,
+                          fontWeight: FontWeight.w600,
+                          color: Color(0xFF3D5A99),
+                        ),
+                      ),
+                    ),
+                  ),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: ElevatedButton(
+                      onPressed: () {
+                        Get.back();
+                        Get.toNamed('/printer-settings');
+                      },
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: const Color(0xFF3D5A99),
+                        padding: const EdgeInsets.symmetric(vertical: 14),
+                        elevation: 0,
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(12),
+                        ),
+                      ),
+                      child: const Text(
+                        'Set Up',
+                        style: TextStyle(
+                          fontSize: 15,
+                          fontWeight: FontWeight.bold,
+                          color: Colors.white,
+                        ),
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ],
+          ),
+        ),
+      ),
+      barrierDismissible: false,
+    );
+  }
 
   @override
   Widget build(BuildContext context) {

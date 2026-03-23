@@ -3,11 +3,10 @@ import 'package:get/get.dart';
 import 'package:http/http.dart' as http;
 import 'dart:convert';
 import 'auth_controller.dart';
-import '../models/bet.dart';
 import '../models/game.dart';
 import '../core/services/game_service.dart';
+import '../core/services/printer_service.dart';
 import '../core/services/profile_service.dart';
-import '../widgets/receipt_modal.dart';
 
 class BetEntry {
   final int betNumber;
@@ -298,14 +297,6 @@ class LotteryController extends GetxController {
       // Parse response
       final responseBody = jsonDecode(response.body);
       final responseData = responseBody['data'] as Map<String, dynamic>? ?? {};
-      final submittedBets =
-          (responseData['bets'] as List?)
-              ?.map((bet) => Bet.fromJson(bet as Map<String, dynamic>))
-              .toList() ??
-          [];
-      final transaction =
-          responseData['transaction'] as Map<String, dynamic>? ?? {};
-      final ledgers = (responseData['ledgers'] as List?) ?? [];
       final teller = responseData['teller'] as Map<String, dynamic>? ?? {};
 
       // All bets submitted successfully
@@ -314,14 +305,30 @@ class LotteryController extends GetxController {
         (prev, bet) => prev + bet.totalBetAmount,
       );
 
-      // Show receipt as modal
-      _showReceiptModal(
-        submittedBets: submittedBets,
+      // Trigger Bluetooth POS print (fire-and-forget)
+      // Use the batch ticket number we generated and sent — don't rely on
+      // the API response which may return a ticket ID instead.
+      final ticketNo = responseData['batch_id'] as String? ?? batchTicketNo;
+
+      // Capture game/draw-time context before state might be cleared
+      final gameName = currentGame?.name ?? '';
+      final selectedDt = currentDrawTimes.cast<DrawTime?>().firstWhere(
+        (d) => d?.id == selectedTime.value,
+        orElse: () => null,
+      );
+      final drawTimeLabel = selectedDt?.getFormattedTime() ?? '';
+
+      // Snapshot betList BEFORE clearing — it has the digits the user
+      // entered, which may not come back in the API response.
+      final printEntries = List<BetEntry>.from(betList);
+
+      _triggerPrint(
+        betEntries: printEntries,
         totalAmount: totalAmount,
-        transaction: transaction,
-        ledgers: ledgers,
-        batchId: responseData['batch_id'] as String? ?? '',
+        ticketNo: ticketNo,
         teller: teller,
+        gameName: gameName,
+        drawTimeLabel: drawTimeLabel,
       );
 
       // Refresh user profile to update balance after bet submission
@@ -344,29 +351,190 @@ class LotteryController extends GetxController {
     }
   }
 
-  void _showReceiptModal({
-    required List<Bet> submittedBets,
+  /// Shows a brief "Printing Ticket…" snackbar and sends the ticket to
+  /// the configured Bluetooth thermal printer in the background.
+  void _triggerPrint({
+    required List<BetEntry> betEntries,
     required double totalAmount,
-    required Map<String, dynamic> transaction,
-    required List<dynamic> ledgers,
-    required String batchId,
+    required String ticketNo,
     required Map<String, dynamic> teller,
+    required String gameName,
+    required String drawTimeLabel,
   }) {
-    Get.bottomSheet(
-      ReceiptModal(
-        submittedBets: submittedBets,
-        totalAmount: totalAmount,
-        transaction: transaction,
-        ledgers: ledgers,
-        batchId: batchId,
-        teller: teller,
+    // Show user-facing "Printing Ticket…" feedback immediately
+    Get.snackbar(
+      '',
+      '',
+      titleText: const Row(
+        children: [
+          Icon(Icons.print, color: Colors.white, size: 18),
+          SizedBox(width: 8),
+          Text(
+            'Printing Ticket…',
+            style: TextStyle(
+              color: Colors.white,
+              fontWeight: FontWeight.bold,
+              fontSize: 15,
+            ),
+          ),
+        ],
       ),
-      isScrollControlled: true,
+      messageText: const SizedBox.shrink(),
+      backgroundColor: const Color(0xFF3D5A99),
+      duration: const Duration(seconds: 2),
+      snackPosition: SnackPosition.BOTTOM,
+      borderRadius: 12,
+      margin: const EdgeInsets.all(16),
+    );
+
+    // Print in background — do not await so UI stays responsive.
+    // All error conditions (no printer, disconnected, out of paper) are
+    // surfaced via the typed PrintResult.
+    PrinterService.printTicket(
+      betEntries: betEntries,
+      totalAmount: totalAmount,
+      ticketNo: ticketNo,
+      teller: teller,
+      gameName: gameName,
+      drawTimeLabel: drawTimeLabel,
+    ).then((result) {
+      if (result.success) return;
+
+      switch (result.error) {
+        case PrintError.noPrinterConfigured:
+          Get.dialog(
+            _printerAlertDialog(
+              icon: Icons.bluetooth_disabled,
+              title: 'No Printer Connected',
+              message: 'Please connect to a printer before submitting bets.',
+              actionLabel: 'Set Up Printer',
+              onAction: () {
+                Get.back();
+                Get.toNamed('/printer-settings');
+              },
+            ),
+          );
+          break;
+        case PrintError.notConnected:
+          Get.dialog(
+            _printerAlertDialog(
+              icon: Icons.bluetooth_disabled,
+              title: 'Printer Not Connected',
+              message:
+                  'Please connect to a printer. Make sure Bluetooth is on and the printer is paired.',
+              actionLabel: 'Go to Settings',
+              onAction: () {
+                Get.back();
+                Get.toNamed('/printer-settings');
+              },
+            ),
+          );
+          break;
+        case PrintError.outOfPaper:
+          Get.dialog(
+            _printerAlertDialog(
+              icon: Icons.feed_outlined,
+              title: 'Printer Out of Paper',
+              message:
+                  'The printer has no paper. Please load paper and print again.',
+              actionLabel: 'OK',
+              onAction: Get.back,
+            ),
+          );
+          break;
+        case PrintError.nearEndOfPaper:
+          // Ticket printed but paper is running low — show warning snackbar
+          Get.snackbar(
+            'Low Paper',
+            'Ticket printed, but printer paper is running low. Please refill soon.',
+            snackPosition: SnackPosition.BOTTOM,
+            backgroundColor: Colors.orange[700],
+            colorText: Colors.white,
+            duration: const Duration(seconds: 5),
+            icon: const Icon(Icons.warning_amber_rounded, color: Colors.white),
+          );
+          break;
+        default:
+          Get.snackbar(
+            'Print Failed',
+            'Could not print the ticket. Please check the printer and try again.',
+            snackPosition: SnackPosition.BOTTOM,
+            backgroundColor: Colors.red[700],
+            colorText: Colors.white,
+          );
+      }
+    });
+  }
+
+  /// Builds a reusable alert dialog for printer-related errors.
+  Widget _printerAlertDialog({
+    required IconData icon,
+    required String title,
+    required String message,
+    required String actionLabel,
+    required VoidCallback onAction,
+  }) {
+    return Dialog(
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
       backgroundColor: Colors.white,
-      shape: const RoundedRectangleBorder(
-        borderRadius: BorderRadius.only(
-          topLeft: Radius.circular(20),
-          topRight: Radius.circular(20),
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(24, 32, 24, 24),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Container(
+              width: 72,
+              height: 72,
+              decoration: const BoxDecoration(
+                color: Color(0xFFFFF3E0),
+                shape: BoxShape.circle,
+              ),
+              child: Icon(icon, color: const Color(0xFFF59E0B), size: 36),
+            ),
+            const SizedBox(height: 20),
+            Text(
+              title,
+              textAlign: TextAlign.center,
+              style: const TextStyle(
+                fontSize: 18,
+                fontWeight: FontWeight.bold,
+                color: Colors.black87,
+              ),
+            ),
+            const SizedBox(height: 12),
+            Text(
+              message,
+              textAlign: TextAlign.center,
+              style: const TextStyle(
+                fontSize: 14,
+                color: Colors.black54,
+                height: 1.4,
+              ),
+            ),
+            const SizedBox(height: 24),
+            SizedBox(
+              width: double.infinity,
+              child: ElevatedButton(
+                onPressed: onAction,
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: const Color(0xFF3D5A99),
+                  padding: const EdgeInsets.symmetric(vertical: 14),
+                  elevation: 0,
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                ),
+                child: Text(
+                  actionLabel,
+                  style: const TextStyle(
+                    fontSize: 15,
+                    fontWeight: FontWeight.bold,
+                    color: Colors.white,
+                  ),
+                ),
+              ),
+            ),
+          ],
         ),
       ),
     );

@@ -47,5 +47,9 @@
 	<true/>
 	<key>NSCameraUsageDescription</key>
 	<string>Camera access is required to scan QR codes for lottery tickets</string>
+	<key>NSBluetoothAlwaysUsageDescription</key>
+	<string>Bluetooth access is required to connect to the receipt printer</string>
+	<key>NSBluetoothPeripheralUsageDescription</key>
+	<string>Bluetooth access is required to connect to the receipt printer</string>
 </dict>
 </plist>
