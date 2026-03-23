@@ -548,7 +548,7 @@ class _TicketPageState extends State<TicketPage> {
                             ),
                           ),
                         ),
-                        if ((ticket.status ?? '').toLowerCase() != 'voided')
+                        if ((ticket.status ?? '').toLowerCase() == 'pending')
                           ElevatedButton(
                             style: ElevatedButton.styleFrom(
                               backgroundColor: AppColors.backgroundDark,
