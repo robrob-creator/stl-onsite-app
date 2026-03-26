@@ -9,6 +9,7 @@ import 'transaction_page.dart';
 import 'dashboard_page.dart';
 import 'ticket_page.dart';
 import 'claim_page.dart';
+import 'live_page.dart';
 
 class HomePage extends StatefulWidget {
   const HomePage({super.key});
@@ -183,7 +184,11 @@ class _HomePageState extends State<HomePage> {
   Widget build(BuildContext context) {
     return MainLayout(
       onMenuPressed: () {},
-      title: _currentIndex == 0 ? 'Dashboard' : null,
+      title: _currentIndex == 0
+          ? 'Dashboard'
+          : _currentIndex == 5
+          ? 'Live Draw'
+          : null,
       appBarTrailing: GetBuilder<LotteryController>(
         builder: (ctrl) => Container(
           padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
@@ -267,6 +272,14 @@ class _HomePageState extends State<HomePage> {
 
           label: 'Claim',
         ),
+        BottomNavigationBarItem(
+          icon: Icon(
+            Icons.live_tv_rounded,
+            size: 24,
+            color: _currentIndex == 5 ? AppColors.primary : Colors.grey,
+          ),
+          label: 'Live',
+        ),
       ],
       currentIndex: _currentIndex,
     );
@@ -284,6 +297,8 @@ class _HomePageState extends State<HomePage> {
         return const TicketPage();
       case 4:
         return const ClaimPage();
+      case 5:
+        return const LivePage();
       default:
         return const BetEntryPage();
     }

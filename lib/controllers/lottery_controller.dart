@@ -180,13 +180,15 @@ class LotteryController extends GetxController {
     }
 
     if (rambleAmount > 0) {
+      final combinations = game.numberOfCombinations;
       betList.add(
         BetEntry(
           betNumber: betCounter.value,
           game: game.name,
           straightBetAmount: 0,
           rambleBetAmount: rambleAmount,
-          winAmount: rambleAmount * (game.rambleMultiplier ?? 0),
+          winAmount:
+              (rambleAmount / combinations) * (game.rambleMultiplier ?? 0),
           digits: List<String>.from(selectedNumbers),
         ),
       );

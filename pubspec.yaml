@@ -51,6 +51,7 @@ dependencies:
   print_bluetooth_thermal: ^1.0.16
   esc_pos_utils_plus: ^2.0.4
   image: ^4.3.0
+  webview_flutter: ^4.10.0
 
 dev_dependencies:
   flutter_test:

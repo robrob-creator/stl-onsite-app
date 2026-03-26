@@ -4,6 +4,27 @@ import 'package:get/get.dart';
 import '../../controllers/lottery_controller.dart';
 import '../../widgets/lotto_number_input.dart';
 
+/// Restricts typed numeric input to [min, max].
+/// Clears the field if the value exceeds max; does NOT clamp to min on typing
+/// (min is enforced on submit instead, for a friendlier typing experience).
+class _RangeFormatter extends TextInputFormatter {
+  final int min;
+  final int max;
+  const _RangeFormatter({required this.min, required this.max});
+
+  @override
+  TextEditingValue formatEditUpdate(
+    TextEditingValue oldValue,
+    TextEditingValue newValue,
+  ) {
+    if (newValue.text.isEmpty) return newValue;
+    final n = int.tryParse(newValue.text);
+    if (n == null) return oldValue;
+    if (n > max) return oldValue; // block over-limit
+    return newValue;
+  }
+}
+
 class BetEntryPage extends StatefulWidget {
   const BetEntryPage({super.key});
 
@@ -19,6 +40,8 @@ class _BetEntryPageState extends State<BetEntryPage> {
   late FocusNode _rambolAmountFocusNode;
   // 'target' | 'rambol' | '' (neither focused)
   String _activeBetField = 'target';
+  String? _targetError;
+  String? _rambolError;
 
   @override
   void initState() {
@@ -555,12 +578,28 @@ class _BetEntryPageState extends State<BetEntryPage> {
                                     onChanged: (value) {
                                       ctrl.targetAmount.value =
                                           int.tryParse(value) ?? 0;
+                                      final n = int.tryParse(value) ?? 0;
+                                      setState(() {
+                                        _targetError =
+                                            (n > 0 && n < game.minStraightBet)
+                                            ? 'Min: ₱${game.minStraightBet}  •  Max: ₱${game.maxStraightBet}'
+                                            : null;
+                                      });
                                     },
+                                    inputFormatters: [
+                                      FilteringTextInputFormatter.digitsOnly,
+                                      _RangeFormatter(
+                                        min: game.minStraightBet,
+                                        max: game.maxStraightBet,
+                                      ),
+                                    ],
                                     decoration: InputDecoration(
                                       hintText: 'Target Amount',
                                       hintStyle: TextStyle(
                                         color: Colors.grey[400],
                                       ),
+                                      errorText: _targetError,
+                                      errorStyle: const TextStyle(fontSize: 11),
                                       contentPadding:
                                           const EdgeInsets.symmetric(
                                             horizontal: 16,
@@ -609,12 +648,29 @@ class _BetEntryPageState extends State<BetEntryPage> {
                                     onChanged: (value) {
                                       ctrl.rambolAmount.value =
                                           int.tryParse(value) ?? 0;
+                                      final n = int.tryParse(value) ?? 0;
+                                      final minR = game.minRambleBet ?? 0;
+                                      final maxR = game.maxRambleBet ?? 99999;
+                                      setState(() {
+                                        _rambolError = (n > 0 && n < minR)
+                                            ? 'Min: ₱$minR  •  Max: ₱$maxR'
+                                            : null;
+                                      });
                                     },
+                                    inputFormatters: [
+                                      FilteringTextInputFormatter.digitsOnly,
+                                      _RangeFormatter(
+                                        min: game.minRambleBet ?? 0,
+                                        max: game.maxRambleBet ?? 99999,
+                                      ),
+                                    ],
                                     decoration: InputDecoration(
                                       hintText: 'Rambol Amount',
                                       hintStyle: TextStyle(
                                         color: Colors.grey[400],
                                       ),
+                                      errorText: _rambolError,
+                                      errorStyle: const TextStyle(fontSize: 11),
                                       contentPadding:
                                           const EdgeInsets.symmetric(
                                             horizontal: 16,
@@ -710,6 +766,34 @@ class _BetEntryPageState extends State<BetEntryPage> {
                                   );
                                   return;
                                 }
+                                // Validate ranges for whichever fields are filled
+                                if (targetAmount > 0) {
+                                  if (targetAmount < game.minStraightBet) {
+                                    Get.snackbar(
+                                      'Invalid Amount',
+                                      'Target bet must be at least ₱${game.minStraightBet}',
+                                    );
+                                    return;
+                                  }
+                                }
+                                if (rambolAmount > 0) {
+                                  final minR = game.minRambleBet ?? 0;
+                                  final maxR = game.maxRambleBet ?? 99999;
+                                  if (rambolAmount < minR) {
+                                    Get.snackbar(
+                                      'Invalid Amount',
+                                      'Rambol bet must be at least ₱$minR',
+                                    );
+                                    return;
+                                  }
+                                  if (rambolAmount > maxR) {
+                                    Get.snackbar(
+                                      'Invalid Amount',
+                                      'Rambol bet must not exceed ₱$maxR',
+                                    );
+                                    return;
+                                  }
+                                }
                               } else if (game.enableStraight) {
                                 // Only Target enabled
                                 if (targetAmount == 0) {
@@ -719,12 +803,35 @@ class _BetEntryPageState extends State<BetEntryPage> {
                                   );
                                   return;
                                 }
+                                if (targetAmount < game.minStraightBet) {
+                                  Get.snackbar(
+                                    'Invalid Amount',
+                                    'Target bet must be at least ₱${game.minStraightBet}',
+                                  );
+                                  return;
+                                }
                               } else if (game.enableRamble) {
                                 // Only Rambol enabled
                                 if (rambolAmount == 0) {
                                   Get.snackbar(
                                     'Error',
                                     'Please enter a Rambol/Box bet amount',
+                                  );
+                                  return;
+                                }
+                                final minR = game.minRambleBet ?? 0;
+                                final maxR = game.maxRambleBet ?? 99999;
+                                if (rambolAmount < minR) {
+                                  Get.snackbar(
+                                    'Invalid Amount',
+                                    'Rambol bet must be at least ₱$minR',
+                                  );
+                                  return;
+                                }
+                                if (rambolAmount > maxR) {
+                                  Get.snackbar(
+                                    'Invalid Amount',
+                                    'Rambol bet must not exceed ₱$maxR',
                                   );
                                   return;
                                 }
@@ -1038,7 +1145,7 @@ class _BetEntryPageState extends State<BetEntryPage> {
                                   Expanded(
                                     flex: 1,
                                     child: Text(
-                                      bet.betNumber.toString(),
+                                      bet.digits.join("-").toString(),
                                       style: const TextStyle(fontSize: 12),
                                     ),
                                   ),
