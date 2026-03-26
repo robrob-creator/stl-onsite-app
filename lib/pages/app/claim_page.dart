@@ -6,6 +6,7 @@ import 'dart:convert';
 import 'dart:async';
 import 'package:qr_code_scanner_plus/qr_code_scanner_plus.dart';
 import 'package:permission_handler/permission_handler.dart';
+import '../../core/app_constants.dart';
 import 'package:onstite/core/design_system.dart';
 import '../../controllers/lottery_controller.dart';
 import '../../controllers/auth_controller.dart';
@@ -389,7 +390,7 @@ class _ClaimPageState extends State<ClaimPage> {
 
     try {
       final token = authController.token.value;
-      final baseUrl = 'https://stl-backend-mws9.onrender.com/api/claims';
+      final baseUrl = '${AppConstants.apiBaseUrl}/claims';
 
       // Build query parameters
       final queryParams = <String, String>{};

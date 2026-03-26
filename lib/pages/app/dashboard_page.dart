@@ -63,184 +63,215 @@ class _DashboardPageState extends State<DashboardPage> {
   @override
   Widget build(BuildContext context) {
     return SingleChildScrollView(
-      child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 16.0),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            const SizedBox(height: 16),
-            // Lottery type tabs
-            Container(
-              padding: const EdgeInsets.all(2),
-              decoration: BoxDecoration(
-                color: Colors.grey[100],
-                borderRadius: BorderRadius.circular(12),
-              ),
-              child: Row(
-                children: [
-                  Expanded(
-                    child: GestureDetector(
-                      onTap: () {
-                        setState(() {
-                          selectedTab = 0;
-                        });
-                        _fetchDrawResults();
-                      },
-                      child: Container(
-                        padding: const EdgeInsets.symmetric(
-                          horizontal: 16,
-                          vertical: 12,
-                        ),
-                        decoration: BoxDecoration(
-                          color: selectedTab == 0
-                              ? Colors.white
-                              : Colors.grey[50],
-                          borderRadius: BorderRadius.circular(12),
-                        ),
-                        child: Row(
-                          mainAxisAlignment: MainAxisAlignment.center,
-                          children: [
-                            Container(
-                              width: 32,
-                              height: 32,
-                              decoration: BoxDecoration(
-                                borderRadius: BorderRadius.circular(6),
-                                image: const DecorationImage(
-                                  image: AssetImage(
-                                    'assets/images/logos/lotto2d.png',
-                                  ),
-                                  fit: BoxFit.cover,
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          // Lottery type tabs
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+            decoration: BoxDecoration(color: Colors.grey[100]),
+            child: Row(
+              children: [
+                Expanded(
+                  child: GestureDetector(
+                    onTap: () {
+                      setState(() {
+                        selectedTab = 0;
+                      });
+                      _fetchDrawResults();
+                    },
+                    child: Container(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 16,
+                        vertical: 12,
+                      ),
+                      decoration: BoxDecoration(
+                        color: selectedTab == 0
+                            ? Colors.white
+                            : Colors.grey[50],
+                        borderRadius: BorderRadius.circular(12),
+                      ),
+                      child: Row(
+                        mainAxisAlignment: MainAxisAlignment.center,
+                        children: [
+                          Container(
+                            width: 32,
+                            height: 32,
+                            decoration: BoxDecoration(
+                              borderRadius: BorderRadius.circular(6),
+                              image: const DecorationImage(
+                                image: AssetImage(
+                                  'assets/images/logos/lotto2d.png',
                                 ),
+                                fit: BoxFit.cover,
                               ),
                             ),
-                            const SizedBox(width: 12),
-                            const Text(
-                              '2D Lotto',
-                              style: TextStyle(
-                                fontWeight: FontWeight.w600,
-                                fontSize: 14,
-                              ),
+                          ),
+                          const SizedBox(width: 12),
+                          const Text(
+                            '2D Lotto',
+                            style: TextStyle(
+                              fontWeight: FontWeight.w600,
+                              fontSize: 14,
                             ),
-                          ],
-                        ),
+                          ),
+                        ],
                       ),
                     ),
                   ),
-                  const SizedBox(width: 12),
-                  Expanded(
-                    child: GestureDetector(
-                      onTap: () {
-                        setState(() {
-                          selectedTab = 1;
-                        });
-                        _fetchDrawResults();
-                      },
-                      child: Container(
-                        padding: const EdgeInsets.symmetric(
-                          horizontal: 16,
-                          vertical: 12,
-                        ),
-                        decoration: BoxDecoration(
-                          color: selectedTab == 1
-                              ? Colors.white
-                              : Colors.grey[50],
-                          borderRadius: BorderRadius.circular(12),
-                        ),
-                        child: Row(
-                          mainAxisAlignment: MainAxisAlignment.center,
-                          children: [
-                            Container(
-                              width: 32,
-                              height: 32,
-                              decoration: BoxDecoration(
-                                borderRadius: BorderRadius.circular(6),
-                                image: const DecorationImage(
-                                  image: AssetImage(
-                                    'assets/images/logos/lotto3d.png',
-                                  ),
-                                  fit: BoxFit.cover,
+                ),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: GestureDetector(
+                    onTap: () {
+                      setState(() {
+                        selectedTab = 1;
+                      });
+                      _fetchDrawResults();
+                    },
+                    child: Container(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 16,
+                        vertical: 12,
+                      ),
+                      decoration: BoxDecoration(
+                        color: selectedTab == 1
+                            ? Colors.white
+                            : Colors.grey[50],
+                        borderRadius: BorderRadius.circular(12),
+                      ),
+                      child: Row(
+                        mainAxisAlignment: MainAxisAlignment.center,
+                        children: [
+                          Container(
+                            width: 32,
+                            height: 32,
+                            decoration: BoxDecoration(
+                              borderRadius: BorderRadius.circular(6),
+                              image: const DecorationImage(
+                                image: AssetImage(
+                                  'assets/images/logos/lotto3d.png',
                                 ),
+                                fit: BoxFit.cover,
                               ),
                             ),
-                            const SizedBox(width: 12),
-                            Text(
-                              '3D Lotto',
-                              style: TextStyle(
-                                fontWeight: FontWeight.w600,
-                                fontSize: 14,
-                                color: selectedTab == 1
-                                    ? Colors.black87
-                                    : Colors.grey[400],
-                              ),
+                          ),
+                          const SizedBox(width: 12),
+                          Text(
+                            '3D Lotto',
+                            style: TextStyle(
+                              fontWeight: FontWeight.w600,
+                              fontSize: 14,
+                              color: selectedTab == 1
+                                  ? Colors.black87
+                                  : Colors.grey[400],
                             ),
-                          ],
-                        ),
+                          ),
+                        ],
                       ),
                     ),
                   ),
-                ],
-              ),
+                ),
+              ],
             ),
-            const SizedBox(height: 20),
-            // Date picker
-            GestureDetector(
-              onTap: () => _selectDate(context),
-              child: Container(
-                padding: const EdgeInsets.symmetric(
-                  horizontal: 12,
-                  vertical: 8,
-                ),
-                decoration: BoxDecoration(
-                  border: Border.all(color: Colors.grey[300]!),
-                  borderRadius: BorderRadius.circular(8),
-                ),
-                child: Row(
-                  mainAxisSize: MainAxisSize.min,
+          ),
+
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 16),
+            child: Column(
+              children: [
+                const SizedBox(height: 20),
+                // Date picker
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.end,
                   children: [
-                    const Icon(
-                      Icons.calendar_today,
-                      size: 18,
-                      color: Colors.grey,
-                    ),
-                    const SizedBox(width: 8),
-                    Text(
-                      _formatDate(selectedDate),
-                      style: const TextStyle(
-                        fontSize: 14,
-                        color: Colors.black87,
+                    GestureDetector(
+                      onTap: () => _selectDate(context),
+                      child: Container(
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 12,
+                          vertical: 8,
+                        ),
+                        decoration: BoxDecoration(
+                          border: Border.all(color: Colors.grey[300]!),
+                          borderRadius: BorderRadius.circular(8),
+                        ),
+                        child: Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            const Icon(
+                              Icons.calendar_today,
+                              size: 18,
+                              color: Colors.grey,
+                            ),
+                            const SizedBox(width: 8),
+                            Text(
+                              _formatDate(selectedDate),
+                              style: const TextStyle(
+                                fontSize: 14,
+                                color: Colors.black87,
+                              ),
+                            ),
+                          ],
+                        ),
                       ),
                     ),
                   ],
                 ),
-              ),
+                const SizedBox(height: 14),
+                // Recent draws or loading state
+                if (isLoadingResults)
+                  const Center(child: CircularProgressIndicator())
+                else if (drawResults != null &&
+                    drawResults!.drawTimes.isNotEmpty)
+                  ..._buildDrawCards()
+                else
+                  Center(
+                    child: Text(
+                      'No results available',
+                      style: TextStyle(color: Colors.grey[400]),
+                    ),
+                  ),
+                const SizedBox(height: 24),
+              ],
             ),
-            const SizedBox(height: 24),
-            // Recent draws or loading state
-            if (isLoadingResults)
-              const Center(child: CircularProgressIndicator())
-            else if (drawResults != null && drawResults!.drawTimes.isNotEmpty)
-              ...drawResults!.drawTimes.map((drawTime) {
-                final formattedTime = _formatDrawTime(drawTime.drawTime ?? '');
-                final resultText = _parseResultString(
-                  drawTime.latestResult?.result,
-                );
-                return _buildDrawCard(time: formattedTime, result: resultText);
-              }).toList()
-            else
-              Center(
-                child: Text(
-                  'No results available',
-                  style: TextStyle(color: Colors.grey[400]),
-                ),
-              ),
-            const SizedBox(height: 24),
-          ],
-        ),
+          ),
+        ],
       ),
     );
   }
 
-  Widget _buildDrawCard({required String time, required String result}) {
+  List<Widget> _buildDrawCards() {
+    if (drawResults == null || drawResults!.drawTimes.isEmpty) return [];
+    final allAmounts = drawResults!.drawTimes
+        .map((dt) => dt.latestResult?.winAmount ?? 0)
+        .toList();
+    return drawResults!.drawTimes.asMap().entries.map((entry) {
+      final i = entry.key;
+      final drawTime = entry.value;
+      final formattedTime = _formatDrawTime(drawTime.drawTime ?? '');
+      final resultText = _parseResultString(drawTime.latestResult?.result);
+      return _buildDrawCard(
+        time: formattedTime,
+        result: resultText,
+        winningAmnt: drawTime.latestResult?.winAmount?.toString(),
+        chartData: allAmounts,
+        highlightIndex: i,
+        totalBet: drawTime.betSummary?.totalBet ?? 0,
+        totalWon: drawTime.betSummary?.totalWon ?? 0,
+      );
+    }).toList();
+  }
+
+  Widget _buildDrawCard({
+    required String time,
+    required String result,
+    required String? winningAmnt,
+    required List<int> chartData,
+    required int highlightIndex,
+    required int totalBet,
+    required int totalWon,
+  }) {
     return Container(
       margin: const EdgeInsets.only(bottom: 12),
       padding: const EdgeInsets.all(16),
@@ -280,32 +311,36 @@ class _DashboardPageState extends State<DashboardPage> {
             ],
           ),
           const SizedBox(height: 12),
-          // Result number
-          Text(
-            result,
-            style: const TextStyle(
-              fontSize: 36,
-              fontWeight: FontWeight.bold,
-              color: Colors.black,
-              letterSpacing: 2,
-            ),
+          // Result number + mini bar chart
+          Row(
+            crossAxisAlignment: CrossAxisAlignment.center,
+            children: [
+              Text(
+                result,
+                style: TextStyle(
+                  fontSize: 36,
+                  fontWeight: FontWeight.bold,
+                  color: result == "----" ? Colors.grey : Colors.black,
+                  letterSpacing: 2,
+                ),
+              ),
+              const Spacer(),
+              _MiniLineChart(
+                values: chartData,
+                highlightIndex: highlightIndex,
+                isGreen: totalBet > totalWon,
+                isFlat: totalBet == totalWon,
+              ),
+            ],
           ),
           const SizedBox(height: 12),
           // Status badge
-          Container(
-            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-            decoration: BoxDecoration(
-              color: Colors.green[50],
-              borderRadius: BorderRadius.circular(6),
-              border: Border.all(color: Colors.green[300]!),
-            ),
-            child: Text(
-              'Result Posted',
-              style: TextStyle(
-                fontSize: 12,
-                color: Colors.green[700],
-                fontWeight: FontWeight.w500,
-              ),
+          Text(
+            _formatAmount(winningAmnt),
+            style: TextStyle(
+              fontSize: 12,
+              color: Colors.grey[700],
+              fontWeight: FontWeight.w500,
             ),
           ),
         ],
@@ -313,8 +348,23 @@ class _DashboardPageState extends State<DashboardPage> {
     );
   }
 
+  String _formatAmount(String? amount) {
+    if (amount == null) return '--';
+    final value = double.tryParse(amount);
+    if (value == null) return '--';
+    final intVal = value.toInt();
+    final str = intVal.toString();
+    final buffer = StringBuffer();
+    for (int i = 0; i < str.length; i++) {
+      if (i > 0 && (str.length - i) % 3 == 0) buffer.write(',');
+      buffer.write(str[i]);
+    }
+    return '₱ ${buffer.toString()}';
+  }
+
   String _formatDate(DateTime date) {
-    final months = [
+    const weekdays = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
+    const months = [
       'Jan',
       'Feb',
       'Mar',
@@ -328,7 +378,10 @@ class _DashboardPageState extends State<DashboardPage> {
       'Nov',
       'Dec',
     ];
-    return '${months[date.month - 1]}, ${date.day.toString().padLeft(2, '0')} ${date.year}';
+    final weekday = weekdays[date.weekday - 1];
+    final month = months[date.month - 1];
+    final day = date.day.toString().padLeft(2, '0');
+    return '$weekday, $month.$day, ${date.year}';
   }
 
   String _formatDrawTime(String isoTime) {
@@ -348,7 +401,7 @@ class _DashboardPageState extends State<DashboardPage> {
   }
 
   String _parseResultString(String? result) {
-    if (result == null || result.isEmpty) return 'No Result';
+    if (result == null || result.isEmpty) return '----';
     try {
       // Extract all numbers from the result string and join with dash
       final regex = RegExp(r'\d+');
@@ -356,7 +409,7 @@ class _DashboardPageState extends State<DashboardPage> {
           .allMatches(result)
           .map((match) => match.group(0))
           .join('-');
-      return numbers.isNotEmpty ? numbers : 'No Result';
+      return numbers.isNotEmpty ? numbers : '----';
     } catch (e) {
       return result;
     }
@@ -387,4 +440,110 @@ class _DashboardPageState extends State<DashboardPage> {
       _fetchDrawResults();
     }
   }
+}
+
+class _MiniLineChart extends StatelessWidget {
+  final List<int> values;
+  final int highlightIndex;
+  final bool isGreen;
+  final bool isFlat;
+
+  const _MiniLineChart({
+    required this.values,
+    required this.highlightIndex,
+    required this.isGreen,
+    this.isFlat = false,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final color = isFlat
+        ? const Color(0xFFB0B0B0)
+        : isGreen
+        ? const Color(0xFF22C55E)
+        : const Color(0xFFEF4444);
+
+    return SizedBox(
+      width: 100,
+      height: 60,
+      child: CustomPaint(
+        painter: _LineChartPainter(values: values, color: color),
+      ),
+    );
+  }
+}
+
+class _LineChartPainter extends CustomPainter {
+  final List<int> values;
+  final Color color;
+
+  _LineChartPainter({required this.values, required this.color});
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    if (values.length < 2) return;
+
+    final maxVal = values.reduce((a, b) => a > b ? a : b).toDouble();
+    final minVal = values.reduce((a, b) => a < b ? a : b).toDouble();
+    final range = (maxVal - minVal).clamp(1.0, double.infinity);
+
+    // Map values to canvas points
+    final points = List.generate(values.length, (i) {
+      final x = i / (values.length - 1) * size.width;
+      final y =
+          size.height -
+          ((values[i] - minVal) / range) * (size.height * 0.7) -
+          size.height * 0.1;
+      return Offset(x, y);
+    });
+
+    // Build smooth bezier path
+    final linePath = Path();
+    linePath.moveTo(points[0].dx, points[0].dy);
+    for (int i = 0; i < points.length - 1; i++) {
+      final cp1 = Offset(
+        points[i].dx + (points[i + 1].dx - points[i].dx) / 2,
+        points[i].dy,
+      );
+      final cp2 = Offset(
+        points[i].dx + (points[i + 1].dx - points[i].dx) / 2,
+        points[i + 1].dy,
+      );
+      linePath.cubicTo(
+        cp1.dx,
+        cp1.dy,
+        cp2.dx,
+        cp2.dy,
+        points[i + 1].dx,
+        points[i + 1].dy,
+      );
+    }
+
+    // Filled area path
+    final fillPath = Path.from(linePath)
+      ..lineTo(size.width, size.height)
+      ..lineTo(0, size.height)
+      ..close();
+
+    canvas.drawPath(
+      fillPath,
+      Paint()
+        ..color = color.withOpacity(0.12)
+        ..style = PaintingStyle.fill,
+    );
+
+    canvas.drawPath(
+      linePath,
+      Paint()
+        ..color = color
+        ..style = PaintingStyle.stroke
+        ..strokeWidth = 2.2
+        ..strokeCap = StrokeCap.round
+        ..strokeJoin = StrokeJoin.round,
+    );
+  }
+
+  @override
+  bool shouldRepaint(_LineChartPainter old) =>
+      old.values != values || old.color != color;
 }

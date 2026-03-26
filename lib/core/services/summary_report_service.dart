@@ -3,10 +3,10 @@ import 'package:http/http.dart' as http;
 import 'package:get/get.dart';
 import 'package:onstite/controllers/auth_controller.dart';
 import 'package:onstite/models/summary_report.dart';
+import '../app_constants.dart';
 
 class SummaryReportService {
-  static const String baseUrl =
-      'https://stl-backend-mws9.onrender.com/api/reports/summary';
+  static const String baseUrl = '${AppConstants.apiBaseUrl}/reports/summary';
 
   static Future<SummaryReportModel> fetchSummaryReport({
     required String date,

@@ -3,10 +3,10 @@ import 'dart:convert';
 import 'package:get/get.dart';
 import '../../models/user.dart';
 import '../../controllers/auth_controller.dart';
+import '../app_constants.dart';
 
 class ProfileService {
-  static const String baseUrl =
-      'https://stl-backend-mws9.onrender.com/api/auth/profile';
+  static const String baseUrl = '${AppConstants.apiBaseUrl}/auth/profile';
 
   /// Fetch user profile
   static Future<User> fetchProfile() async {

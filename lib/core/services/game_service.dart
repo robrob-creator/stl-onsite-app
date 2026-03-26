@@ -1,10 +1,10 @@
 import 'package:http/http.dart' as http;
 import 'dart:convert';
 import '../../models/game.dart';
+import '../app_constants.dart';
 
 class GameService {
-  static const String baseUrl =
-      'https://stl-backend-mws9.onrender.com/api/games';
+  static const String baseUrl = '${AppConstants.apiBaseUrl}/games';
 
   /// Fetch all available games from the backend
   static Future<List<Game>> fetchGames() async {

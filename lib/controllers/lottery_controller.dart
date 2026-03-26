@@ -3,6 +3,7 @@ import 'package:get/get.dart';
 import 'package:http/http.dart' as http;
 import 'dart:convert';
 import 'auth_controller.dart';
+import '../core/app_constants.dart';
 import '../models/game.dart';
 import '../core/services/game_service.dart';
 import '../core/services/printer_service.dart';
@@ -205,6 +206,62 @@ class LotteryController extends GetxController {
     update();
   }
 
+  /// Pre-checks a single bet against the sold-out endpoint.
+  /// Returns `true` if the bet is available, `false` if sold out.
+  Future<bool> isBetAvailable({
+    required List<String> digits,
+    required double totalBetAmount,
+  }) async {
+    try {
+      final authController = Get.find<AuthController>();
+      final token = authController.token.value;
+      final game = currentGame;
+      if (game == null) return true;
+
+      final drawTimeId = selectedTime.value;
+
+      final payload = {
+        'bets': [
+          {
+            'index': 0,
+            'game_id': game.id,
+            'draw_time_id': drawTimeId,
+            'draw_id': drawTimeId,
+            'digits': digits,
+            'total_bet_amount': totalBetAmount,
+          },
+        ],
+      };
+
+      final response = await http
+          .post(
+            Uri.parse('${AppConstants.apiBaseUrl}/bets/check-available'),
+            headers: {
+              'Content-Type': 'application/json',
+              'Authorization': 'Bearer $token',
+            },
+            body: jsonEncode(payload),
+          )
+          .timeout(const Duration(seconds: 10));
+
+      if (response.statusCode == 200) {
+        final data = jsonDecode(response.body) as Map<String, dynamic>;
+        // Support both 'results' and 'bets' array keys
+        final results =
+            (data['results'] as List?) ?? (data['bets'] as List?) ?? [];
+        for (final item in results) {
+          final isAvailable = item['is_available'] as bool? ?? true;
+          if (!isAvailable) return false;
+        }
+        return true;
+      }
+      // Non-200 — fail open so the bulk submit can surface the real error
+      return true;
+    } catch (_) {
+      return true;
+    }
+  }
+
   Future<void> submitBets() async {
     if (betList.isEmpty) {
       Get.snackbar('Error', 'Please add at least one bet');
@@ -276,7 +333,7 @@ class LotteryController extends GetxController {
 
       final response = await http
           .post(
-            Uri.parse('https://stl-backend-mws9.onrender.com/api/bets/bulk'),
+            Uri.parse('${AppConstants.apiBaseUrl}/bets/bulk'),
             headers: {
               'Content-Type': 'application/json',
               'Authorization': 'Bearer $token',
@@ -590,9 +647,7 @@ class LotteryController extends GetxController {
 
       final response = await http
           .post(
-            Uri.parse(
-              'https://stl-backend-mws9.onrender.com/api/claims/create-by-ticket',
-            ),
+            Uri.parse('${AppConstants.apiBaseUrl}/claims/create-by-ticket'),
             headers: {
               'Content-Type': 'application/json',
               'Authorization': 'Bearer $token',
@@ -642,7 +697,7 @@ class LotteryController extends GetxController {
 
       final token = authController.token.value;
       final uri = Uri.parse(
-        'https://stl-backend-mws9.onrender.com/api/tickets',
+        '${AppConstants.apiBaseUrl}/tickets',
       ).replace(queryParameters: {'ticket_no': ticketNumber});
 
       final response = await http

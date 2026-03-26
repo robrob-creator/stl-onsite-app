@@ -4,6 +4,7 @@ import 'dart:convert';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:device_info_plus/device_info_plus.dart';
 import '../models/login_response.dart';
+import '../core/app_constants.dart';
 import '../models/user.dart';
 
 class AuthController extends GetxController {
@@ -19,8 +20,7 @@ class AuthController extends GetxController {
   late FlutterSecureStorage _secureStorage;
   late DeviceInfoPlugin _deviceInfo;
 
-  static const String baseUrl =
-      'https://stl-backend-mws9.onrender.com/api/auth';
+  static const String baseUrl = '${AppConstants.apiBaseUrl}/auth';
 
   // Secure storage keys
   static const String _imeiKey = 'device_imei';

@@ -657,7 +657,7 @@ class _BetEntryPageState extends State<BetEntryPage> {
                     height: 56,
                     child: ElevatedButton(
                       onPressed: hasDrawTimes
-                          ? () {
+                          ? () async {
                               if (_lottoNumbers.isEmpty) {
                                 Get.snackbar('Error', 'Please select numbers');
                                 return;
@@ -730,17 +730,161 @@ class _BetEntryPageState extends State<BetEntryPage> {
                                 }
                               }
 
-                              // Convert lotto numbers to list for controller by grouping
-                              controller.selectedNumbers.clear();
+                              // Build digits list
+                              final digits = <String>[];
                               for (
                                 int i = 0;
                                 i < _lottoNumbers.length;
                                 i += digitsPerCell
                               ) {
-                                controller.selectedNumbers.add(
+                                digits.add(
                                   _lottoNumbers.substring(i, i + digitsPerCell),
                                 );
                               }
+
+                              // Check availability (sold-out pre-check)
+                              final totalBet = (targetAmount + rambolAmount)
+                                  .toDouble();
+
+                              // Show checking dialog
+                              Get.dialog(
+                                Dialog(
+                                  backgroundColor: Colors.transparent,
+                                  elevation: 0,
+                                  child: Center(
+                                    child: Container(
+                                      padding: const EdgeInsets.symmetric(
+                                        horizontal: 32,
+                                        vertical: 28,
+                                      ),
+                                      decoration: BoxDecoration(
+                                        color: Colors.white,
+                                        borderRadius: BorderRadius.circular(16),
+                                      ),
+                                      child: const Column(
+                                        mainAxisSize: MainAxisSize.min,
+                                        children: [
+                                          CircularProgressIndicator(
+                                            valueColor:
+                                                AlwaysStoppedAnimation<Color>(
+                                                  Color(0xFF3D5A99),
+                                                ),
+                                            strokeWidth: 3,
+                                          ),
+                                          SizedBox(height: 20),
+                                          Text(
+                                            'Checking availability...',
+                                            style: TextStyle(
+                                              fontSize: 15,
+                                              fontWeight: FontWeight.w500,
+                                              color: Colors.black87,
+                                            ),
+                                          ),
+                                        ],
+                                      ),
+                                    ),
+                                  ),
+                                ),
+                                barrierDismissible: false,
+                              );
+
+                              final available = await controller.isBetAvailable(
+                                digits: digits,
+                                totalBetAmount: totalBet,
+                              );
+
+                              // Dismiss the checking dialog
+                              if (Get.isDialogOpen ?? false) Get.back();
+
+                              if (!available) {
+                                Get.dialog(
+                                  Dialog(
+                                    shape: RoundedRectangleBorder(
+                                      borderRadius: BorderRadius.circular(20),
+                                    ),
+                                    backgroundColor: Colors.white,
+                                    child: Padding(
+                                      padding: const EdgeInsets.fromLTRB(
+                                        24,
+                                        32,
+                                        24,
+                                        24,
+                                      ),
+                                      child: Column(
+                                        mainAxisSize: MainAxisSize.min,
+                                        children: [
+                                          Container(
+                                            width: 72,
+                                            height: 72,
+                                            decoration: BoxDecoration(
+                                              color: Colors.red[50],
+                                              shape: BoxShape.circle,
+                                            ),
+                                            child: Icon(
+                                              Icons.block_rounded,
+                                              color: Colors.red[400],
+                                              size: 36,
+                                            ),
+                                          ),
+                                          const SizedBox(height: 20),
+                                          const Text(
+                                            'Sold Out',
+                                            style: TextStyle(
+                                              fontSize: 20,
+                                              fontWeight: FontWeight.bold,
+                                              color: Colors.black87,
+                                            ),
+                                          ),
+                                          const SizedBox(height: 12),
+                                          const Text(
+                                            'This combination is no longer available for the selected draw time.',
+                                            textAlign: TextAlign.center,
+                                            style: TextStyle(
+                                              fontSize: 15,
+                                              color: Colors.black54,
+                                              height: 1.4,
+                                            ),
+                                          ),
+                                          const SizedBox(height: 28),
+                                          SizedBox(
+                                            width: double.infinity,
+                                            child: ElevatedButton(
+                                              onPressed: () => Get.back(),
+                                              style: ElevatedButton.styleFrom(
+                                                backgroundColor: const Color(
+                                                  0xFF3D5A99,
+                                                ),
+                                                padding:
+                                                    const EdgeInsets.symmetric(
+                                                      vertical: 14,
+                                                    ),
+                                                elevation: 0,
+                                                shape: RoundedRectangleBorder(
+                                                  borderRadius:
+                                                      BorderRadius.circular(12),
+                                                ),
+                                              ),
+                                              child: const Text(
+                                                'OK',
+                                                style: TextStyle(
+                                                  fontSize: 15,
+                                                  fontWeight: FontWeight.bold,
+                                                  color: Colors.white,
+                                                ),
+                                              ),
+                                            ),
+                                          ),
+                                        ],
+                                      ),
+                                    ),
+                                  ),
+                                );
+                                return;
+                              }
+
+                              // Convert lotto numbers to list for controller by grouping
+                              controller.selectedNumbers.clear();
+                              controller.selectedNumbers.addAll(digits);
 
                               controller.addBet();
 

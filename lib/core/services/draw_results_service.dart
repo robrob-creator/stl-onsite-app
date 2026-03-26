@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:get/get.dart';
 import '../design_system.dart';
 import '../../controllers/auth_controller.dart';
+import '../app_constants.dart';
 
 class LatestResult {
   final String? id;
@@ -31,12 +32,36 @@ class LatestResult {
   }
 }
 
+class BetSummary {
+  final int totalBet;
+  final int totalWon;
+  final int winningBetsCount;
+  final bool isAtRisk;
+
+  BetSummary({
+    required this.totalBet,
+    required this.totalWon,
+    required this.winningBetsCount,
+    required this.isAtRisk,
+  });
+
+  factory BetSummary.fromJson(Map<String, dynamic> json) {
+    return BetSummary(
+      totalBet: (json['total_bet'] as num?)?.toInt() ?? 0,
+      totalWon: (json['total_won'] as num?)?.toInt() ?? 0,
+      winningBetsCount: (json['winning_bets_count'] as num?)?.toInt() ?? 0,
+      isAtRisk: json['is_at_risk'] as bool? ?? false,
+    );
+  }
+}
+
 class DrawResult {
   final String? id;
   final String? drawTime;
   final int? cutoffMinutes;
   final bool? isActive;
   final LatestResult? latestResult;
+  final BetSummary? betSummary;
 
   DrawResult({
     this.id,
@@ -44,10 +69,12 @@ class DrawResult {
     this.cutoffMinutes,
     this.isActive,
     this.latestResult,
+    this.betSummary,
   });
 
   factory DrawResult.fromJson(Map<String, dynamic> json) {
     final latestResultData = json['latest_result'];
+    final betSummaryData = json['bet_summary'];
     return DrawResult(
       id: json['id'] as String?,
       drawTime: json['draw_time'] as String?,
@@ -55,6 +82,9 @@ class DrawResult {
       isActive: json['is_active'] as bool?,
       latestResult: latestResultData != null
           ? LatestResult.fromJson(latestResultData as Map<String, dynamic>)
+          : null,
+      betSummary: betSummaryData != null
+          ? BetSummary.fromJson(betSummaryData as Map<String, dynamic>)
           : null,
     );
   }
@@ -92,8 +122,7 @@ class DrawResultsResponse {
 }
 
 class DrawResultsService {
-  static const String _baseUrl =
-      'https://stl-backend-mws9.onrender.com/api/draw-results';
+  static const String _baseUrl = '${AppConstants.apiBaseUrl}/draw-results';
 
   static Future<DrawResultsResponse?> getLatestResultsByGameAndDate({
     required String gameId,

@@ -3,10 +3,10 @@ import 'dart:convert';
 import 'package:get/get.dart';
 import '../../models/transaction.dart';
 import '../../controllers/auth_controller.dart';
+import '../app_constants.dart';
 
 class TransactionService {
-  static const String _baseUrl =
-      'https://stl-backend-mws9.onrender.com/api/transactions';
+  static const String _baseUrl = '${AppConstants.apiBaseUrl}/transactions';
 
   static String _formatDate(DateTime date) {
     final y = date.year.toString();

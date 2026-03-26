@@ -45,6 +45,7 @@ class _MainLayoutState extends State<MainLayout> {
       key: _scaffoldKey,
       backgroundColor: widget.backgroundColor,
       appBar: AppBar(
+        surfaceTintColor: Colors.white,
         backgroundColor: Colors.white,
         elevation: 1,
         leading: IconButton(

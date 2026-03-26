@@ -3,10 +3,10 @@ import 'dart:convert';
 import 'package:get/get.dart';
 import '../../models/ticket.dart';
 import '../../controllers/auth_controller.dart';
+import '../app_constants.dart';
 
 class TicketService {
-  static const String baseUrl =
-      'https://stl-backend-mws9.onrender.com/api/tickets';
+  static const String baseUrl = '${AppConstants.apiBaseUrl}/tickets';
 
   /// Fetch tickets with optional search by ticket number and status filter
   static Future<List<Ticket>> fetchTickets({

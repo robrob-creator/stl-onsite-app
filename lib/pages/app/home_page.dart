@@ -168,10 +168,22 @@ class _HomePageState extends State<HomePage> {
     );
   }
 
+  String _formatAmount(double value) {
+    final intVal = value.toInt();
+    final str = intVal.toString();
+    final buffer = StringBuffer();
+    for (int i = 0; i < str.length; i++) {
+      if (i > 0 && (str.length - i) % 3 == 0) buffer.write(',');
+      buffer.write(str[i]);
+    }
+    return '₱ ${buffer.toString()}';
+  }
+
   @override
   Widget build(BuildContext context) {
     return MainLayout(
       onMenuPressed: () {},
+      title: _currentIndex == 0 ? 'Dashboard' : null,
       appBarTrailing: GetBuilder<LotteryController>(
         builder: (ctrl) => Container(
           padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
@@ -182,16 +194,17 @@ class _HomePageState extends State<HomePage> {
           child: Row(
             mainAxisSize: MainAxisSize.min,
             children: [
-              const Icon(
-                Icons.account_balance_wallet,
+              Image.asset(
+                'assets/images/icons/moneys.png',
+                width: 16,
+                height: 16,
                 color: AppColors.primary,
-                size: 20,
               ),
               const SizedBox(width: 8),
               Text(
-                ctrl.balance.value.toStringAsFixed(2),
-                style: const TextStyle(
-                  color: AppColors.primary,
+                _formatAmount(ctrl.balance.value),
+                style: TextStyle(
+                  color: AppColors.primary.withOpacity(0.9),
                   fontWeight: FontWeight.bold,
                   fontSize: 14,
                 ),

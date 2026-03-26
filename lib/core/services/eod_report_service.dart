@@ -3,10 +3,10 @@ import 'package:http/http.dart' as http;
 import 'package:get/get.dart';
 import 'package:onstite/controllers/auth_controller.dart';
 import 'package:onstite/models/eod_report.dart';
+import '../app_constants.dart';
 
 class EodReportService {
-  static const String baseUrl =
-      'https://stl-backend-mws9.onrender.com/api/reports/eod';
+  static const String baseUrl = '${AppConstants.apiBaseUrl}/reports/eod';
 
   static Future<EodReportModel> fetchEodReport({
     required String makerId,
