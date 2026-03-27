@@ -233,7 +233,7 @@ class AuthController extends GetxController {
           displayMessage = message;
           break;
         case 'INVALID_CREDENTIALS':
-          displayMessage = 'Invalid MPIN.';
+          displayMessage = message;
           break;
         default:
           displayMessage = message;

@@ -119,6 +119,7 @@ class PrinterService {
       try {
         await PrintBluetoothThermal.disconnect;
       } catch (_) {}
+
       return result
           ? const PrintResult.ok()
           : const PrintResult.fail(PrintError.unknown);

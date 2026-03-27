@@ -67,13 +67,14 @@ class TicketService {
   }
 
   /// Void a ticket (soft delete)
+  /// Calls PUT /tickets/void-request with ticket ID
   static Future<void> voidTicket(String ticketId, [String? reason]) async {
     try {
       final authCtrl = Get.find<AuthController>();
       final token = authCtrl.token.value;
 
       final uri = Uri.parse(
-        '$baseUrl/void',
+        '$baseUrl/void-request',
       ).replace(queryParameters: {'id': ticketId});
 
       final body = reason != null && reason.isNotEmpty

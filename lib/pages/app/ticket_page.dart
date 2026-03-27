@@ -43,7 +43,9 @@ class _TicketPageState extends State<TicketPage> {
   Future<List<Ticket>> _fetchTickets([String? ticketNo]) async {
     return await TicketService.fetchTickets(
       ticketNo: ticketNo,
-      status: selectedStatus == 'Void' ? 'voided' : 'pending,won,lost',
+      status: selectedStatus == 'Void'
+          ? 'voided'
+          : 'pending_void,pending,won,lost',
     );
   }
 
@@ -477,6 +479,19 @@ class _TicketPageState extends State<TicketPage> {
                 );
               }
 
+              // Sort tickets: pending_void first, then others
+              allTickets.sort((a, b) {
+                if (a.status?.toLowerCase() == 'pending_void' &&
+                    b.status?.toLowerCase() != 'pending_void') {
+                  return -1;
+                }
+                if (a.status?.toLowerCase() != 'pending_void' &&
+                    b.status?.toLowerCase() == 'pending_void') {
+                  return 1;
+                }
+                return 0;
+              });
+
               return ListView.builder(
                 padding: const EdgeInsets.symmetric(
                   horizontal: 16,
@@ -595,7 +610,7 @@ class _TicketPageState extends State<TicketPage> {
                   ),
                   const SizedBox(height: 4),
                   Text(
-                    '${ticket.betIds?.length ?? 0} bet${(ticket.betIds?.length ?? 0) != 1 ? 's' : ''}',
+                    '${ticket.betObjects?.length ?? 0} bet${(ticket.betObjects?.length ?? 0) != 1 ? 's' : ''}',
                     style: const TextStyle(
                       fontSize: 14,
                       fontWeight: FontWeight.w500,
@@ -637,7 +652,7 @@ class _TicketPageState extends State<TicketPage> {
           ),
           const SizedBox(height: 16),
           // Bet details table
-          if ((ticket.betIds?.isNotEmpty ?? false) &&
+          if ((ticket.betObjects?.isNotEmpty ?? false) &&
                   ((ticket.status ?? '').toLowerCase() != 'voided')
               ? true
               : showDetails) ...[
@@ -715,7 +730,7 @@ class _TicketPageState extends State<TicketPage> {
                     ),
                   ),
                   // Table rows
-                  ...?ticket.betIds?.map((bet) {
+                  ...?ticket.betObjects?.map((bet) {
                     String betType = (bet.straightBetAmount ?? 0) > 0
                         ? 'Straight'
                         : 'Ramble';
@@ -796,7 +811,7 @@ class _TicketPageState extends State<TicketPage> {
                 ],
               ),
             ),
-          ] else if ((ticket.betIds?.isEmpty ?? true) &&
+          ] else if ((ticket.betObjects?.isEmpty ?? true) &&
               (ticket.status ?? '').toLowerCase() != 'voided') ...[
             Padding(
               padding: const EdgeInsets.symmetric(vertical: 8),
@@ -809,7 +824,7 @@ class _TicketPageState extends State<TicketPage> {
           const SizedBox(height: 16),
 
           // Bet Details Summary
-          if ((ticket.betIds?.isNotEmpty ?? false)) ...[
+          if ((ticket.betObjects?.isNotEmpty ?? false)) ...[
             Container(
               padding: const EdgeInsets.all(12),
               decoration: BoxDecoration(
@@ -838,7 +853,7 @@ class _TicketPageState extends State<TicketPage> {
                         ),
                       ),
                       Text(
-                        '₱ ${(ticket.betIds?.fold<double>(0, (prev, bet) => prev + (bet.totalBetAmount ?? 0)) ?? 0).toStringAsFixed(2)}',
+                        '₱ ${(ticket.betObjects?.fold<double>(0, (prev, bet) => prev + (bet.totalBetAmount ?? 0)) ?? 0).toStringAsFixed(2)}',
                         style: const TextStyle(
                           fontSize: 13,
                           fontWeight: FontWeight.w600,

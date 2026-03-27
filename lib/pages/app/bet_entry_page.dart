@@ -1,7 +1,9 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:get/get.dart';
+import 'package:print_bluetooth_thermal/print_bluetooth_thermal.dart';
 import '../../controllers/lottery_controller.dart';
+import '../../core/services/printer_service.dart';
 import '../../widgets/lotto_number_input.dart';
 
 /// Restricts typed numeric input to [min, max].
@@ -121,10 +123,47 @@ class _BetEntryPageState extends State<BetEntryPage> {
     );
   }
 
-  void _confirmSubmit(LotteryController ctrl) {
+  Future<void> _confirmSubmit(LotteryController ctrl) async {
     if (ctrl.betList.isEmpty) {
       Get.snackbar('Error', 'Please add at least one bet');
       return;
+    }
+
+    // Pre-check printer state before showing the confirmation dialog.
+    final mac = PrinterService.savedMac;
+    if (mac == null || mac.isEmpty) {
+      // No printer configured at all.
+      final proceed = await _showPrinterWarningDialog(
+        icon: Icons.print_disabled_rounded,
+        title: 'No Printer Connected',
+        message:
+            'Please connect to a printer before submitting bets.\n\nDo you want to submit anyway?',
+        confirmLabel: 'Submit Anyway',
+        cancelLabel: 'Set Up Printer',
+        onCancel: () {
+          Get.back();
+          Get.toNamed('/printer-settings');
+        },
+      );
+      if (!proceed) return;
+    } else {
+      // Printer is configured — do a quick connectivity check.
+      final connected = await PrintBluetoothThermal.connectionStatus;
+      if (!connected) {
+        final proceed = await _showPrinterWarningDialog(
+          icon: Icons.bluetooth_disabled_rounded,
+          title: 'Printer Not Reachable',
+          message:
+              'Could not reach the configured printer. Make sure it is on and in Bluetooth range.\n\nDo you want to submit anyway?',
+          confirmLabel: 'Submit Anyway',
+          cancelLabel: 'Check Printer',
+          onCancel: () {
+            Get.back();
+            Get.toNamed('/printer-settings');
+          },
+        );
+        if (!proceed) return;
+      }
     }
 
     Get.dialog(
@@ -235,6 +274,117 @@ class _BetEntryPageState extends State<BetEntryPage> {
         ),
       ),
     );
+  }
+
+  /// Shows a printer-warning dialog and returns [true] if the user
+  /// chose to proceed anyway, [false] if they chose to cancel.
+  Future<bool> _showPrinterWarningDialog({
+    required IconData icon,
+    required String title,
+    required String message,
+    required String confirmLabel,
+    required String cancelLabel,
+    required VoidCallback onCancel,
+  }) async {
+    bool proceed = false;
+    await Get.dialog<void>(
+      Dialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+        backgroundColor: Colors.white,
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(24, 32, 24, 24),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Container(
+                width: 72,
+                height: 72,
+                decoration: const BoxDecoration(
+                  color: Color(0xFFFEE2E2),
+                  shape: BoxShape.circle,
+                ),
+                child: Icon(icon, color: const Color(0xFFDC2626), size: 36),
+              ),
+              const SizedBox(height: 20),
+              Text(
+                title,
+                textAlign: TextAlign.center,
+                style: const TextStyle(
+                  fontSize: 18,
+                  fontWeight: FontWeight.bold,
+                  color: Colors.black87,
+                ),
+              ),
+              const SizedBox(height: 12),
+              Text(
+                message,
+                textAlign: TextAlign.center,
+                style: const TextStyle(
+                  fontSize: 14,
+                  color: Colors.black54,
+                  height: 1.5,
+                ),
+              ),
+              const SizedBox(height: 24),
+              Row(
+                children: [
+                  Expanded(
+                    child: OutlinedButton(
+                      onPressed: onCancel,
+                      style: OutlinedButton.styleFrom(
+                        padding: const EdgeInsets.symmetric(vertical: 14),
+                        side: const BorderSide(
+                          color: Color(0xFF3D5A99),
+                          width: 1.5,
+                        ),
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(12),
+                        ),
+                      ),
+                      child: Text(
+                        cancelLabel,
+                        style: const TextStyle(
+                          fontSize: 13,
+                          fontWeight: FontWeight.w600,
+                          color: Color(0xFF3D5A99),
+                        ),
+                      ),
+                    ),
+                  ),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: ElevatedButton(
+                      onPressed: () {
+                        proceed = true;
+                        Get.back();
+                      },
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: const Color(0xFFDC2626),
+                        padding: const EdgeInsets.symmetric(vertical: 14),
+                        elevation: 0,
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(12),
+                        ),
+                      ),
+                      child: Text(
+                        confirmLabel,
+                        style: const TextStyle(
+                          fontSize: 13,
+                          fontWeight: FontWeight.bold,
+                          color: Colors.white,
+                        ),
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ],
+          ),
+        ),
+      ),
+      barrierDismissible: false,
+    );
+    return proceed;
   }
 
   @override
@@ -1241,7 +1391,7 @@ class _BetEntryPageState extends State<BetEntryPage> {
                   child: ElevatedButton(
                     onPressed: ctrl.isLoading.value
                         ? null
-                        : () => _confirmSubmit(ctrl),
+                        : () async => _confirmSubmit(ctrl),
                     style: ElevatedButton.styleFrom(
                       backgroundColor: const Color(0xFF2563EB),
                       disabledBackgroundColor: Colors.grey[300],

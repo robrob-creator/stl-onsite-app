@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:get/get.dart';
 import 'package:onstite/pages/app/eod_report_page.dart';
 import 'package:onstite/pages/app/summary_report_page.dart';
+import 'package:onstite/pages/app/live_page.dart';
 import '../controllers/auth_controller.dart';
 import 'design_system.dart';
 
@@ -275,6 +276,33 @@ class _MainLayoutState extends State<MainLayout> {
                       dense: true,
                       minLeadingWidth: 0,
                     ),
+                    // Live Draw
+                    ListTile(
+                      leading: const Icon(
+                        Icons.live_tv_rounded,
+                        color: Color(0xFF222222),
+                      ),
+                      title: const Text(
+                        'Live Draw',
+                        style: TextStyle(
+                          fontWeight: FontWeight.w500,
+                          color: Color(0xFF222222),
+                        ),
+                      ),
+                      onTap: () {
+                        Navigator.pop(context);
+                        Navigator.of(context).push(
+                          MaterialPageRoute(builder: (_) => const LivePage()),
+                        );
+                      },
+                      contentPadding: const EdgeInsets.symmetric(
+                        horizontal: 12,
+                        vertical: 0,
+                      ),
+                      dense: true,
+                      minLeadingWidth: 0,
+                    ),
+                    const SizedBox(height: 2),
                     // Notification with badge
                     ListTile(
                       leading: const Icon(

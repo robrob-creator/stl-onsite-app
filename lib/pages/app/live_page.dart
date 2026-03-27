@@ -2,6 +2,7 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:webview_flutter/webview_flutter.dart';
 import '../../core/design_system.dart';
+import '../../core/services/draw_time_service.dart';
 
 class LivePage extends StatefulWidget {
   const LivePage({super.key});
@@ -11,28 +12,22 @@ class LivePage extends StatefulWidget {
 }
 
 class _LivePageState extends State<LivePage> {
-  // Schedule in PST (UTC+8): 14:00, 17:00, 21:00
-  static const _schedule = [
-    {'hour': 14, 'minute': 0},
-    {'hour': 17, 'minute': 0},
-    {'hour': 21, 'minute': 0},
-  ];
-
   static const _preWindow = Duration(minutes: 10);
   static const _postWindow = Duration(hours: 1);
+
+  // Draw schedule fetched from API
+  List<Map<String, int>> _schedule = [];
 
   DateTime? _nextDraw;
   String _timeLeft = '';
   bool _isLive = false;
   Timer? _timer;
-
   WebViewController? _webViewController;
-  bool _webViewReady = false;
 
   @override
   void initState() {
     super.initState();
-    _tick();
+    _loadSchedule();
     _timer = Timer.periodic(const Duration(seconds: 1), (_) => _tick());
   }
 
@@ -42,7 +37,32 @@ class _LivePageState extends State<LivePage> {
     super.dispose();
   }
 
+  Future<void> _loadSchedule() async {
+    try {
+      final drawTimes = await DrawTimeService.fetchDrawTimes();
+      final schedule = <Map<String, int>>[];
+
+      for (final drawTime in drawTimes) {
+        final timeMap = drawTime.extractTime();
+        schedule.add(timeMap);
+      }
+
+      if (mounted) {
+        setState(() {
+          _schedule = schedule;
+        });
+        // Trigger initial tick with updated schedule
+        _tick();
+      }
+    } catch (e) {
+      debugPrint('Error loading schedule: $e');
+      // Fall back to empty schedule or default values
+    }
+  }
+
   void _tick() {
+    if (_schedule.isEmpty) return;
+
     final now = DateTime.now().toUtc();
     final nowMs = now.millisecondsSinceEpoch;
 
@@ -121,47 +141,51 @@ class _LivePageState extends State<LivePage> {
       _timeLeft = timeLeft;
     });
 
-    // Initialize webview when going live
+    // Initialize or clear webview based on live status
     if (isLive && _webViewController == null) {
       _initWebView();
-    }
-    // Clear webview when no longer live
-    if (!isLive && _webViewController != null) {
+    } else if (!isLive && _webViewController != null) {
       setState(() {
         _webViewController = null;
-        _webViewReady = false;
       });
     }
   }
 
   void _initWebView() {
     const channelId = 'UCpOm2kv1upnIFoOT7rSp6hg';
-    const src =
-        'https://www.youtube.com/embed/live_stream?channel=$channelId&autoplay=1&mute=1';
+    const htmlContent =
+        '''
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="referrer" content="origin">
+  <style>
+    * { margin: 0; padding: 0; }
+    body { width: 100%; height: 100vh; background: #000; }
+    iframe { width: 100%; height: 100%; }
+  </style>
+</head>
+<body>
+  <iframe 
+    src="https://www.youtube.com/embed/live_stream?channel=$channelId&autoplay=1&mute=1"
+    frameborder="0"
+    allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
+    allowfullscreen>
+  </iframe>
+</body>
+</html>
+    ''';
 
-    final controller = WebViewController()
+    final controller = WebViewController();
+    controller
       ..setJavaScriptMode(JavaScriptMode.unrestricted)
       ..setBackgroundColor(Colors.black)
-      ..setNavigationDelegate(
-        NavigationDelegate(
-          onPageFinished: (_) {
-            if (mounted) setState(() => _webViewReady = true);
-          },
-          onWebResourceError: (_) {
-            if (mounted) {
-              setState(() {
-                _webViewController = null;
-                _webViewReady = false;
-              });
-            }
-          },
-        ),
-      )
-      ..loadRequest(Uri.parse(src));
+      ..loadHtmlString(htmlContent, baseUrl: 'https://www.onstite.app/');
 
     setState(() {
       _webViewController = controller;
-      _webViewReady = false;
     });
   }
 
@@ -191,19 +215,32 @@ class _LivePageState extends State<LivePage> {
 
   @override
   Widget build(BuildContext context) {
-    return SingleChildScrollView(
-      padding: const EdgeInsets.all(16),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          _buildHeader(),
-          const SizedBox(height: 12),
-          _buildVideoArea(),
-          const SizedBox(height: 16),
-          _buildScheduleInfo(),
-          const SizedBox(height: 24),
-          _buildScheduleList(),
-        ],
+    return Scaffold(
+      backgroundColor: const Color(0xFFFAFAFA),
+      appBar: AppBar(
+        leading: IconButton(
+          icon: const Icon(Icons.arrow_back_rounded),
+          onPressed: () => Navigator.of(context).pop(),
+        ),
+        title: const Text('Live Draw'),
+        backgroundColor: Colors.white,
+        elevation: 0,
+        centerTitle: false,
+      ),
+      body: SingleChildScrollView(
+        padding: const EdgeInsets.all(16),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            _buildHeader(),
+            const SizedBox(height: 12),
+            _buildVideoArea(),
+            const SizedBox(height: 16),
+            _buildScheduleInfo(),
+            const SizedBox(height: 24),
+            _buildScheduleList(),
+          ],
+        ),
       ),
     );
   }
@@ -266,21 +303,7 @@ class _LivePageState extends State<LivePage> {
       child: ClipRRect(
         borderRadius: BorderRadius.circular(12),
         child: _isLive && _webViewController != null
-            ? Stack(
-                children: [
-                  WebViewWidget(controller: _webViewController!),
-                  if (!_webViewReady)
-                    Container(
-                      color: Colors.black,
-                      child: const Center(
-                        child: CircularProgressIndicator(
-                          color: Colors.white,
-                          strokeWidth: 2,
-                        ),
-                      ),
-                    ),
-                ],
-              )
+            ? WebViewWidget(controller: _webViewController!)
             : _buildPlaceholder(),
       ),
     );
@@ -387,6 +410,16 @@ class _LivePageState extends State<LivePage> {
   }
 
   Widget _buildScheduleList() {
+    // Format schedule times for display
+    final formattedTimes = _schedule.map((s) {
+      final hour = s['hour']!;
+      final minute = s['minute']!;
+      final displayHour = hour % 12 == 0 ? 12 : hour % 12;
+      final ampm = hour >= 12 ? 'PM' : 'AM';
+      final minStr = minute.toString().padLeft(2, '0');
+      return '$displayHour:$minStr $ampm';
+    }).toList();
+
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
@@ -399,36 +432,45 @@ class _LivePageState extends State<LivePage> {
           ),
         ),
         const SizedBox(height: 10),
-        ...['2:00 PM', '5:00 PM', '9:00 PM'].map(
-          (time) => Padding(
-            padding: const EdgeInsets.only(bottom: 8),
-            child: Row(
-              children: [
-                Container(
-                  width: 8,
-                  height: 8,
-                  decoration: BoxDecoration(
-                    color: AppColors.primary,
-                    shape: BoxShape.circle,
+        if (_schedule.isEmpty)
+          Padding(
+            padding: const EdgeInsets.symmetric(vertical: 16),
+            child: Text(
+              'Loading schedule...',
+              style: TextStyle(fontSize: 14, color: Colors.grey[500]),
+            ),
+          )
+        else
+          ...formattedTimes.map(
+            (time) => Padding(
+              padding: const EdgeInsets.only(bottom: 8),
+              child: Row(
+                children: [
+                  Container(
+                    width: 8,
+                    height: 8,
+                    decoration: BoxDecoration(
+                      color: AppColors.primary,
+                      shape: BoxShape.circle,
+                    ),
                   ),
-                ),
-                const SizedBox(width: 10),
-                Text(
-                  time,
-                  style: const TextStyle(
-                    fontSize: 14,
-                    color: Color(0xFF4B5563),
+                  const SizedBox(width: 10),
+                  Text(
+                    time,
+                    style: const TextStyle(
+                      fontSize: 14,
+                      color: Color(0xFF4B5563),
+                    ),
                   ),
-                ),
-                const Spacer(),
-                Text(
-                  'Philippine Standard Time',
-                  style: TextStyle(fontSize: 12, color: Colors.grey[500]),
-                ),
-              ],
+                  const Spacer(),
+                  Text(
+                    'Philippine Standard Time',
+                    style: TextStyle(fontSize: 12, color: Colors.grey[500]),
+                  ),
+                ],
+              ),
             ),
           ),
-        ),
       ],
     );
   }

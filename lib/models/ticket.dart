@@ -2,7 +2,8 @@ class Ticket {
   final String? id;
   final String? ticketNo;
   final String? batchId;
-  final List<BetData>? betIds;
+  final List<String>? betIdList;
+  final List<BetData>? betObjects;
   final String? status;
   final CustomerData? customer;
   final ClusterData? cluster;
@@ -16,7 +17,8 @@ class Ticket {
     this.id,
     this.ticketNo,
     this.batchId,
-    this.betIds,
+    this.betIdList,
+    this.betObjects,
     this.status,
     this.customer,
     this.cluster,
@@ -27,12 +29,16 @@ class Ticket {
     this.winningPayout,
   });
 
+  // Backward compatibility: return betObjects for display
+  List<BetData>? get betIds => betObjects;
+
   factory Ticket.fromJson(Map<String, dynamic> json) {
     return Ticket(
       id: json['id'] as String?,
       ticketNo: json['ticket_no'] as String?,
       batchId: json['batch_id'] as String?,
-      betIds: (json['bet_ids'] as List?)
+      betIdList: (json['bet_ids'] as List?)?.cast<String>(),
+      betObjects: (json['bet_objects'] as List?)
           ?.map((bet) => BetData.fromJson(bet as Map<String, dynamic>))
           .toList(),
       status: json['status'] as String? ?? 'unknown',
@@ -55,7 +61,8 @@ class Ticket {
       'id': id,
       'ticket_no': ticketNo,
       'batch_id': batchId,
-      'bet_ids': betIds?.map((b) => b.toJson()).toList(),
+      'bet_ids': betIdList,
+      'bet_objects': betObjects?.map((b) => b.toJson()).toList(),
       'status': status,
       'customer': customer?.toJson(),
       'cluster': cluster?.toJson(),

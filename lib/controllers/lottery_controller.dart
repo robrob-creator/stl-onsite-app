@@ -16,6 +16,7 @@ class BetEntry {
   final double rambleBetAmount;
   final double winAmount;
   final List<String> digits;
+  final int combinations; // Store calculated combinations
 
   BetEntry({
     required this.betNumber,
@@ -24,6 +25,7 @@ class BetEntry {
     required this.rambleBetAmount,
     required this.winAmount,
     required this.digits,
+    this.combinations = 1,
   });
 
   double get totalBetAmount => straightBetAmount + rambleBetAmount;
@@ -115,6 +117,42 @@ class LotteryController extends GetxController {
     return currentGame?.drawTimes ?? [];
   }
 
+  /// Calculate the number of unique permutations for the given digits
+  /// Examples:
+  /// [1, 2, 3] -> 3! = 6 (all different)
+  /// [2, 2, 3] -> 3!/2! = 3 (one pair)
+  /// [1, 2] -> 2! = 2 (both different for 2D)
+  /// [2, 2] -> 2!/2! = 1 (both same for 2D)
+  int calculateCombinations(List<String> digits) {
+    if (digits.isEmpty) return 1;
+
+    // Calculate factorial
+    int factorial(int n) {
+      if (n <= 1) return 1;
+      int result = 1;
+      for (int i = 2; i <= n; i++) {
+        result *= i;
+      }
+      return result;
+    }
+
+    // Get frequency of each digit
+    final frequencyMap = <String, int>{};
+    for (final digit in digits) {
+      frequencyMap[digit] = (frequencyMap[digit] ?? 0) + 1;
+    }
+
+    // Calculate n! / (n1! * n2! * ... * nk!)
+    int numerator = factorial(digits.length);
+    int denominator = 1;
+
+    for (final frequency in frequencyMap.values) {
+      denominator *= factorial(frequency);
+    }
+
+    return numerator ~/ denominator;
+  }
+
   void toggleNumber(String number) {
     if (selectedNumbers.contains(number)) {
       selectedNumbers.remove(number);
@@ -164,6 +202,9 @@ class LotteryController extends GetxController {
       return;
     }
 
+    // Calculate combinations dynamically based on the actual numbers entered
+    final combinations = calculateCombinations(selectedNumbers);
+
     // When both amounts are provided, create two separate bet entries.
     if (straightAmount > 0) {
       betList.add(
@@ -174,13 +215,13 @@ class LotteryController extends GetxController {
           rambleBetAmount: 0,
           winAmount: straightAmount * game.straightMultiplier,
           digits: List<String>.from(selectedNumbers),
+          combinations: combinations,
         ),
       );
       betCounter.value++;
     }
 
     if (rambleAmount > 0) {
-      final combinations = game.numberOfCombinations;
       betList.add(
         BetEntry(
           betNumber: betCounter.value,
@@ -190,6 +231,7 @@ class LotteryController extends GetxController {
           winAmount:
               (rambleAmount / combinations) * (game.rambleMultiplier ?? 0),
           digits: List<String>.from(selectedNumbers),
+          combinations: combinations,
         ),
       );
       betCounter.value++;
@@ -522,12 +564,18 @@ class LotteryController extends GetxController {
           );
           break;
         default:
-          Get.snackbar(
-            'Print Failed',
-            'Could not print the ticket. Please check the printer and try again.',
-            snackPosition: SnackPosition.BOTTOM,
-            backgroundColor: Colors.red[700],
-            colorText: Colors.white,
+          Get.dialog(
+            _printerAlertDialog(
+              icon: Icons.print_disabled_rounded,
+              title: 'Print Failed',
+              message:
+                  'Could not print the ticket. Please check:\n\n'
+                  '• Printer has paper loaded\n'
+                  '• Printer is powered on\n'
+                  '• Bluetooth is connected',
+              actionLabel: 'OK',
+              onAction: Get.back,
+            ),
           );
       }
     });
