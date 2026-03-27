@@ -6,7 +6,7 @@ import 'package:qr_code_scanner_plus/qr_code_scanner_plus.dart';
 import 'package:permission_handler/permission_handler.dart';
 import '../../core/design_system.dart';
 import '../../models/ticket.dart';
-import '../../core/services/ticket_service.dart';
+import '../../controllers/ticket_controller.dart';
 
 class TicketPage extends StatefulWidget {
   const TicketPage({super.key});
@@ -16,37 +16,26 @@ class TicketPage extends StatefulWidget {
 }
 
 class _TicketPageState extends State<TicketPage> {
-  String selectedStatus = 'Tickets'; // Active or Void
+  late final TicketController _ctrl;
   final TextEditingController _searchController = TextEditingController();
-  late Future<List<Ticket>> _ticketsFuture;
   Timer? _debounceTimer;
   bool showDetails = false;
   QRViewController? controller;
   final GlobalKey qrKey = GlobalKey(debugLabel: 'QR');
   bool _showQRScanner = false;
+
   @override
   void initState() {
     super.initState();
-    _ticketsFuture = _fetchTickets();
+    _ctrl = Get.put(TicketController());
     _searchController.addListener(_onSearchChanged);
   }
 
   void _onSearchChanged() {
     _debounceTimer?.cancel();
     _debounceTimer = Timer(const Duration(milliseconds: 500), () {
-      setState(() {
-        _ticketsFuture = _fetchTickets(_searchController.text);
-      });
+      _ctrl.fetchTickets(_searchController.text);
     });
-  }
-
-  Future<List<Ticket>> _fetchTickets([String? ticketNo]) async {
-    return await TicketService.fetchTickets(
-      ticketNo: ticketNo,
-      status: selectedStatus == 'Void'
-          ? 'voided'
-          : 'pending_void,pending,won,lost',
-    );
   }
 
   String _formatDate(String? dateStr) {
@@ -83,7 +72,10 @@ class _TicketPageState extends State<TicketPage> {
     switch (status.toLowerCase()) {
       case 'pending':
         return AppColors.primary;
+      case 'pending_void':
+        return const Color(0xFFF97316);
       case 'void':
+      case 'voided':
         return const Color(0xFFEC4899);
       case 'won':
         return const Color(0xFF10B981);
@@ -92,11 +84,29 @@ class _TicketPageState extends State<TicketPage> {
     }
   }
 
+  String _getStatusLabel(String status) {
+    switch (status.toLowerCase()) {
+      case 'pending_void':
+        return 'VOID REQUEST';
+      case 'voided':
+        return 'VOIDED';
+      case 'pending':
+        return 'PENDING';
+      case 'won':
+        return 'WON';
+      case 'lost':
+        return 'LOST';
+      default:
+        return status.toUpperCase();
+    }
+  }
+
   @override
   void dispose() {
     _debounceTimer?.cancel();
     _searchController.dispose();
     controller?.dispose();
+    Get.delete<TicketController>();
     super.dispose();
   }
 
@@ -127,8 +137,8 @@ class _TicketPageState extends State<TicketPage> {
     // Trigger search
     setState(() {
       _showQRScanner = false;
-      _ticketsFuture = _fetchTickets(qrCode);
     });
+    _ctrl.fetchTickets(qrCode);
   }
 
   @override
@@ -258,21 +268,19 @@ class _TicketPageState extends State<TicketPage> {
 
   Future<void> _voidTicketAction(Ticket ticket, String reason) async {
     try {
-      await TicketService.voidTicket(ticket.id ?? '', reason);
+      await _ctrl.voidTicket(ticket.id ?? '', reason);
       Get.snackbar(
         'Success',
         'Ticket voided successfully',
+        snackPosition: SnackPosition.BOTTOM,
         backgroundColor: const Color(0xFF10B981),
         colorText: Colors.white,
       );
-      // Refresh the tickets list
-      setState(() {
-        _ticketsFuture = _fetchTickets(_searchController.text);
-      });
     } catch (e) {
       Get.snackbar(
         'Error',
         'Failed to void ticket: $e',
+        snackPosition: SnackPosition.BOTTOM,
         backgroundColor: Colors.red,
         colorText: Colors.white,
       );
@@ -339,34 +347,33 @@ class _TicketPageState extends State<TicketPage> {
                   children: ['Tickets', 'Void']
                       .map(
                         (status) => Expanded(
-                          child: GestureDetector(
-                            onTap: () {
-                              setState(() {
-                                selectedStatus = status;
+                          child: Obx(
+                            () => GestureDetector(
+                              onTap: () {
                                 _searchController.clear();
-                                _ticketsFuture = _fetchTickets();
-                              });
-                            },
-                            child: Container(
-                              padding: const EdgeInsets.symmetric(
-                                vertical: 12,
-                                horizontal: 16,
-                              ),
-                              decoration: BoxDecoration(
-                                color: selectedStatus == status
-                                    ? AppColors.primary
-                                    : Colors.grey[100],
-                                borderRadius: BorderRadius.circular(12),
-                              ),
-                              alignment: Alignment.center,
-                              child: Text(
-                                status,
-                                style: TextStyle(
-                                  fontSize: 14,
-                                  fontWeight: FontWeight.w500,
-                                  color: selectedStatus == status
-                                      ? Colors.white
-                                      : Colors.grey[400],
+                                _ctrl.setStatus(status);
+                              },
+                              child: Container(
+                                padding: const EdgeInsets.symmetric(
+                                  vertical: 12,
+                                  horizontal: 16,
+                                ),
+                                decoration: BoxDecoration(
+                                  color: _ctrl.selectedStatus.value == status
+                                      ? AppColors.primary
+                                      : Colors.grey[100],
+                                  borderRadius: BorderRadius.circular(12),
+                                ),
+                                alignment: Alignment.center,
+                                child: Text(
+                                  status,
+                                  style: TextStyle(
+                                    fontSize: 14,
+                                    fontWeight: FontWeight.w500,
+                                    color: _ctrl.selectedStatus.value == status
+                                        ? Colors.white
+                                        : Colors.grey[400],
+                                  ),
                                 ),
                               ),
                             ),
@@ -426,85 +433,62 @@ class _TicketPageState extends State<TicketPage> {
         const SizedBox(height: 8),
         // Ticket list
         Expanded(
-          child: FutureBuilder<List<Ticket>>(
-            future: _ticketsFuture,
-            builder: (context, snapshot) {
-              if (snapshot.connectionState == ConnectionState.waiting) {
-                return const Center(child: CircularProgressIndicator());
-              }
+          child: Obx(() {
+            if (_ctrl.isLoading.value) {
+              return const Center(child: CircularProgressIndicator());
+            }
 
-              if (snapshot.hasError) {
-                return Center(
-                  child: Column(
-                    mainAxisAlignment: MainAxisAlignment.center,
-                    children: [
-                      Icon(
-                        Icons.error_outline,
-                        size: 48,
-                        color: Colors.grey[400],
+            if (_ctrl.hasError.value) {
+              return Center(
+                child: Column(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    Icon(
+                      Icons.error_outline,
+                      size: 48,
+                      color: Colors.grey[400],
+                    ),
+                    const SizedBox(height: 16),
+                    Text(
+                      'Failed to load tickets',
+                      style: TextStyle(color: Colors.grey[600]),
+                    ),
+                    const SizedBox(height: 16),
+                    ElevatedButton(
+                      onPressed: () => _ctrl.fetchTickets(),
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: AppColors.primary,
                       ),
-                      const SizedBox(height: 16),
-                      Text(
-                        'Failed to load tickets',
-                        style: TextStyle(color: Colors.grey[600]),
+                      child: const Text(
+                        'Retry',
+                        style: TextStyle(color: Colors.white),
                       ),
-                      const SizedBox(height: 16),
-                      ElevatedButton(
-                        onPressed: () {
-                          setState(() {
-                            _ticketsFuture = _fetchTickets();
-                          });
-                        },
-                        style: ElevatedButton.styleFrom(
-                          backgroundColor: AppColors.primary,
-                        ),
-                        child: const Text(
-                          'Retry',
-                          style: TextStyle(color: Colors.white),
-                        ),
-                      ),
-                    ],
-                  ),
-                );
-              }
-
-              final allTickets = snapshot.data ?? [];
-
-              if (allTickets.isEmpty) {
-                return Center(
-                  child: Text(
-                    'No tickets found',
-                    style: TextStyle(color: Colors.grey[600]),
-                  ),
-                );
-              }
-
-              // Sort tickets: pending_void first, then others
-              allTickets.sort((a, b) {
-                if (a.status?.toLowerCase() == 'pending_void' &&
-                    b.status?.toLowerCase() != 'pending_void') {
-                  return -1;
-                }
-                if (a.status?.toLowerCase() != 'pending_void' &&
-                    b.status?.toLowerCase() == 'pending_void') {
-                  return 1;
-                }
-                return 0;
-              });
-
-              return ListView.builder(
-                padding: const EdgeInsets.symmetric(
-                  horizontal: 16,
-                  vertical: 8,
+                    ),
+                  ],
                 ),
-                itemCount: allTickets.length,
-                itemBuilder: (context, index) {
-                  final ticket = allTickets[index];
-                  return _buildTicketCard(ticket);
-                },
               );
-            },
-          ),
+            }
+
+            final allTickets = _ctrl.tickets;
+
+            if (allTickets.isEmpty) {
+              return Center(
+                child: Text(
+                  'No tickets found',
+                  style: TextStyle(color: Colors.grey[600]),
+                ),
+              );
+            }
+
+            return ListView.builder(
+              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+              itemCount: allTickets.length,
+              itemBuilder: (context, index) {
+                final ticket = allTickets[index];
+                return _buildTicketCard(ticket);
+              },
+            );
+          }),
         ),
       ],
     );
@@ -628,7 +612,7 @@ class _TicketPageState extends State<TicketPage> {
                   ),
                   const SizedBox(height: 4),
                   Text(
-                    (ticket.status ?? 'UNKNOWN').toUpperCase(),
+                    _getStatusLabel(ticket.status ?? 'UNKNOWN'),
                     style: TextStyle(
                       fontSize: 14,
                       fontWeight: FontWeight.w600,
@@ -790,7 +774,7 @@ class _TicketPageState extends State<TicketPage> {
                                       borderRadius: BorderRadius.circular(4),
                                     ),
                                     child: Text(
-                                      (bet.status ?? '').toUpperCase(),
+                                      _getStatusLabel(bet.status ?? ''),
                                       style: TextStyle(
                                         fontSize: 10,
                                         fontWeight: FontWeight.w600,
@@ -895,7 +879,7 @@ class _TicketPageState extends State<TicketPage> {
                           borderRadius: BorderRadius.circular(4),
                         ),
                         child: Text(
-                          (ticket.status ?? '').toUpperCase(),
+                          _getStatusLabel(ticket.status ?? ''),
                           style: TextStyle(
                             fontSize: 12,
                             fontWeight: FontWeight.w600,

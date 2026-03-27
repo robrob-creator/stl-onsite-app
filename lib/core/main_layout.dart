@@ -18,6 +18,7 @@ class MainLayout extends StatefulWidget {
   final FloatingActionButton? floatingActionButton;
   final Color backgroundColor;
   final Widget? appBarTrailing;
+  final String? activeDrawerItem;
 
   const MainLayout({
     Key? key,
@@ -31,6 +32,7 @@ class MainLayout extends StatefulWidget {
     this.floatingActionButton,
     this.backgroundColor = Colors.white,
     this.appBarTrailing,
+    this.activeDrawerItem,
   }) : super(key: key);
 
   @override
@@ -116,7 +118,7 @@ class _MainLayoutState extends State<MainLayout> {
                       children: [
                         Image.asset(
                           'assets/images/logos/4play-tech.png',
-                          width: MediaQuery.of(context).size.width * 0.7,
+                          width: MediaQuery.of(context).size.width * 0.5,
                         ),
                       ],
                     ),
@@ -197,10 +199,12 @@ class _MainLayoutState extends State<MainLayout> {
                 padding: const EdgeInsets.symmetric(horizontal: 12.0),
                 child: Column(
                   children: [
-                    // Summary Report (selected)
+                    // Summary Report
                     Container(
                       decoration: BoxDecoration(
-                        color: const Color(0xFFF3F5F8),
+                        color: widget.activeDrawerItem == 'summary_report'
+                            ? const Color(0xFFF3F5F8)
+                            : Colors.transparent,
                         borderRadius: BorderRadius.circular(12),
                       ),
                       child: ListTile(
@@ -208,11 +212,14 @@ class _MainLayoutState extends State<MainLayout> {
                           Icons.grid_view_rounded,
                           color: Color(0xFF222222),
                         ),
-                        title: const Text(
+                        title: Text(
                           'Summary Report',
                           style: TextStyle(
-                            fontWeight: FontWeight.w700,
-                            color: Color(0xFF222222),
+                            fontWeight:
+                                widget.activeDrawerItem == 'summary_report'
+                                ? FontWeight.w700
+                                : FontWeight.w500,
+                            color: const Color(0xFF222222),
                           ),
                         ),
                         onTap: () {

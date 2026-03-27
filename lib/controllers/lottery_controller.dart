@@ -8,6 +8,7 @@ import '../models/game.dart';
 import '../core/services/game_service.dart';
 import '../core/services/printer_service.dart';
 import '../core/services/profile_service.dart';
+import '../core/services/websocket_service.dart';
 
 class BetEntry {
   final int betNumber;
@@ -61,6 +62,18 @@ class LotteryController extends GetxController {
     super.onInit();
     loadGames();
     loadProfile();
+    _subscribeToWebSocketEvents();
+  }
+
+  void _subscribeToWebSocketEvents() {
+    try {
+      final ws = Get.find<WebSocketService>();
+      ws.on('bet.placed', (_) => loadProfile());
+      ws.on('bet.bulk_placed', (_) => loadProfile());
+      ws.on('claim.paid', (_) => loadProfile());
+    } catch (_) {
+      // WebSocketService not yet available — will connect after auth
+    }
   }
 
   /// Fetch games from the API

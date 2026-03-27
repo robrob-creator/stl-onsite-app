@@ -1,10 +1,12 @@
 import 'package:get/get.dart';
 import 'package:http/http.dart' as http;
 import 'dart:convert';
+import 'package:flutter/material.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:device_info_plus/device_info_plus.dart';
 import '../models/login_response.dart';
 import '../core/app_constants.dart';
+import '../core/services/websocket_service.dart';
 import '../models/user.dart';
 
 class AuthController extends GetxController {
@@ -23,7 +25,6 @@ class AuthController extends GetxController {
   static const String baseUrl = '${AppConstants.apiBaseUrl}/auth';
 
   // Secure storage keys
-  static const String _imeiKey = 'device_imei';
   static const String _tokenKey = 'auth_token';
   static const String _userKey = 'current_user';
 
@@ -32,6 +33,7 @@ class AuthController extends GetxController {
     super.onInit();
     _secureStorage = const FlutterSecureStorage();
     _deviceInfo = DeviceInfoPlugin();
+    Get.put(WebSocketService());
     _initializeDevice().then((_) {
       restoreSession();
     });
@@ -89,6 +91,7 @@ class AuthController extends GetxController {
           // Clear invalid user data
           await _secureStorage.delete(key: _userKey);
         }
+        _connectWebSocket();
       }
     } catch (e) {
       // Silently fail if restoration fails
@@ -187,6 +190,7 @@ class AuthController extends GetxController {
 
         // Navigate to home
         Get.offNamed('/home');
+        _connectWebSocket();
       } else {
         _handleErrorResponse(response);
       }
@@ -255,6 +259,7 @@ class AuthController extends GetxController {
 
   // Logout function
   Future<void> logout() async {
+    await Get.find<WebSocketService>().disconnect();
     currentUser.value = null;
     token.value = '';
     mpin.value = '';
@@ -264,6 +269,70 @@ class AuthController extends GetxController {
     await _secureStorage.delete(key: _userKey);
 
     Get.offNamed('/login');
+  }
+
+  void _connectWebSocket() {
+    final wsService = Get.find<WebSocketService>();
+    wsService.connect(token.value);
+
+    wsService.on('ticket.voided', (payload) {
+      Get.snackbar(
+        'Ticket Voided',
+        'Ticket ${payload['ticketNo'] ?? ''} has been voided.',
+        snackPosition: SnackPosition.BOTTOM,
+        backgroundColor: const Color(0xFFEC4899),
+        colorText: Colors.white,
+        duration: const Duration(seconds: 5),
+      );
+    });
+
+    wsService.on('bet.placed', (payload) {
+      // balance refresh handled by LotteryController
+    });
+
+    wsService.on('bet.bulk_placed', (payload) {
+      Get.snackbar(
+        'Bets Confirmed',
+        'Your bets have been placed successfully.',
+        snackPosition: SnackPosition.BOTTOM,
+        backgroundColor: const Color(0xFF10B981),
+        colorText: Colors.white,
+      );
+    });
+
+    wsService.on('draw_result.posted', (payload) {
+      final game = payload['gameName'] ?? payload['game'] ?? 'Game';
+      Get.snackbar(
+        'Draw Result',
+        '$game draw result is now available.',
+        snackPosition: SnackPosition.BOTTOM,
+        backgroundColor: const Color(0xFF2563EB),
+        colorText: Colors.white,
+        duration: const Duration(seconds: 6),
+      );
+    });
+
+    wsService.on('claim.created', (payload) {
+      Get.snackbar(
+        'Claim Submitted',
+        'A winning claim has been submitted.',
+        snackPosition: SnackPosition.BOTTOM,
+        backgroundColor: const Color(0xFF10B981),
+        colorText: Colors.white,
+      );
+    });
+
+    wsService.on('claim.paid', (payload) {
+      // balance refresh handled by LotteryController
+      Get.snackbar(
+        'Claim Paid',
+        'A winning claim has been paid out.',
+        snackPosition: SnackPosition.BOTTOM,
+        backgroundColor: const Color(0xFF10B981),
+        colorText: Colors.white,
+        duration: const Duration(seconds: 6),
+      );
+    });
   }
 
   // Check if user is logged in
