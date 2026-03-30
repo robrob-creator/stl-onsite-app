@@ -39,6 +39,33 @@ class BetEntry {
       straightBetAmount > 0 ? straightBetAmount : rambleBetAmount;
 }
 
+class DraftBet {
+  final String id;
+  final String gameName;
+  final List<String> digits;
+  final double straightBetAmount;
+  final double rambleBetAmount;
+  final double totalBetAmount;
+  final double estPayout;
+  final int combinations;
+
+  DraftBet({
+    required this.id,
+    required this.gameName,
+    required this.digits,
+    required this.straightBetAmount,
+    required this.rambleBetAmount,
+    required this.totalBetAmount,
+    required this.estPayout,
+    required this.combinations,
+  });
+
+  String get betType {
+    if (straightBetAmount > 0 && rambleBetAmount > 0) return 'Both';
+    return straightBetAmount > 0 ? 'Target' : 'Rambol';
+  }
+}
+
 class LotteryController extends GetxController {
   // Games from API
   final RxList<Game> availableGames = <Game>[].obs;
@@ -51,10 +78,9 @@ class LotteryController extends GetxController {
   final RxInt targetAmount = 0.obs;
   final RxInt rambolAmount = 0.obs;
 
-  // Bet tracking
-  final RxList<BetEntry> betList = <BetEntry>[].obs;
+  // Draft bets (API-backed, status=draft)
+  final RxList<DraftBet> draftBets = <DraftBet>[].obs;
   final RxDouble balance = 0.0.obs;
-  final RxInt betCounter = 0.obs;
   final RxBool isLoading = false.obs;
 
   @override
@@ -194,73 +220,228 @@ class LotteryController extends GetxController {
     update();
   }
 
-  void addBet() {
+  /// Sends the current bet inputs to `POST /bets/draft-bulk` and appends
+  /// the returned draft to [draftBets]. Returns `true` on success.
+  Future<bool> addBet() async {
     if (selectedNumbers.isEmpty) {
       Get.snackbar('Error', 'Please select numbers');
-      return;
+      return false;
     }
 
-    double straightAmount = targetAmount.value.toDouble();
-    double rambleAmount = rambolAmount.value.toDouble();
+    final double straightAmount = targetAmount.value.toDouble();
+    final double rambleAmount = rambolAmount.value.toDouble();
 
-    // At least one amount must be > 0
     if (straightAmount == 0 && rambleAmount == 0) {
       Get.snackbar('Error', 'Please enter at least one bet amount');
-      return;
+      return false;
     }
 
     final game = currentGame;
     if (game == null) {
       Get.snackbar('Error', 'Please select a game');
+      return false;
+    }
+
+    isLoading.value = true;
+    update();
+
+    try {
+      final token = Get.find<AuthController>().token.value;
+      final drawId = selectedTime.value;
+      final clusterId = game.clusters.isNotEmpty ? game.clusters[0].id : '';
+      final combinations = calculateCombinations(selectedNumbers);
+      final digits = List<String>.from(selectedNumbers);
+
+      // Build separate items for each enabled bet type so the server stores
+      // them as independent draft records (one per type).
+      final List<Map<String, dynamic>> betItems = [];
+
+      if (straightAmount > 0) {
+        final estPayout = straightAmount * game.straightMultiplier;
+        betItems.add({
+          'draw_id': drawId,
+          'game_id': game.id,
+          'total_bet_amount': straightAmount,
+          'digits': digits,
+          'cluster_id': clusterId,
+          'straight_bet_amount': straightAmount,
+          'ramble_bet_amount': 0,
+          'est_payout': estPayout,
+        });
+      }
+
+      if (rambleAmount > 0) {
+        final estPayout =
+            (rambleAmount / combinations) * (game.rambleMultiplier ?? 0);
+        betItems.add({
+          'draw_id': drawId,
+          'game_id': game.id,
+          'total_bet_amount': rambleAmount,
+          'digits': digits,
+          'cluster_id': clusterId,
+          'straight_bet_amount': 0,
+          'ramble_bet_amount': rambleAmount,
+          'est_payout': estPayout,
+        });
+      }
+
+      final response = await http
+          .post(
+            Uri.parse('${AppConstants.apiBaseUrl}/bets/draft-bulk'),
+            headers: {
+              'Content-Type': 'application/json',
+              'Authorization': 'Bearer $token',
+            },
+            body: jsonEncode({'bets': betItems}),
+          )
+          .timeout(const Duration(seconds: 30));
+
+      if (response.statusCode != 200 && response.statusCode != 201) {
+        _handleBetError(response, 0);
+        return false;
+      }
+
+      // Response shape: { "message": "...", "data": [ {...}, ... ] }
+      // `data` is a flat List of the created bet objects.
+      final responseData = jsonDecode(response.body) as Map<String, dynamic>;
+      final betsJson = (responseData['data'] as List?) ?? [];
+
+      if (betsJson.isEmpty) {
+        // Fallback: build placeholder drafts from local intent so the user
+        // can still see and submit what they added.
+        if (straightAmount > 0) {
+          draftBets.add(
+            DraftBet(
+              id: '',
+              gameName: game.name,
+              digits: digits,
+              straightBetAmount: straightAmount,
+              rambleBetAmount: 0,
+              totalBetAmount: straightAmount,
+              estPayout: straightAmount * game.straightMultiplier,
+              combinations: combinations,
+            ),
+          );
+        }
+        if (rambleAmount > 0) {
+          draftBets.add(
+            DraftBet(
+              id: '',
+              gameName: game.name,
+              digits: digits,
+              straightBetAmount: 0,
+              rambleBetAmount: rambleAmount,
+              totalBetAmount: rambleAmount,
+              estPayout:
+                  (rambleAmount / combinations) * (game.rambleMultiplier ?? 0),
+              combinations: combinations,
+            ),
+          );
+        }
+      } else {
+        // Map each returned bet to a DraftBet.
+        // The server sends back one record per item we submitted so the
+        // count should match betItems.length, but we iterate what we get.
+        for (final betJson in betsJson) {
+          final serverStraight = (betJson['straight_bet_amount'] as num? ?? 0)
+              .toDouble();
+          final serverRamble = (betJson['ramble_bet_amount'] as num? ?? 0)
+              .toDouble();
+          final serverTotal = (betJson['total_bet_amount'] as num? ?? 0)
+              .toDouble();
+          final serverEstPayout = (betJson['est_payout'] as num? ?? 0)
+              .toDouble();
+
+          // Parse digits from the server response (may be a JSON list or
+          // PostgreSQL-array literal like "{25,17}").
+          List<String> serverDigits = digits; // default to what we sent
+          final rawDigits = betJson['digits'];
+          if (rawDigits is List) {
+            serverDigits = List<String>.from(rawDigits);
+          } else if (rawDigits is String) {
+            serverDigits = rawDigits
+                .replaceAll('{', '')
+                .replaceAll('}', '')
+                .split(',')
+                .map((d) => d.trim())
+                .toList();
+          }
+
+          draftBets.add(
+            DraftBet(
+              id: betJson['id'] as String? ?? '',
+              gameName: game.name,
+              digits: serverDigits,
+              straightBetAmount: serverStraight,
+              rambleBetAmount: serverRamble,
+              totalBetAmount: serverTotal,
+              estPayout: serverEstPayout,
+              combinations: combinations,
+            ),
+          );
+        }
+      }
+
+      clearNumbers();
+      targetAmount.value = 0;
+      rambolAmount.value = 0;
+      update();
+      return true;
+    } catch (e) {
+      Get.snackbar(
+        'Error',
+        'Failed to add bet: $e',
+        snackPosition: SnackPosition.BOTTOM,
+      );
+      return false;
+    } finally {
+      isLoading.value = false;
+      update();
+    }
+  }
+
+  Future<void> removeBet(int index) async {
+    final draft = draftBets[index];
+
+    // If no server ID yet (fallback placeholder), just remove locally.
+    if (draft.id.isEmpty) {
+      draftBets.removeAt(index);
+      update();
       return;
     }
 
-    // Calculate combinations dynamically based on the actual numbers entered
-    final combinations = calculateCombinations(selectedNumbers);
+    try {
+      final token = Get.find<AuthController>().token.value;
+      final response = await http
+          .delete(
+            Uri.parse('${AppConstants.apiBaseUrl}/bets/delete?id=${draft.id}'),
+            headers: {
+              'Content-Type': 'application/json',
+              'Authorization': 'Bearer $token',
+            },
+          )
+          .timeout(const Duration(seconds: 30));
 
-    // When both amounts are provided, create two separate bet entries.
-    if (straightAmount > 0) {
-      betList.add(
-        BetEntry(
-          betNumber: betCounter.value,
-          game: game.name,
-          straightBetAmount: straightAmount,
-          rambleBetAmount: 0,
-          winAmount: straightAmount * game.straightMultiplier,
-          digits: List<String>.from(selectedNumbers),
-          combinations: combinations,
-        ),
+      if (response.statusCode == 200 ||
+          response.statusCode == 204 ||
+          response.statusCode == 404) {
+        // 404 means already gone — treat as success
+        draftBets.removeAt(index);
+        update();
+      } else {
+        final body = jsonDecode(response.body) as Map<String, dynamic>? ?? {};
+        final message =
+            body['message'] as String? ??
+            'Failed to delete bet (${response.statusCode})';
+        Get.snackbar('Error', message, snackPosition: SnackPosition.BOTTOM);
+      }
+    } catch (e) {
+      Get.snackbar(
+        'Error',
+        'Failed to delete bet: $e',
+        snackPosition: SnackPosition.BOTTOM,
       );
-      betCounter.value++;
     }
-
-    if (rambleAmount > 0) {
-      betList.add(
-        BetEntry(
-          betNumber: betCounter.value,
-          game: game.name,
-          straightBetAmount: 0,
-          rambleBetAmount: rambleAmount,
-          winAmount:
-              (rambleAmount / combinations) * (game.rambleMultiplier ?? 0),
-          digits: List<String>.from(selectedNumbers),
-          combinations: combinations,
-        ),
-      );
-      betCounter.value++;
-    }
-
-    clearNumbers();
-    targetAmount.value = 0;
-    rambolAmount.value = 0;
-    update();
-
-    Get.snackbar('Success', 'Bet added successfully');
-  }
-
-  void removeBet(int index) {
-    betList.removeAt(index);
-    update();
   }
 
   /// Pre-checks a single bet against the sold-out endpoint.
@@ -320,7 +501,7 @@ class LotteryController extends GetxController {
   }
 
   Future<void> submitBets() async {
-    if (betList.isEmpty) {
+    if (draftBets.isEmpty) {
       Get.snackbar('Error', 'Please add at least one bet');
       return;
     }
@@ -333,64 +514,47 @@ class LotteryController extends GetxController {
 
       if (!authController.isLoggedIn) {
         Get.snackbar('Error', 'Please log in first');
-        isLoading.value = false;
-        update();
         return;
       }
 
       final game = currentGame;
       if (game == null) {
         Get.snackbar('Error', 'Please select a game');
-        isLoading.value = false;
-        update();
         return;
       }
 
-      // Get the selected draw time ID
       final drawId = selectedTime.value;
       final token = authController.token.value;
-      final userId = authController.currentUser.value?.id ?? '';
 
-      // Get the first cluster (default to first available cluster)
       final clusterId = game.clusters.isNotEmpty ? game.clusters[0].id : '';
       final clusterCode = game.clusters.isNotEmpty
           ? game.clusters[0].id.substring(0, 3).toUpperCase()
           : 'UNK';
 
-      // Create bet objects for bulk submission
-      List<Map<String, dynamic>> betsToSubmit = [];
-
-      // Generate ONE unique ticket number for the entire batch
       final now = DateTime.now();
       final uniqueTimestamp =
           '${now.hour.toString().padLeft(2, '0')}${now.minute.toString().padLeft(2, '0')}${now.second.toString().padLeft(2, '0')}${now.millisecond.toString().padLeft(3, '0')}';
       final batchTicketNo =
-          'TKT-$clusterCode-${DateTime.now().year}-${DateTime.now().month.toString().padLeft(2, '0')}-${DateTime.now().day.toString().padLeft(2, '0')}-$uniqueTimestamp';
+          'TKT-$clusterCode-${now.year}-${now.month.toString().padLeft(2, '0')}-${now.day.toString().padLeft(2, '0')}-$uniqueTimestamp';
 
-      for (int i = 0; i < betList.length; i++) {
-        final betEntry = betList[i];
+      // Collect unique draft bet IDs (exclude empty-id fallback entries)
+      final betIds = draftBets
+          .map((d) => d.id)
+          .where((id) => id.isNotEmpty)
+          .toSet()
+          .toList();
 
-        final bet = {
-          'draw_id': drawId,
-          'game_id': game.id,
-          'ticket_no': batchTicketNo,
-          'cluster_id': clusterId,
-          'agent_id': userId,
-          'straight_bet_amount': betEntry.straightBetAmount,
-          'ramble_bet_amount': betEntry.rambleBetAmount,
-          'total_bet_amount': betEntry.totalBetAmount,
-          'digits': betEntry.digits,
-        };
-
-        betsToSubmit.add(bet);
-      }
-
-      // Submit bulk bets
-      final payload = {'bets': betsToSubmit};
+      final payload = {
+        'bet_ids': betIds,
+        'ticket_no': batchTicketNo,
+        'draw_id': drawId,
+        'cluster_id': clusterId,
+        'payment_method': 'cash',
+      };
 
       final response = await http
           .post(
-            Uri.parse('${AppConstants.apiBaseUrl}/bets/bulk'),
+            Uri.parse('${AppConstants.apiBaseUrl}/bets/submit-draft'),
             headers: {
               'Content-Type': 'application/json',
               'Authorization': 'Bearer $token',
@@ -401,38 +565,60 @@ class LotteryController extends GetxController {
 
       if (response.statusCode != 200 && response.statusCode != 201) {
         _handleBetError(response, 0);
-        isLoading.value = false;
-        update();
         return;
       }
 
-      // Parse response
       final responseBody = jsonDecode(response.body);
       final responseData = responseBody['data'] as Map<String, dynamic>? ?? {};
       final teller = responseData['teller'] as Map<String, dynamic>? ?? {};
-
-      // All bets submitted successfully
-      final totalAmount = betList.fold<double>(
-        0,
-        (prev, bet) => prev + bet.totalBetAmount,
-      );
-
-      // Trigger Bluetooth POS print (fire-and-forget)
-      // Use the batch ticket number we generated and sent — don't rely on
-      // the API response which may return a ticket ID instead.
       final ticketNo = responseData['batch_id'] as String? ?? batchTicketNo;
 
-      // Capture game/draw-time context before state might be cleared
-      final gameName = currentGame?.name ?? '';
+      final totalAmount = draftBets.fold<double>(
+        0,
+        (prev, draft) => prev + draft.totalBetAmount,
+      );
+
+      // Capture context before clearing state
+      final gameName = game.name;
       final selectedDt = currentDrawTimes.cast<DrawTime?>().firstWhere(
         (d) => d?.id == selectedTime.value,
         orElse: () => null,
       );
       final drawTimeLabel = selectedDt?.getFormattedTime() ?? '';
 
-      // Snapshot betList BEFORE clearing — it has the digits the user
-      // entered, which may not come back in the API response.
-      final printEntries = List<BetEntry>.from(betList);
+      // Convert DraftBet entries to BetEntry for printing
+      final printEntries = draftBets.expand((draft) {
+        final entries = <BetEntry>[];
+        if (draft.straightBetAmount > 0) {
+          entries.add(
+            BetEntry(
+              betNumber: 0,
+              game: draft.gameName,
+              straightBetAmount: draft.straightBetAmount,
+              rambleBetAmount: 0,
+              winAmount: draft.straightBetAmount * (game.straightMultiplier),
+              digits: List<String>.from(draft.digits),
+              combinations: draft.combinations,
+            ),
+          );
+        }
+        if (draft.rambleBetAmount > 0) {
+          entries.add(
+            BetEntry(
+              betNumber: 0,
+              game: draft.gameName,
+              straightBetAmount: 0,
+              rambleBetAmount: draft.rambleBetAmount,
+              winAmount:
+                  (draft.rambleBetAmount / draft.combinations) *
+                  (game.rambleMultiplier ?? 0),
+              digits: List<String>.from(draft.digits),
+              combinations: draft.combinations,
+            ),
+          );
+        }
+        return entries;
+      }).toList();
 
       _triggerPrint(
         betEntries: printEntries,
@@ -443,11 +629,9 @@ class LotteryController extends GetxController {
         drawTimeLabel: drawTimeLabel,
       );
 
-      // Refresh user profile to update balance after bet submission
       await loadProfile();
 
-      // Clear bets after successful submission
-      betList.clear();
+      draftBets.clear();
       selectedNumbers.clear();
       targetAmount.value = 0;
       rambolAmount.value = 0;

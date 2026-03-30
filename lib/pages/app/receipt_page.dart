@@ -414,7 +414,7 @@ class ReceiptPage extends StatelessWidget {
                   controller.clearNumbers();
                   controller.targetAmount.value = 0;
                   controller.rambolAmount.value = 0;
-                  controller.betList.clear();
+                  controller.draftBets.clear();
                   Get.offNamed('/bet-entry');
                 },
                 style: ElevatedButton.styleFrom(

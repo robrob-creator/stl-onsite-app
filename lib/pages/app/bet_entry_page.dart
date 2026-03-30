@@ -86,45 +86,8 @@ class _BetEntryPageState extends State<BetEntryPage> {
     return buffer.toString();
   }
 
-  void _showLoadingDialog() {
-    Get.dialog(
-      Dialog(
-        backgroundColor: Colors.transparent,
-        elevation: 0,
-        child: Center(
-          child: Container(
-            padding: const EdgeInsets.symmetric(horizontal: 32, vertical: 28),
-            decoration: BoxDecoration(
-              color: Colors.white,
-              borderRadius: BorderRadius.circular(16),
-            ),
-            child: const Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                CircularProgressIndicator(
-                  valueColor: AlwaysStoppedAnimation<Color>(Color(0xFF3D5A99)),
-                  strokeWidth: 3,
-                ),
-                SizedBox(height: 20),
-                Text(
-                  'Submitting bets...',
-                  style: TextStyle(
-                    fontSize: 15,
-                    fontWeight: FontWeight.w500,
-                    color: Colors.black87,
-                  ),
-                ),
-              ],
-            ),
-          ),
-        ),
-      ),
-      barrierDismissible: false,
-    );
-  }
-
   Future<void> _confirmSubmit(LotteryController ctrl) async {
-    if (ctrl.betList.isEmpty) {
+    if (ctrl.draftBets.isEmpty) {
       Get.snackbar('Error', 'Please add at least one bet');
       return;
     }
@@ -858,11 +821,12 @@ class _BetEntryPageState extends State<BetEntryPage> {
                   final hasDrawTimes = ctrl.currentDrawTimes
                       .where((dt) => dt.isAvailable())
                       .isNotEmpty;
+                  final canAdd = hasDrawTimes && !ctrl.isLoading.value;
                   return SizedBox(
                     width: double.infinity,
                     height: 56,
                     child: ElevatedButton(
-                      onPressed: hasDrawTimes
+                      onPressed: canAdd
                           ? () async {
                               if (_lottoNumbers.isEmpty) {
                                 Get.snackbar('Error', 'Please select numbers');
@@ -1143,35 +1107,47 @@ class _BetEntryPageState extends State<BetEntryPage> {
                               controller.selectedNumbers.clear();
                               controller.selectedNumbers.addAll(digits);
 
-                              controller.addBet();
+                              final ok = await controller.addBet();
 
-                              // Clear all inputs after successful bet addition
-                              // Use Future.microtask to defer setState until after build completes
-                              Future.microtask(() {
-                                setState(() {
-                                  _lottoNumbers = '';
-                                  _targetAmountController.clear();
-                                  _rambolAmountController.clear();
+                              // Clear inputs only when the draft was created successfully
+                              if (ok) {
+                                Future.microtask(() {
+                                  setState(() {
+                                    _lottoNumbers = '';
+                                    _targetAmountController.clear();
+                                    _rambolAmountController.clear();
+                                  });
                                 });
-                              });
+                              }
                             }
                           : null,
                       style: ElevatedButton.styleFrom(
-                        backgroundColor: hasDrawTimes
+                        backgroundColor: canAdd
                             ? Colors.orange[400]
                             : Colors.grey[300],
                         shape: RoundedRectangleBorder(
                           borderRadius: BorderRadius.circular(12),
                         ),
                       ),
-                      child: Text(
-                        'Add Bet',
-                        style: TextStyle(
-                          color: hasDrawTimes ? Colors.white : Colors.grey[500],
-                          fontWeight: FontWeight.bold,
-                          fontSize: 16,
-                        ),
-                      ),
+                      child: ctrl.isLoading.value
+                          ? const SizedBox(
+                              height: 20,
+                              width: 20,
+                              child: CircularProgressIndicator(
+                                strokeWidth: 2,
+                                valueColor: AlwaysStoppedAnimation<Color>(
+                                  Colors.white,
+                                ),
+                              ),
+                            )
+                          : Text(
+                              'Add Bet',
+                              style: TextStyle(
+                                color: canAdd ? Colors.white : Colors.grey[500],
+                                fontWeight: FontWeight.bold,
+                                fontSize: 16,
+                              ),
+                            ),
                     ),
                   );
                 },
@@ -1181,7 +1157,7 @@ class _BetEntryPageState extends State<BetEntryPage> {
 
               // Bet List Table
               GetBuilder<LotteryController>(
-                builder: (ctrl) => controller.betList.isEmpty
+                builder: (ctrl) => controller.draftBets.isEmpty
                     ? SizedBox(
                         height: 100,
                         child: Center(
@@ -1277,9 +1253,9 @@ class _BetEntryPageState extends State<BetEntryPage> {
                             ),
                           ),
                           // Table Rows
-                          ...ctrl.betList.asMap().entries.map((entry) {
+                          ...ctrl.draftBets.asMap().entries.map((entry) {
                             int index = entry.key;
-                            var bet = entry.value;
+                            var draft = entry.value;
                             return Container(
                               padding: const EdgeInsets.symmetric(
                                 horizontal: 12,
@@ -1295,35 +1271,35 @@ class _BetEntryPageState extends State<BetEntryPage> {
                                   Expanded(
                                     flex: 1,
                                     child: Text(
-                                      bet.digits.join("-").toString(),
+                                      draft.digits.join("-"),
                                       style: const TextStyle(fontSize: 12),
                                     ),
                                   ),
                                   Expanded(
                                     flex: 1,
                                     child: Text(
-                                      bet.game,
+                                      draft.gameName,
                                       style: const TextStyle(fontSize: 12),
                                     ),
                                   ),
                                   Expanded(
                                     flex: 1,
                                     child: Text(
-                                      bet.betType,
+                                      draft.betType,
                                       style: const TextStyle(fontSize: 12),
                                     ),
                                   ),
                                   Expanded(
                                     flex: 1,
                                     child: Text(
-                                      bet.betAmount.toStringAsFixed(0),
+                                      draft.totalBetAmount.toStringAsFixed(0),
                                       style: const TextStyle(fontSize: 12),
                                     ),
                                   ),
                                   Expanded(
                                     flex: 1,
                                     child: Text(
-                                      _formatNumber(bet.winAmount),
+                                      _formatNumber(draft.estPayout),
                                       style: const TextStyle(
                                         fontSize: 12,
                                         fontWeight: FontWeight.w500,
@@ -1362,14 +1338,14 @@ class _BetEntryPageState extends State<BetEntryPage> {
                     mainAxisAlignment: MainAxisAlignment.spaceBetween,
                     children: [
                       Text(
-                        'Total Bets: ${ctrl.betList.length}',
+                        'Total Bets: ${ctrl.draftBets.length}',
                         style: const TextStyle(
                           fontSize: 14,
                           fontWeight: FontWeight.w500,
                         ),
                       ),
                       Text(
-                        'Total: ₱ ${ctrl.betList.fold<double>(0, (prev, bet) => prev + bet.totalBetAmount).toStringAsFixed(2)}',
+                        'Total: ₱ ${ctrl.draftBets.fold<double>(0, (prev, draft) => prev + draft.totalBetAmount).toStringAsFixed(2)}',
                         style: const TextStyle(
                           fontSize: 14,
                           fontWeight: FontWeight.bold,
