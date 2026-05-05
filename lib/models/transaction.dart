@@ -245,6 +245,167 @@ class TransactionGroup {
       transactions.isNotEmpty ? transactions.first.createdAt : '';
 }
 
+class TicketCustomer {
+  final String id;
+  final String name;
+  final String email;
+  final String phoneNumber;
+  final String role;
+
+  TicketCustomer({
+    required this.id,
+    required this.name,
+    required this.email,
+    required this.phoneNumber,
+    required this.role,
+  });
+
+  factory TicketCustomer.fromJson(Map<String, dynamic> json) {
+    return TicketCustomer(
+      id: json['id'] as String? ?? '',
+      name: json['name'] as String? ?? '',
+      email: json['email'] as String? ?? '',
+      phoneNumber: json['phone_number'] as String? ?? '',
+      role: json['role'] as String? ?? '',
+    );
+  }
+}
+
+class Ticket {
+  final String id;
+  final String batchId;
+  final String accountNumber;
+  final String createdAt;
+  final String? deletedAt;
+  final TicketCustomer? customer;
+  final String paymentMethod;
+  final String status;
+  final String ticketNo;
+  final double totalBetAmount;
+  final int totalBets;
+  final double winningPayout;
+  final String? drawTime;
+  final String? drawTimeId;
+
+  Ticket({
+    required this.id,
+    required this.batchId,
+    required this.accountNumber,
+    required this.createdAt,
+    this.deletedAt,
+    this.customer,
+    required this.paymentMethod,
+    required this.status,
+    required this.ticketNo,
+    required this.totalBetAmount,
+    required this.totalBets,
+    required this.winningPayout,
+    this.drawTime,
+    this.drawTimeId,
+  });
+
+  factory Ticket.fromJson(
+    Map<String, dynamic> json, {
+    String? drawTime,
+    String? drawTimeId,
+  }) {
+    return Ticket(
+      id: json['id'] as String? ?? '',
+      batchId: json['batch_id'] as String? ?? '',
+      accountNumber: json['account_number'] as String? ?? '',
+      createdAt: json['created_at'] as String? ?? '',
+      deletedAt: json['deleted_at'] as String?,
+      customer: json['customer'] is Map<String, dynamic>
+          ? TicketCustomer.fromJson(json['customer'] as Map<String, dynamic>)
+          : null,
+      paymentMethod: json['payment_method'] as String? ?? '',
+      status: json['status'] as String? ?? '',
+      ticketNo: json['ticket_no'] as String? ?? '',
+      totalBetAmount: (json['total_bet_amount'] as num?)?.toDouble() ?? 0.0,
+      totalBets: (json['total_bets'] as num?)?.toInt() ?? 0,
+      winningPayout: (json['winning_payout'] as num?)?.toDouble() ?? 0.0,
+      drawTime: drawTime,
+      drawTimeId: drawTimeId,
+    );
+  }
+}
+
+class TicketGroup {
+  final String drawTimeId;
+  final String drawTime;
+  final List<Ticket> tickets;
+
+  TicketGroup({
+    required this.drawTimeId,
+    required this.drawTime,
+    required this.tickets,
+  });
+
+  double get totalAmount =>
+      tickets.fold(0.0, (sum, t) => sum + t.totalBetAmount);
+
+  int get count => tickets.length;
+
+  String get overallStatus {
+    if (tickets.every((t) => t.status == 'completed')) return 'completed';
+    if (tickets.any((t) => t.status == 'failed')) return 'failed';
+    return 'pending';
+  }
+
+  String get createdAt => tickets.isNotEmpty ? tickets.first.createdAt : '';
+}
+
+class TicketBet {
+  final String id;
+  final String drawId;
+  final String gameId;
+  final double straightBetAmount;
+  final double rambleBetAmount;
+  final double totalBetAmount;
+  final String status;
+  final String ticketNo;
+  final String drawDate;
+  final List<String> digits;
+  final double estPayout;
+  final String createdAt;
+
+  TicketBet({
+    required this.id,
+    required this.drawId,
+    required this.gameId,
+    required this.straightBetAmount,
+    required this.rambleBetAmount,
+    required this.totalBetAmount,
+    required this.status,
+    required this.ticketNo,
+    required this.drawDate,
+    required this.digits,
+    required this.estPayout,
+    required this.createdAt,
+  });
+
+  String get betType => straightBetAmount > 0 ? 'Target' : 'Rambol';
+
+  factory TicketBet.fromJson(Map<String, dynamic> json) {
+    return TicketBet(
+      id: json['id'] as String? ?? '',
+      drawId: json['draw_id'] as String? ?? '',
+      gameId: json['game_id'] as String? ?? '',
+      straightBetAmount:
+          (json['straight_bet_amount'] as num?)?.toDouble() ?? 0.0,
+      rambleBetAmount: (json['ramble_bet_amount'] as num?)?.toDouble() ?? 0.0,
+      totalBetAmount: (json['total_bet_amount'] as num?)?.toDouble() ?? 0.0,
+      status: json['status'] as String? ?? '',
+      ticketNo: json['ticket_no'] as String? ?? '',
+      drawDate: json['draw_date'] as String? ?? '',
+      digits:
+          (json['digits'] as List?)?.map((e) => e.toString()).toList() ?? [],
+      estPayout: (json['est_payout'] as num?)?.toDouble() ?? 0.0,
+      createdAt: json['created_at'] as String? ?? '',
+    );
+  }
+}
+
 class TransactionBet {
   final String id;
   final String gameName;

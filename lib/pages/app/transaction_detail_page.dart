@@ -4,7 +4,7 @@ import '../../models/transaction.dart';
 import '../../core/services/transaction_service.dart';
 
 class TransactionDetailPage extends StatelessWidget {
-  final TransactionGroup group;
+  final TicketGroup group;
 
   const TransactionDetailPage({super.key, required this.group});
 
@@ -50,11 +50,11 @@ class TransactionDetailPage extends StatelessWidget {
       ),
       body: ListView.separated(
         padding: const EdgeInsets.all(16),
-        itemCount: group.transactions.length,
+        itemCount: group.tickets.length,
         separatorBuilder: (_, __) => const SizedBox(height: 12),
         itemBuilder: (context, index) {
-          return _TransactionCard(
-            transaction: group.transactions[index],
+          return _TicketCard(
+            ticket: group.tickets[index],
             drawTime: group.drawTime,
           );
         },
@@ -63,32 +63,30 @@ class TransactionDetailPage extends StatelessWidget {
   }
 }
 
-class _TransactionCard extends StatefulWidget {
-  final Transaction transaction;
+class _TicketCard extends StatefulWidget {
+  final Ticket ticket;
   final String drawTime;
 
-  const _TransactionCard({required this.transaction, required this.drawTime});
+  const _TicketCard({required this.ticket, required this.drawTime});
 
   @override
-  State<_TransactionCard> createState() => _TransactionCardState();
+  State<_TicketCard> createState() => _TicketCardState();
 }
 
-class _TransactionCardState extends State<_TransactionCard> {
+class _TicketCardState extends State<_TicketCard> {
   bool _expanded = false;
   bool _loading = false;
   String? _error;
-  List<TransactionBet>? _bets;
+  List<TicketBet>? _bets;
 
   Future<void> _loadBets() async {
-    if (_bets != null) return; // already fetched
+    if (_bets != null) return;
     setState(() {
       _loading = true;
       _error = null;
     });
     try {
-      final bets = await TransactionService.fetchTransactionBets(
-        widget.transaction.id,
-      );
+      final bets = await TransactionService.fetchTicketBets(widget.ticket.id);
       setState(() {
         _bets = bets;
         _loading = false;
@@ -220,10 +218,9 @@ class _TransactionCardState extends State<_TransactionCard> {
     );
   }
 
-  Widget _buildBetsTable(List<TransactionBet> bets) {
+  Widget _buildBetsTable(List<TicketBet> bets) {
     return Column(
       children: [
-        // Header
         Container(
           decoration: BoxDecoration(
             color: AppColors.primary,
@@ -234,15 +231,14 @@ class _TransactionCardState extends State<_TransactionCard> {
           ),
           child: Row(
             children: [
-              _buildTableHeader('Game', flex: 2),
               _buildTableHeader('Bet.No', flex: 2),
               _buildTableHeader('Amount', flex: 2),
               _buildTableHeader('Type', flex: 2),
+              _buildTableHeader('Est. Payout', flex: 2),
               _buildTableHeader('Soldout', flex: 2),
             ],
           ),
         ),
-        // Rows
         Container(
           decoration: BoxDecoration(
             border: Border.all(color: Colors.grey[200]!),
@@ -262,13 +258,16 @@ class _TransactionCardState extends State<_TransactionCard> {
               final isSoldout = bet.status.toLowerCase() == 'soldout';
               return Row(
                 children: [
-                  _buildTableCell(bet.gameName, flex: 2),
                   _buildTableCell(bet.digits.join('-'), flex: 2),
                   _buildTableCell(
-                    '${bet.totalBetAmount.toStringAsFixed(0)}',
+                    bet.totalBetAmount.toStringAsFixed(0),
                     flex: 2,
                   ),
                   _buildTableCell(bet.betType, flex: 2),
+                  _buildTableCell(
+                    bet.estPayout.toStringAsFixed(0),
+                    flex: 2,
+                  ),
                   _buildTableCell(
                     isSoldout ? 'Yes' : 'No',
                     flex: 2,
@@ -288,28 +287,21 @@ class _TransactionCardState extends State<_TransactionCard> {
 
   @override
   Widget build(BuildContext context) {
-    final tx = widget.transaction;
-    // Extract ticket number from bets if loaded, otherwise show idx
-    final ticketLabel = _bets != null && _bets!.isNotEmpty
-        ? _bets!.first.ticketNo
-        : '#${tx.idx}';
+    final ticket = widget.ticket;
 
     return Container(
       decoration: BoxDecoration(
         color: Colors.white,
         borderRadius: BorderRadius.circular(12),
-        // border: Border.all(color: Colors.grey[200]!),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          // Card header
           Padding(
             padding: const EdgeInsets.all(12),
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                // Logo + ticket number
                 Row(
                   children: [
                     Container(
@@ -326,7 +318,7 @@ class _TransactionCardState extends State<_TransactionCard> {
                     const SizedBox(width: 10),
                     Expanded(
                       child: Text(
-                        ticketLabel,
+                        ticket.ticketNo,
                         style: const TextStyle(
                           fontSize: 14,
                           fontWeight: FontWeight.w600,
@@ -337,7 +329,6 @@ class _TransactionCardState extends State<_TransactionCard> {
                   ],
                 ),
                 const SizedBox(height: 12),
-                // Draw time row
                 Row(
                   mainAxisAlignment: MainAxisAlignment.spaceBetween,
                   children: [
@@ -356,7 +347,6 @@ class _TransactionCardState extends State<_TransactionCard> {
                   ],
                 ),
                 const SizedBox(height: 4),
-                // Transaction date/time row
                 Row(
                   mainAxisAlignment: MainAxisAlignment.spaceBetween,
                   children: [
@@ -365,7 +355,7 @@ class _TransactionCardState extends State<_TransactionCard> {
                       style: TextStyle(fontSize: 12, color: Colors.grey[600]),
                     ),
                     Text(
-                      _formatDateTime(tx.createdAt),
+                      _formatDateTime(ticket.createdAt),
                       style: const TextStyle(
                         fontSize: 12,
                         fontWeight: FontWeight.w500,
@@ -374,11 +364,31 @@ class _TransactionCardState extends State<_TransactionCard> {
                     ),
                   ],
                 ),
+                if (ticket.customer != null) ...[
+                  const SizedBox(height: 4),
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    children: [
+                      Text(
+                        'Agent:',
+                        style:
+                            TextStyle(fontSize: 12, color: Colors.grey[600]),
+                      ),
+                      Text(
+                        ticket.customer!.name,
+                        style: const TextStyle(
+                          fontSize: 12,
+                          fontWeight: FontWeight.w500,
+                          color: Colors.black87,
+                        ),
+                      ),
+                    ],
+                  ),
+                ],
               ],
             ),
           ),
 
-          // Bet details (expanded content)
           if (_expanded) ...[
             if (_loading)
               const Padding(
@@ -400,7 +410,6 @@ class _TransactionCardState extends State<_TransactionCard> {
               ),
           ],
 
-          // Toggle button
           GestureDetector(
             onTap: () async {
               if (!_expanded) {
@@ -416,8 +425,8 @@ class _TransactionCardState extends State<_TransactionCard> {
               decoration: BoxDecoration(
                 color: AppColors.primary.withOpacity(0.08),
                 borderRadius: BorderRadius.only(
-                  bottomLeft: Radius.circular(12),
-                  bottomRight: Radius.circular(12),
+                  bottomLeft: const Radius.circular(12),
+                  bottomRight: const Radius.circular(12),
                   topLeft: Radius.circular(_expanded ? 0 : 12),
                   topRight: Radius.circular(_expanded ? 0 : 12),
                 ),

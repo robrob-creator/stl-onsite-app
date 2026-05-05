@@ -7,6 +7,7 @@ import '../app_constants.dart';
 
 class TransactionService {
   static const String _baseUrl = '${AppConstants.apiBaseUrl}/transactions';
+  static const String _ticketsBaseUrl = '${AppConstants.apiBaseUrl}/tickets';
 
   static String _formatDate(DateTime date) {
     final y = date.year.toString();
@@ -63,6 +64,93 @@ class TransactionService {
       }
     } catch (e) {
       throw Exception('Error fetching transactions: $e');
+    }
+  }
+
+  /// Fetch tickets grouped by draw time for a given date.
+  static Future<List<TicketGroup>> fetchTicketsByDrawTime({
+    DateTime? date,
+  }) async {
+    try {
+      final authCtrl = Get.find<AuthController>();
+      final token = authCtrl.token.value;
+      final dateStr = _formatDate(date ?? DateTime.now());
+
+      final uri = Uri.parse(
+        '$_ticketsBaseUrl/grouped-by-draw-time?date=$dateStr',
+      );
+
+      final response = await http
+          .get(
+            uri,
+            headers: {
+              'Authorization': 'Bearer $token',
+              'Content-Type': 'application/json',
+            },
+          )
+          .timeout(const Duration(seconds: 30));
+
+      if (response.statusCode == 200) {
+        final jsonResponse = jsonDecode(response.body);
+        final List<dynamic> groups = jsonResponse['data'] as List<dynamic>;
+        return groups.map((group) {
+          final drawTime = group['draw_time'] as String? ?? '';
+          final drawTimeId = group['draw_time_id'] as String? ?? '';
+          final ticketList = group['tickets'] as List<dynamic>? ?? [];
+          final tickets = ticketList
+              .map(
+                (item) => Ticket.fromJson(
+                  item as Map<String, dynamic>,
+                  drawTime: drawTime,
+                  drawTimeId: drawTimeId,
+                ),
+              )
+              .toList();
+          return TicketGroup(
+            drawTimeId: drawTimeId,
+            drawTime: drawTime,
+            tickets: tickets,
+          );
+        }).toList();
+      } else {
+        throw Exception(
+          'Failed to load tickets: ${response.statusCode}',
+        );
+      }
+    } catch (e) {
+      throw Exception('Error fetching tickets: $e');
+    }
+  }
+
+  /// Fetch ticket detail (including bet_ids) by ticket ID.
+  static Future<List<TicketBet>> fetchTicketBets(String ticketId) async {
+    try {
+      final authCtrl = Get.find<AuthController>();
+      final token = authCtrl.token.value;
+      final uri = Uri.parse('$_ticketsBaseUrl/get?id=$ticketId');
+
+      final response = await http
+          .get(
+            uri,
+            headers: {
+              'Authorization': 'Bearer $token',
+              'Content-Type': 'application/json',
+            },
+          )
+          .timeout(const Duration(seconds: 30));
+
+      if (response.statusCode == 200) {
+        final jsonResponse = jsonDecode(response.body);
+        final data = jsonResponse['data'] as Map<String, dynamic>;
+        final betIds = data['bet_ids'] as List<dynamic>? ?? [];
+        return betIds
+            .map((item) => TicketBet.fromJson(item as Map<String, dynamic>))
+            .toList();
+      } else {
+        throw Exception('Failed to load ticket: ${response.statusCode}');
+      }
+    } catch (e) {
+      throw Exception('Error fetching ticket: $e');
     }
   }
 

@@ -13,12 +13,14 @@ class TransactionPage extends StatefulWidget {
 
 class _TransactionPageState extends State<TransactionPage> {
   DateTime _selectedDate = DateTime.now();
-  late Future<List<TransactionGroup>> _groupsFuture;
+  late Future<List<TicketGroup>> _groupsFuture;
 
   @override
   void initState() {
     super.initState();
-    _groupsFuture = TransactionService.fetchTransactions(date: _selectedDate);
+    _groupsFuture = TransactionService.fetchTicketsByDrawTime(
+      date: _selectedDate,
+    );
   }
 
   void _pickDate() async {
@@ -44,7 +46,7 @@ class _TransactionPageState extends State<TransactionPage> {
     if (picked == null) return;
     setState(() {
       _selectedDate = picked;
-      _groupsFuture = TransactionService.fetchTransactions(date: picked);
+      _groupsFuture = TransactionService.fetchTicketsByDrawTime(date: picked);
     });
   }
 
@@ -211,7 +213,7 @@ class _TransactionPageState extends State<TransactionPage> {
         ),
         // Transaction list
         Expanded(
-          child: FutureBuilder<List<TransactionGroup>>(
+          child: FutureBuilder<List<TicketGroup>>(
             future: _groupsFuture,
             builder: (context, snapshot) {
               if (snapshot.connectionState == ConnectionState.waiting) {
@@ -238,7 +240,7 @@ class _TransactionPageState extends State<TransactionPage> {
                         onPressed: () {
                           setState(() {
                             _groupsFuture =
-                                TransactionService.fetchTransactions(
+                                TransactionService.fetchTicketsByDrawTime(
                                   date: _selectedDate,
                                 );
                           });
@@ -284,7 +286,7 @@ class _TransactionPageState extends State<TransactionPage> {
     );
   }
 
-  Widget _buildGroupCard(TransactionGroup group) {
+  Widget _buildGroupCard(TicketGroup group) {
     return GestureDetector(
       onTap: () {
         Navigator.push(
