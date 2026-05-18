@@ -44,6 +44,8 @@ class _BetEntryPageState extends State<BetEntryPage> {
   String _activeBetField = 'target';
   String? _targetError;
   String? _rambolError;
+  bool _isAddingBet = false;
+  bool _isSubmitting = false;
 
   @override
   void initState() {
@@ -203,10 +205,17 @@ class _BetEntryPageState extends State<BetEntryPage> {
                   const SizedBox(width: 12),
                   Expanded(
                     child: ElevatedButton(
-                      onPressed: () async {
+                      onPressed: _isSubmitting
+                          ? null
+                          : () async {
+                        if (_isSubmitting) return;
+                        setState(() => _isSubmitting = true);
                         Get.back(); // close confirmation dialog
-                        // _showLoadingDialog();
+                        try {
                         await ctrl.submitBets();
+                        } finally {
+                          if (mounted) setState(() => _isSubmitting = false);
+                        }
                         // Always dismiss the loading dialog here — the dialog
                         // is owned by this page so it is the most reliable
                         // place to close it regardless of GetX routing state.
@@ -821,13 +830,17 @@ class _BetEntryPageState extends State<BetEntryPage> {
                   final hasDrawTimes = ctrl.currentDrawTimes
                       .where((dt) => dt.isAvailable())
                       .isNotEmpty;
-                  final canAdd = hasDrawTimes && !ctrl.isLoading.value;
+                  final canAdd =
+                      hasDrawTimes && !ctrl.isLoading.value && !_isAddingBet;
                   return SizedBox(
                     width: double.infinity,
                     height: 56,
                     child: ElevatedButton(
                       onPressed: canAdd
                           ? () async {
+                              if (_isAddingBet) return;
+                              setState(() => _isAddingBet = true);
+                              try {
                               if (_lottoNumbers.isEmpty) {
                                 Get.snackbar('Error', 'Please select numbers');
                                 return;
@@ -1118,6 +1131,11 @@ class _BetEntryPageState extends State<BetEntryPage> {
                                     _rambolAmountController.clear();
                                   });
                                 });
+                              }
+                              } finally {
+                                if (mounted) {
+                                  setState(() => _isAddingBet = false);
+                                }
                               }
                             }
                           : null,

@@ -17,6 +17,7 @@ class _DashboardPageState extends State<DashboardPage> {
   late LotteryController lotteryController;
   DrawResultsResponse? drawResults;
   bool isLoadingResults = false;
+  bool _hasError = false;
 
   @override
   void initState() {
@@ -28,6 +29,7 @@ class _DashboardPageState extends State<DashboardPage> {
   Future<void> _fetchDrawResults() async {
     setState(() {
       isLoadingResults = true;
+      _hasError = false;
     });
 
     try {
@@ -56,6 +58,7 @@ class _DashboardPageState extends State<DashboardPage> {
     } catch (e) {
       setState(() {
         isLoadingResults = false;
+        _hasError = true;
       });
     }
   }
@@ -222,6 +225,27 @@ class _DashboardPageState extends State<DashboardPage> {
                 // Recent draws or loading state
                 if (isLoadingResults)
                   const Center(child: CircularProgressIndicator())
+                else if (_hasError)
+                  Center(
+                    child: Column(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Icon(Icons.wifi_off_rounded,
+                            size: 40, color: Colors.grey[400]),
+                        const SizedBox(height: 12),
+                        Text(
+                          'Failed to load results',
+                          style: TextStyle(color: Colors.grey[600]),
+                        ),
+                        const SizedBox(height: 12),
+                        TextButton.icon(
+                          onPressed: _fetchDrawResults,
+                          icon: const Icon(Icons.refresh),
+                          label: const Text('Retry'),
+                        ),
+                      ],
+                    ),
+                  )
                 else if (drawResults != null &&
                     drawResults!.drawTimes.isNotEmpty)
                   ..._buildDrawCards()

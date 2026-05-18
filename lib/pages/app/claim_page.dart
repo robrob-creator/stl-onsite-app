@@ -29,6 +29,7 @@ class _ClaimPageState extends State<ClaimPage> {
   final TextEditingController _searchController = TextEditingController();
   List<Claim> _claims = [];
   bool _isLoadingClaims = false;
+  bool _isProcessingClaim = false;
   String? _errorMessage;
   StreamSubscription? _qrSubscription;
   Map<String, dynamic>? _scannedTicketData; // Store scanned ticket data
@@ -961,10 +962,10 @@ class _ClaimPageState extends State<ClaimPage> {
                 width: double.infinity,
                 child: ElevatedButton(
                   style: ElevatedButton.styleFrom(
-                    backgroundColor: isClaimable
+                    backgroundColor: (isClaimable && !_isProcessingClaim)
                         ? AppColors.primary
                         : Colors.grey[300],
-                    foregroundColor: isClaimable
+                    foregroundColor: (isClaimable && !_isProcessingClaim)
                         ? Colors.white
                         : Colors.grey[600],
                     padding: const EdgeInsets.symmetric(vertical: 12),
@@ -972,18 +973,28 @@ class _ClaimPageState extends State<ClaimPage> {
                       borderRadius: BorderRadius.circular(8),
                     ),
                   ),
-                  onPressed: isClaimable
+                  onPressed: (isClaimable && !_isProcessingClaim)
                       ? () {
                           _showClaimConfirmation(context, claim);
                         }
                       : null,
-                  child: Text(
-                    isClaimable ? 'Claim Winnings' : 'Claimed',
-                    style: const TextStyle(
-                      fontWeight: FontWeight.w600,
-                      fontSize: 14,
-                    ),
-                  ),
+                  child: _isProcessingClaim
+                      ? const SizedBox(
+                          height: 18,
+                          width: 18,
+                          child: CircularProgressIndicator(
+                            strokeWidth: 2,
+                            valueColor:
+                                AlwaysStoppedAnimation<Color>(Colors.white),
+                          ),
+                        )
+                      : Text(
+                          isClaimable ? 'Claim Winnings' : 'Claimed',
+                          style: const TextStyle(
+                            fontWeight: FontWeight.w600,
+                            fontSize: 14,
+                          ),
+                        ),
                 ),
               ),
             ],
@@ -1094,15 +1105,15 @@ class _ClaimPageState extends State<ClaimPage> {
                 width: double.infinity,
                 child: ElevatedButton(
                   style: ElevatedButton.styleFrom(
-                    backgroundColor: isClaimable
+                    backgroundColor: (isClaimable && !_isProcessingClaim)
                         ? AppColors.primary
                         : Colors.grey[300],
-                    foregroundColor: isClaimable
+                    foregroundColor: (isClaimable && !_isProcessingClaim)
                         ? Colors.white
                         : Colors.grey[600],
                     padding: const EdgeInsets.symmetric(vertical: 14),
                   ),
-                  onPressed: isClaimable
+                  onPressed: (isClaimable && !_isProcessingClaim)
                       ? () {
                           Get.back();
                           _showClaimConfirmation(context, claim);
@@ -1187,6 +1198,8 @@ class _ClaimPageState extends State<ClaimPage> {
   }
 
   Future<void> _processClaim(Claim claim) async {
+    if (_isProcessingClaim) return;
+    if (mounted) setState(() => _isProcessingClaim = true);
     try {
       Get.snackbar(
         'Processing',
@@ -1222,6 +1235,8 @@ class _ClaimPageState extends State<ClaimPage> {
         backgroundColor: Colors.red,
         colorText: Colors.white,
       );
+    } finally {
+      if (mounted) setState(() => _isProcessingClaim = false);
     }
   }
 }

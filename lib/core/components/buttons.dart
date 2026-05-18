@@ -5,7 +5,7 @@ import '../theme/spacing.dart';
 import '../layout/layout.dart';
 
 /// Custom primary button with rounded corners
-class AppButton extends StatelessWidget {
+class AppButton extends StatefulWidget {
   final String label;
   final VoidCallback? onPressed;
   final bool isLoading;
@@ -41,53 +41,74 @@ class AppButton extends StatelessWidget {
   }) : super(key: key);
 
   @override
+  State<AppButton> createState() => _AppButtonState();
+}
+
+class _AppButtonState extends State<AppButton> {
+  DateTime? _lastTap;
+
+  bool get _canTap {
+    if (_lastTap == null) return true;
+    return DateTime.now().difference(_lastTap!) >
+        const Duration(milliseconds: 800);
+  }
+
+  void _handleTap() {
+    if (!_canTap) return;
+    _lastTap = DateTime.now();
+    widget.onPressed?.call();
+  }
+
+  @override
   Widget build(BuildContext context) {
     return SizedBox(
-      width: width,
-      height: height,
+      width: widget.width,
+      height: widget.height,
       child: Material(
         color: Colors.transparent,
         child: InkWell(
-          onTap: (isLoading || !isEnabled) ? null : onPressed,
-          borderRadius: BorderRadius.circular(borderRadius),
+          onTap: (widget.isLoading || !widget.isEnabled) ? null : _handleTap,
+          borderRadius: BorderRadius.circular(widget.borderRadius),
           child: Container(
             decoration: BoxDecoration(
-              color: isEnabled ? backgroundColor : AppColors.disabled,
-              borderRadius: BorderRadius.circular(borderRadius),
+              color: widget.isEnabled
+                  ? widget.backgroundColor
+                  : AppColors.disabled,
+              borderRadius: BorderRadius.circular(widget.borderRadius),
             ),
             child: Center(
-              child: isLoading
+              child: widget.isLoading
                   ? SizedBox(
                       height: 24,
                       width: 24,
                       child: CircularProgressIndicator(
                         strokeWidth: 2,
                         valueColor: AlwaysStoppedAnimation<Color>(
-                          foregroundColor,
+                          widget.foregroundColor,
                         ),
                       ),
                     )
                   : Padding(
-                      padding: padding,
+                      padding: widget.padding,
                       child: Row(
                         mainAxisSize: MainAxisSize.min,
                         mainAxisAlignment: MainAxisAlignment.center,
                         children: [
-                          if (leadingIcon != null) ...[
-                            leadingIcon!,
+                          if (widget.leadingIcon != null) ...[
+                            widget.leadingIcon!,
                             const HSpacer(width: AppSpacing.sm),
                           ],
                           Text(
-                            label,
+                            widget.label,
                             style:
-                                textStyle ??
+                                widget.textStyle ??
                                 AppTextStyles.button.copyWith(
-                                  color: foregroundColor,
+                                  color: widget.foregroundColor,
                                 ),
                           ),
-                          if (trailingIcon != null) ...[
+                          if (widget.trailingIcon != null) ...[
                             const HSpacer(width: AppSpacing.sm),
-                            trailingIcon!,
+                            widget.trailingIcon!,
                           ],
                         ],
                       ),
@@ -101,7 +122,7 @@ class AppButton extends StatelessWidget {
 }
 
 /// Secondary button with outline
-class SecondaryButton extends StatelessWidget {
+class SecondaryButton extends StatefulWidget {
   final String label;
   final VoidCallback? onPressed;
   final bool isLoading;
@@ -137,59 +158,80 @@ class SecondaryButton extends StatelessWidget {
   }) : super(key: key);
 
   @override
+  State<SecondaryButton> createState() => _SecondaryButtonState();
+}
+
+class _SecondaryButtonState extends State<SecondaryButton> {
+  DateTime? _lastTap;
+
+  bool get _canTap {
+    if (_lastTap == null) return true;
+    return DateTime.now().difference(_lastTap!) >
+        const Duration(milliseconds: 800);
+  }
+
+  void _handleTap() {
+    if (!_canTap) return;
+    _lastTap = DateTime.now();
+    widget.onPressed?.call();
+  }
+
+  @override
   Widget build(BuildContext context) {
     return SizedBox(
-      width: width,
-      height: height,
+      width: widget.width,
+      height: widget.height,
       child: Material(
         color: Colors.transparent,
         child: InkWell(
-          onTap: (isLoading || !isEnabled) ? null : onPressed,
-          borderRadius: BorderRadius.circular(borderRadius),
+          onTap: (widget.isLoading || !widget.isEnabled) ? null : _handleTap,
+          borderRadius: BorderRadius.circular(widget.borderRadius),
           child: Container(
             decoration: BoxDecoration(
               color: Colors.transparent,
               border: Border.all(
-                color: isEnabled ? borderColor : AppColors.disabled,
+                color: widget.isEnabled
+                    ? widget.borderColor
+                    : AppColors.disabled,
                 width: 1.5,
               ),
-              borderRadius: BorderRadius.circular(borderRadius),
+              borderRadius: BorderRadius.circular(widget.borderRadius),
             ),
             child: Center(
-              child: isLoading
+              child: widget.isLoading
                   ? SizedBox(
                       height: 24,
                       width: 24,
                       child: CircularProgressIndicator(
                         strokeWidth: 2,
                         valueColor: AlwaysStoppedAnimation<Color>(
-                          foregroundColor,
+                          widget.foregroundColor,
                         ),
                       ),
                     )
                   : Padding(
-                      padding: padding,
+                      padding: widget.padding,
                       child: Row(
                         mainAxisSize: MainAxisSize.min,
                         mainAxisAlignment: MainAxisAlignment.center,
                         children: [
-                          if (leadingIcon != null) ...[
-                            leadingIcon!,
+                          if (widget.leadingIcon != null) ...[
+                            widget.leadingIcon!,
                             const HSpacer(width: AppSpacing.sm),
                           ],
                           Text(
-                            label,
+                            widget.label,
                             style:
-                                textStyle ??
+                                widget.textStyle ??
                                 AppTextStyles.button.copyWith(
-                                  color: isEnabled
-                                      ? foregroundColor
+                                  color: widget.isEnabled
+                                      ? widget.foregroundColor
                                       : AppColors.disabledText,
                                 ),
                           ),
-                          if (trailingIcon != null) ...[
+                          if (widget.trailingIcon != null) ...[
                             const HSpacer(width: AppSpacing.sm),
-                            trailingIcon!,
+                            widget.trailingIcon!,
                           ],
                         ],
                       ),
