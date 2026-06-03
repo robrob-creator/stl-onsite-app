@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:get/get.dart';
 import 'package:onstite/core/design_system.dart';
+import 'package:permission_handler/permission_handler.dart';
 import '../../../core/main_layout.dart';
 import '../../../controllers/lottery_controller.dart';
 import '../../../core/services/printer_service.dart';
@@ -36,12 +37,33 @@ class _HomePageState extends State<HomePage> {
       return;
     }
 
-    // MAC is saved — verify the printer is reachable, then disconnect so
-    // printTicket() can establish a fresh session when needed.
-    final connected = await PrinterService.connect(mac);
-    if (connected) {
-      await PrinterService.disconnect();
-    } else {
+    final reachability = await PrinterService.getSavedPrinterReachability();
+    if (reachability == PrinterReachabilityStatus.permissionDenied) {
+      Get.snackbar(
+        'Bluetooth Permission Required',
+        'Allow Nearby devices permission so the app can check and use your printer.',
+        icon: const Icon(Icons.bluetooth_searching, color: Colors.white),
+        backgroundColor: const Color(0xFFE53E3E),
+        colorText: Colors.white,
+        snackPosition: SnackPosition.BOTTOM,
+        duration: const Duration(seconds: 5),
+        borderRadius: 12,
+        margin: const EdgeInsets.all(16),
+        mainButton: TextButton(
+          onPressed: () {
+            Get.closeCurrentSnackbar();
+            openAppSettings();
+          },
+          child: const Text(
+            'Open Settings',
+            style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold),
+          ),
+        ),
+      );
+      return;
+    }
+
+    if (reachability == PrinterReachabilityStatus.unreachable) {
       Get.snackbar(
         'Printer Unreachable',
         'Could not connect to "${PrinterService.savedName ?? mac}". Make sure the printer is on and in range.',

@@ -1,14 +1,18 @@
 import 'package:flutter/material.dart';
 import 'package:get/get.dart';
 import 'package:http/http.dart' as http;
+import 'package:permission_handler/permission_handler.dart';
 import 'dart:convert';
 import 'auth_controller.dart';
 import '../core/app_constants.dart';
 import '../models/game.dart';
+import '../models/bet_availability.dart';
+import '../models/permutation_availability.dart';
 import '../core/services/game_service.dart';
 import '../core/services/printer_service.dart';
 import '../core/services/profile_service.dart';
 import '../core/services/websocket_service.dart';
+import '../core/services/sold_out_service.dart';
 
 class BetEntry {
   final int betNumber;
@@ -82,6 +86,10 @@ class LotteryController extends GetxController {
   final RxList<DraftBet> draftBets = <DraftBet>[].obs;
   final RxDouble balance = 0.0.obs;
   final RxBool isLoading = false.obs;
+
+  // Permutation availability from server (preview endpoint)
+  final Rx<PermutationAvailability?> permAvailability =
+      Rx<PermutationAvailability?>(null);
 
   @override
   void onInit() {
@@ -444,59 +452,83 @@ class LotteryController extends GetxController {
     }
   }
 
-  /// Pre-checks a single bet against the sold-out endpoint.
-  /// Returns `true` if the bet is available, `false` if sold out.
-  Future<bool> isBetAvailable({
-    required List<String> digits,
-    required double totalBetAmount,
+  /// Calls POST /bet/token/permutations and stores result in [permAvailability].
+  /// Pass [cartBets] to factor in existing draft bets.
+  Future<void> fetchPermutations(
+    List<String> digits, {
+    List<Map<String, dynamic>> cartBets = const [],
   }) async {
+    final game = currentGame;
+    if (game == null) return;
+    final drawTimeId = selectedTime.value;
+    final drawDate = DateTime.now().toIso8601String().substring(0, 10);
     try {
-      final authController = Get.find<AuthController>();
-      final token = authController.token.value;
-      final game = currentGame;
-      if (game == null) return true;
-
-      final drawTimeId = selectedTime.value;
-
-      final payload = {
-        'bets': [
-          {
-            'index': 0,
-            'game_id': game.id,
-            'draw_time_id': drawTimeId,
-            'draw_id': drawTimeId,
-            'digits': digits,
-            'total_bet_amount': totalBetAmount,
-          },
-        ],
-      };
-
-      final response = await http
-          .post(
-            Uri.parse('${AppConstants.apiBaseUrl}/bets/check-available'),
-            headers: {
-              'Content-Type': 'application/json',
-              'Authorization': 'Bearer $token',
-            },
-            body: jsonEncode(payload),
-          )
-          .timeout(const Duration(seconds: 10));
-
-      if (response.statusCode == 200) {
-        final data = jsonDecode(response.body) as Map<String, dynamic>;
-        // Support both 'results' and 'bets' array keys
-        final results =
-            (data['results'] as List?) ?? (data['bets'] as List?) ?? [];
-        for (final item in results) {
-          final isAvailable = item['is_available'] as bool? ?? true;
-          if (!isAvailable) return false;
-        }
-        return true;
-      }
-      // Non-200 — fail open so the bulk submit can surface the real error
-      return true;
+      final result = await SoldOutService.checkPermutations(
+        gameId: game.id,
+        drawId: drawTimeId,
+        drawTimeId: drawTimeId,
+        drawDate: drawDate,
+        tokens: digits,
+        cartBets: cartBets,
+      );
+      permAvailability.value = result;
     } catch (_) {
-      return true;
+      permAvailability.value = null;
+    }
+  }
+
+  /// Checks availability via POST /bet/token/permutations (with cart_bets).
+  /// Returns null when open. Returns BetAvailabilityResult when a conflict exists.
+  Future<BetAvailabilityResult?> checkBetAvailability({
+    required List<String> digits,
+    required double targetAmount,
+    required double rambolAmount,
+  }) async {
+    final game = currentGame;
+    if (game == null) return null;
+
+    final drawTimeId = selectedTime.value;
+    final drawDate = DateTime.now().toIso8601String().substring(0, 10);
+
+    final cartBets = <Map<String, dynamic>>[];
+    for (final d in draftBets) {
+      if (d.straightBetAmount > 0) {
+        cartBets.add({
+          'digits': d.digits,
+          'amount': d.straightBetAmount.toInt(),
+          'bet_type': 'straight',
+        });
+      }
+      if (d.rambleBetAmount > 0) {
+        cartBets.add({
+          'digits': d.digits,
+          'amount': d.rambleBetAmount.toInt(),
+          'bet_type': 'rambol',
+        });
+      }
+    }
+
+    try {
+      final result = await SoldOutService.checkPermutations(
+        gameId: game.id,
+        drawId: drawTimeId,
+        drawTimeId: drawTimeId,
+        drawDate: drawDate,
+        tokens: digits,
+        cartBets: cartBets,
+      );
+      permAvailability.value = result;
+      return buildBetAvailabilityResult(
+        gameId: game.id,
+        digits: digits,
+        drawTimeId: drawTimeId,
+        drawDate: drawDate,
+        targetAmount: targetAmount,
+        rambolAmount: rambolAmount,
+        perm: result,
+      );
+    } catch (_) {
+      return null; // fail open
     }
   }
 
@@ -717,6 +749,21 @@ class LotteryController extends GetxController {
               onAction: () {
                 Get.back();
                 Get.toNamed('/printer-settings');
+              },
+            ),
+          );
+          break;
+        case PrintError.permissionDenied:
+          Get.dialog(
+            _printerAlertDialog(
+              icon: Icons.bluetooth_searching,
+              title: 'Bluetooth Permission Required',
+              message:
+                  'Allow Nearby devices permission so the app can connect to your printer.',
+              actionLabel: 'Open Settings',
+              onAction: () {
+                Get.back();
+                openAppSettings();
               },
             ),
           );

@@ -1,6 +1,5 @@
 import 'package:flutter/material.dart';
 import 'package:get/get.dart';
-import 'package:permission_handler/permission_handler.dart';
 import 'package:print_bluetooth_thermal/print_bluetooth_thermal.dart';
 import '../../core/services/printer_service.dart';
 
@@ -26,12 +25,11 @@ class _PrinterSettingsPageState extends State<PrinterSettingsPage> {
   }
 
   Future<void> _scan() async {
-    // Request Bluetooth permissions on Android 12+
-    final status = await Permission.bluetoothConnect.request();
-    if (status.isDenied) {
+    final hasPermission = await PrinterService.ensureBluetoothPermissions();
+    if (!hasPermission) {
       Get.snackbar(
         'Permission Denied',
-        'Bluetooth permission is required to find printers',
+        'Nearby devices permission is required to find printers',
       );
       return;
     }

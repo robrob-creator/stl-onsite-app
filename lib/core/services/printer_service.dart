@@ -1,18 +1,27 @@
 import 'dart:developer';
-import 'dart:typed_data';
+import 'dart:io';
 import 'package:esc_pos_utils_plus/esc_pos_utils_plus.dart';
 import 'package:flutter/services.dart';
 import 'package:get_storage/get_storage.dart';
 import 'package:image/image.dart' as img;
+import 'package:permission_handler/permission_handler.dart';
 import 'package:print_bluetooth_thermal/print_bluetooth_thermal.dart';
 import '../../controllers/lottery_controller.dart';
 
 enum PrintError {
   noPrinterConfigured,
+  permissionDenied,
   notConnected,
   outOfPaper,
   nearEndOfPaper,
   unknown,
+}
+
+enum PrinterReachabilityStatus {
+  notConfigured,
+  permissionDenied,
+  reachable,
+  unreachable,
 }
 
 class PrintResult {
@@ -58,6 +67,102 @@ class PrinterService {
     return await PrintBluetoothThermal.disconnect;
   }
 
+  static Future<bool> ensureBluetoothPermissions() async {
+    if (!Platform.isAndroid) {
+      return true;
+    }
+
+    final statuses = await [
+      Permission.bluetoothConnect,
+      Permission.bluetoothScan,
+    ].request();
+
+    return statuses.values.every((status) => status.isGranted);
+  }
+
+  static Future<PrinterReachabilityStatus> getSavedPrinterReachability() async {
+    final mac = savedMac;
+    if (mac == null || mac.isEmpty) {
+      return PrinterReachabilityStatus.notConfigured;
+    }
+
+    final hasPermission = await ensureBluetoothPermissions();
+    if (!hasPermission) {
+      return PrinterReachabilityStatus.permissionDenied;
+    }
+
+    return await canReachSavedPrinter(skipPermissionCheck: true)
+        ? PrinterReachabilityStatus.reachable
+        : PrinterReachabilityStatus.unreachable;
+  }
+
+  /// Checks whether the saved printer is still available to this device.
+  ///
+  /// The app only needs the printer to stay configured and paired here. A
+  /// printer may be paired and ready to print later even when the plugin does
+  /// not currently report an active Bluetooth session, so a paired-device match
+  /// counts as reachable for the pre-submit warning flow.
+  static Future<bool> canReachSavedPrinter({
+    bool skipPermissionCheck = false,
+  }) async {
+    final mac = savedMac;
+    if (mac == null || mac.isEmpty) {
+      return false;
+    }
+
+    if (!skipPermissionCheck) {
+      final hasPermission = await ensureBluetoothPermissions();
+      if (!hasPermission) {
+        return false;
+      }
+    }
+
+    final normalizedSavedMac = _normalizeMac(mac);
+    if (normalizedSavedMac.isEmpty) {
+      return false;
+    }
+
+    try {
+      if (await PrintBluetoothThermal.connectionStatus) {
+        return true;
+      }
+
+      final pairedDevices = await getPairedDevices();
+      final isStillPaired = pairedDevices.any(
+        (device) => _normalizeMac(device.macAdress) == normalizedSavedMac,
+      );
+      if (isStillPaired) {
+        return true;
+      }
+    } catch (e) {
+      log('canReachSavedPrinter error: $e', name: 'PrinterService');
+    }
+
+    try {
+      final connected = await _connectWithRetry(
+        mac,
+        retries: 2,
+        delay: const Duration(milliseconds: 800),
+      );
+      if (!connected) {
+        return false;
+      }
+
+      try {
+        await PrintBluetoothThermal.disconnect;
+      } catch (_) {}
+
+      return true;
+    } catch (e) {
+      log('canReachSavedPrinter connect probe failed: $e', name: 'PrinterService');
+      return false;
+    }
+  }
+
+  static String _normalizeMac(String mac) {
+    return mac.replaceAll(RegExp(r'[^0-9A-Fa-f]'), '').toUpperCase();
+  }
+
   /// Attempts to connect with up to [retries] attempts, with a short
   /// delay between each try.
   static Future<bool> _connectWithRetry(
@@ -90,6 +195,11 @@ class PrinterService {
     final mac = savedMac;
     if (mac == null || mac.isEmpty) {
       return const PrintResult.fail(PrintError.noPrinterConfigured);
+    }
+
+    final hasPermission = await ensureBluetoothPermissions();
+    if (!hasPermission) {
+      return const PrintResult.fail(PrintError.permissionDenied);
     }
 
     try {

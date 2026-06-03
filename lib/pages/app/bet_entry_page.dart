@@ -1,10 +1,13 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:get/get.dart';
-import 'package:print_bluetooth_thermal/print_bluetooth_thermal.dart';
+import 'package:permission_handler/permission_handler.dart';
 import '../../controllers/lottery_controller.dart';
 import '../../core/services/printer_service.dart';
+import '../../models/bet_availability.dart';
 import '../../widgets/lotto_number_input.dart';
+import '../../widgets/conflict_notice_modal.dart';
+import '../../widgets/batch_bet_choice_modal.dart';
 
 /// Restricts typed numeric input to [min, max].
 /// Clears the field if the value exceeds max; does NOT clamp to min on typing
@@ -112,9 +115,22 @@ class _BetEntryPageState extends State<BetEntryPage> {
       );
       if (!proceed) return;
     } else {
-      // Printer is configured — do a quick connectivity check.
-      final connected = await PrintBluetoothThermal.connectionStatus;
-      if (!connected) {
+      final reachability = await PrinterService.getSavedPrinterReachability();
+      if (reachability == PrinterReachabilityStatus.permissionDenied) {
+        final proceed = await _showPrinterWarningDialog(
+          icon: Icons.bluetooth_searching_rounded,
+          title: 'Bluetooth Permission Required',
+          message:
+              'Allow Nearby devices permission so the app can check and use your printer.\n\nDo you want to submit anyway?',
+          confirmLabel: 'Submit Anyway',
+          cancelLabel: 'Open Settings',
+          onCancel: () {
+            Get.back();
+            openAppSettings();
+          },
+        );
+        if (!proceed) return;
+      } else if (reachability == PrinterReachabilityStatus.unreachable) {
         final proceed = await _showPrinterWarningDialog(
           icon: Icons.bluetooth_disabled_rounded,
           title: 'Printer Not Reachable',
@@ -208,19 +224,20 @@ class _BetEntryPageState extends State<BetEntryPage> {
                       onPressed: _isSubmitting
                           ? null
                           : () async {
-                        if (_isSubmitting) return;
-                        setState(() => _isSubmitting = true);
-                        Get.back(); // close confirmation dialog
-                        try {
-                        await ctrl.submitBets();
-                        } finally {
-                          if (mounted) setState(() => _isSubmitting = false);
-                        }
-                        // Always dismiss the loading dialog here — the dialog
-                        // is owned by this page so it is the most reliable
-                        // place to close it regardless of GetX routing state.
-                        // if (Get.isDialogOpen ?? false) Get.back();
-                      },
+                              if (_isSubmitting) return;
+                              setState(() => _isSubmitting = true);
+                              Get.back(); // close confirmation dialog
+                              try {
+                                await ctrl.submitBets();
+                              } finally {
+                                if (mounted)
+                                  setState(() => _isSubmitting = false);
+                              }
+                              // Always dismiss the loading dialog here — the dialog
+                              // is owned by this page so it is the most reliable
+                              // place to close it regardless of GetX routing state.
+                              // if (Get.isDialogOpen ?? false) Get.back();
+                            },
                       style: ElevatedButton.styleFrom(
                         backgroundColor: const Color(0xFF3D5A99),
                         padding: const EdgeInsets.symmetric(vertical: 14),
@@ -474,16 +491,85 @@ class _BetEntryPageState extends State<BetEntryPage> {
                         setState(() {
                           _lottoNumbers = value;
                         });
+                        final game = ctrl.currentGame;
+                        if (game != null) {
+                          final dpc = game.maxNumber.toString().length;
+                          final expected = game.numberOfCombinations * dpc;
+                          if (value.length == expected) {
+                            final digs = <String>[];
+                            for (int i = 0; i < value.length; i += dpc) {
+                              digs.add(value.substring(i, i + dpc));
+                            }
+                            ctrl.fetchPermutations(digs);
+                          } else {
+                            ctrl.permAvailability.value = null;
+                          }
+                        }
                       },
                       initialValue: _lottoNumbers,
                       onLastNumberEntered: () {
-                        // Move focus to target amount field when last number is entered
                         FocusScope.of(
                           context,
                         ).requestFocus(_targetAmountFocusNode);
                       },
                     ),
-                    // Play Type Selector (Only for games that enable both straight and ramble)
+                    // Availability badge — shown once digits are complete
+                    Obx(() {
+                      final perm = ctrl.permAvailability.value;
+                      if (perm == null) return const SizedBox.shrink();
+                      final Color bg;
+                      final Color fg;
+                      final IconData icon;
+                      final String label;
+                      switch (perm.state) {
+                        case 'SOLD_OUT':
+                          bg = const Color(0xFFFEE2E2);
+                          fg = const Color(0xFFDC2626);
+                          icon = Icons.block_rounded;
+                          label = 'Sold Out';
+                        case 'PARTIALLY_SOLD':
+                          bg = const Color(0xFFFFF3E0);
+                          fg = const Color(0xFFF59E0B);
+                          icon = Icons.warning_amber_rounded;
+                          label = 'Partially Sold';
+                        default:
+                          bg = const Color(0xFFD1FAE5);
+                          fg = const Color(0xFF059669);
+                          icon = Icons.check_circle_outline_rounded;
+                          label = 'Available';
+                      }
+                      return Padding(
+                        padding: const EdgeInsets.only(top: 8),
+                        child: Align(
+                          alignment: Alignment.centerLeft,
+                          child: Container(
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 12,
+                              vertical: 6,
+                            ),
+                            decoration: BoxDecoration(
+                              color: bg,
+                              borderRadius: BorderRadius.circular(20),
+                            ),
+                            child: Row(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                Icon(icon, size: 14, color: fg),
+                                const SizedBox(width: 4),
+                                Text(
+                                  label,
+                                  style: TextStyle(
+                                    fontSize: 12,
+                                    fontWeight: FontWeight.w600,
+                                    color: fg,
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                        ),
+                      );
+                    }),
                   ],
                 ),
               ),
@@ -591,87 +677,127 @@ class _BetEntryPageState extends State<BetEntryPage> {
                   return Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      // Target / Rambol toggle (only shown when both are available)
-                      if (bothEnabled) ...[
-                        Container(
-                          padding: const EdgeInsets.all(2),
-                          decoration: BoxDecoration(
-                            color: Colors.grey[100],
-                            borderRadius: BorderRadius.circular(12),
-                          ),
-                          child: Row(
+                      // Target / Rambol toggle — hidden when server says showBetTypeSelection=false
+                      if (bothEnabled)
+                        Obx(() {
+                          final perm = ctrl.permAvailability.value;
+                          if (perm != null && !perm.showBetTypeSelection) {
+                            return const SizedBox.shrink();
+                          }
+                          final targetDisabled =
+                              perm != null && !perm.target.allowed;
+                          final rambolTabDisabled =
+                              perm != null &&
+                              (perm.rambolDisabled || !perm.rambol.allowed);
+                          return Column(
                             children: [
-                              Expanded(
-                                child: GestureDetector(
-                                  onTap: () {
-                                    setState(() => _activeBetField = 'target');
-                                    FocusScope.of(
-                                      context,
-                                    ).requestFocus(_targetAmountFocusNode);
-                                  },
-                                  child: Container(
-                                    padding: const EdgeInsets.symmetric(
-                                      vertical: 12,
-                                      horizontal: 16,
-                                    ),
-                                    decoration: BoxDecoration(
-                                      color: _activeBetField == 'target'
-                                          ? const Color(0xFF2563EB)
-                                          : Colors.grey[100],
-                                      borderRadius: BorderRadius.circular(12),
-                                    ),
-                                    alignment: Alignment.center,
-                                    child: Text(
-                                      'Target',
-                                      style: TextStyle(
-                                        fontSize: 14,
-                                        fontWeight: FontWeight.w500,
-                                        color: _activeBetField == 'target'
-                                            ? Colors.white
-                                            : Colors.grey[400],
+                              Container(
+                                padding: const EdgeInsets.all(2),
+                                decoration: BoxDecoration(
+                                  color: Colors.grey[100],
+                                  borderRadius: BorderRadius.circular(12),
+                                ),
+                                child: Row(
+                                  children: [
+                                    Expanded(
+                                      child: GestureDetector(
+                                        onTap: targetDisabled
+                                            ? null
+                                            : () {
+                                                setState(
+                                                  () => _activeBetField =
+                                                      'target',
+                                                );
+                                                FocusScope.of(
+                                                  context,
+                                                ).requestFocus(
+                                                  _targetAmountFocusNode,
+                                                );
+                                              },
+                                        child: Container(
+                                          padding: const EdgeInsets.symmetric(
+                                            vertical: 12,
+                                            horizontal: 16,
+                                          ),
+                                          decoration: BoxDecoration(
+                                            color: targetDisabled
+                                                ? Colors.grey[200]
+                                                : _activeBetField == 'target'
+                                                ? const Color(0xFF2563EB)
+                                                : Colors.grey[100],
+                                            borderRadius: BorderRadius.circular(
+                                              12,
+                                            ),
+                                          ),
+                                          alignment: Alignment.center,
+                                          child: Text(
+                                            'Target',
+                                            style: TextStyle(
+                                              fontSize: 14,
+                                              fontWeight: FontWeight.w500,
+                                              color: targetDisabled
+                                                  ? Colors.grey[400]
+                                                  : _activeBetField == 'target'
+                                                  ? Colors.white
+                                                  : Colors.grey[400],
+                                            ),
+                                          ),
+                                        ),
                                       ),
                                     ),
-                                  ),
-                                ),
-                              ),
-                              Expanded(
-                                child: GestureDetector(
-                                  onTap: () {
-                                    setState(() => _activeBetField = 'rambol');
-                                    FocusScope.of(
-                                      context,
-                                    ).requestFocus(_rambolAmountFocusNode);
-                                  },
-                                  child: Container(
-                                    padding: const EdgeInsets.symmetric(
-                                      vertical: 12,
-                                      horizontal: 16,
-                                    ),
-                                    decoration: BoxDecoration(
-                                      color: _activeBetField == 'rambol'
-                                          ? const Color(0xFF2563EB)
-                                          : Colors.grey[100],
-                                      borderRadius: BorderRadius.circular(12),
-                                    ),
-                                    alignment: Alignment.center,
-                                    child: Text(
-                                      'Rambol',
-                                      style: TextStyle(
-                                        fontSize: 14,
-                                        fontWeight: FontWeight.w500,
-                                        color: _activeBetField == 'rambol'
-                                            ? Colors.white
-                                            : Colors.grey[400],
+                                    Expanded(
+                                      child: GestureDetector(
+                                        onTap: rambolTabDisabled
+                                            ? null
+                                            : () {
+                                                setState(
+                                                  () => _activeBetField =
+                                                      'rambol',
+                                                );
+                                                FocusScope.of(
+                                                  context,
+                                                ).requestFocus(
+                                                  _rambolAmountFocusNode,
+                                                );
+                                              },
+                                        child: Container(
+                                          padding: const EdgeInsets.symmetric(
+                                            vertical: 12,
+                                            horizontal: 16,
+                                          ),
+                                          decoration: BoxDecoration(
+                                            color: rambolTabDisabled
+                                                ? Colors.grey[200]
+                                                : _activeBetField == 'rambol'
+                                                ? const Color(0xFF2563EB)
+                                                : Colors.grey[100],
+                                            borderRadius: BorderRadius.circular(
+                                              12,
+                                            ),
+                                          ),
+                                          alignment: Alignment.center,
+                                          child: Text(
+                                            'Rambol',
+                                            style: TextStyle(
+                                              fontSize: 14,
+                                              fontWeight: FontWeight.w500,
+                                              color: rambolTabDisabled
+                                                  ? Colors.grey[400]
+                                                  : _activeBetField == 'rambol'
+                                                  ? Colors.white
+                                                  : Colors.grey[400],
+                                            ),
+                                          ),
+                                        ),
                                       ),
                                     ),
-                                  ),
+                                  ],
                                 ),
                               ),
+                              const SizedBox(height: 12),
                             ],
-                          ),
-                        ),
-                        const SizedBox(height: 12),
-                      ],
+                          );
+                        }),
 
                       // Amount input fields
                       Row(
@@ -679,142 +805,197 @@ class _BetEntryPageState extends State<BetEntryPage> {
                         children: [
                           if (game.enableStraight)
                             Expanded(
-                              child: Column(
-                                crossAxisAlignment: CrossAxisAlignment.start,
-                                children: [
-                                  if (!bothEnabled)
-                                    Padding(
-                                      padding: const EdgeInsets.only(bottom: 8),
-                                      child: Text(
-                                        'Target / Straight Bet',
-                                        style: TextStyle(
-                                          fontSize: 14,
-                                          fontWeight: FontWeight.w600,
-                                          color: Colors.grey[700],
+                              child: Obx(() {
+                                final perm = ctrl.permAvailability.value;
+                                final targetBlocked =
+                                    perm != null && !perm.target.allowed;
+                                return Column(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: [
+                                    if (!bothEnabled)
+                                      Padding(
+                                        padding: const EdgeInsets.only(
+                                          bottom: 8,
                                         ),
-                                      ),
-                                    ),
-                                  TextField(
-                                    controller: _targetAmountController,
-                                    focusNode: _targetAmountFocusNode,
-                                    onChanged: (value) {
-                                      ctrl.targetAmount.value =
-                                          int.tryParse(value) ?? 0;
-                                      final n = int.tryParse(value) ?? 0;
-                                      setState(() {
-                                        _targetError =
-                                            (n > 0 && n < game.minStraightBet)
-                                            ? 'Min: ₱${game.minStraightBet}  •  Max: ₱${game.maxStraightBet}'
-                                            : null;
-                                      });
-                                    },
-                                    inputFormatters: [
-                                      FilteringTextInputFormatter.digitsOnly,
-                                      _RangeFormatter(
-                                        min: game.minStraightBet,
-                                        max: game.maxStraightBet,
-                                      ),
-                                    ],
-                                    decoration: InputDecoration(
-                                      hintText: 'Target Amount',
-                                      hintStyle: TextStyle(
-                                        color: Colors.grey[400],
-                                      ),
-                                      errorText: _targetError,
-                                      errorStyle: const TextStyle(fontSize: 11),
-                                      contentPadding:
-                                          const EdgeInsets.symmetric(
-                                            horizontal: 16,
-                                            vertical: 14,
+                                        child: Text(
+                                          'Target / Straight Bet',
+                                          style: TextStyle(
+                                            fontSize: 14,
+                                            fontWeight: FontWeight.w600,
+                                            color: Colors.grey[700],
                                           ),
-                                      border: OutlineInputBorder(
-                                        borderRadius: BorderRadius.circular(12),
-                                        borderSide: BorderSide(
-                                          color: Colors.grey[300]!,
                                         ),
                                       ),
-                                      enabledBorder: OutlineInputBorder(
-                                        borderRadius: BorderRadius.circular(12),
-                                        borderSide: BorderSide(
-                                          color: Colors.grey[300]!,
+                                    TextField(
+                                      controller: _targetAmountController,
+                                      focusNode: _targetAmountFocusNode,
+                                      enabled: !targetBlocked,
+                                      onChanged: (value) {
+                                        ctrl.targetAmount.value =
+                                            int.tryParse(value) ?? 0;
+                                        final n = int.tryParse(value) ?? 0;
+                                        setState(() {
+                                          _targetError =
+                                              (n > 0 && n < game.minStraightBet)
+                                              ? 'Min: ₱${game.minStraightBet}  •  Max: ₱${game.maxStraightBet}'
+                                              : null;
+                                        });
+                                      },
+                                      inputFormatters: [
+                                        FilteringTextInputFormatter.digitsOnly,
+                                        _RangeFormatter(
+                                          min: game.minStraightBet,
+                                          max: game.maxStraightBet,
+                                        ),
+                                      ],
+                                      decoration: InputDecoration(
+                                        hintText: 'Target Amount',
+                                        hintStyle: TextStyle(
+                                          color: Colors.grey[400],
+                                        ),
+                                        errorText: _targetError,
+                                        errorStyle: const TextStyle(
+                                          fontSize: 11,
+                                        ),
+                                        contentPadding:
+                                            const EdgeInsets.symmetric(
+                                              horizontal: 16,
+                                              vertical: 14,
+                                            ),
+                                        border: OutlineInputBorder(
+                                          borderRadius: BorderRadius.circular(
+                                            12,
+                                          ),
+                                          borderSide: BorderSide(
+                                            color: Colors.grey[300]!,
+                                          ),
+                                        ),
+                                        enabledBorder: OutlineInputBorder(
+                                          borderRadius: BorderRadius.circular(
+                                            12,
+                                          ),
+                                          borderSide: BorderSide(
+                                            color: Colors.grey[300]!,
+                                          ),
                                         ),
                                       ),
+                                      keyboardType: TextInputType.number,
                                     ),
-                                    keyboardType: TextInputType.number,
-                                  ),
-                                ],
-                              ),
+                                  ],
+                                );
+                              }),
                             ),
                           if (game.enableStraight && game.enableRamble)
                             const SizedBox(width: 16),
                           if (game.enableRamble)
                             Expanded(
-                              child: Column(
-                                crossAxisAlignment: CrossAxisAlignment.start,
-                                children: [
-                                  if (!bothEnabled)
-                                    Padding(
-                                      padding: const EdgeInsets.only(bottom: 8),
-                                      child: Text(
-                                        'Rambol / Box Bet',
-                                        style: TextStyle(
-                                          fontSize: 14,
-                                          fontWeight: FontWeight.w600,
-                                          color: Colors.grey[700],
+                              child: Obx(() {
+                                final perm = ctrl.permAvailability.value;
+                                final rambolBlocked =
+                                    perm != null &&
+                                    (perm.rambolDisabled ||
+                                        !perm.rambol.allowed);
+                                return Column(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: [
+                                    if (!bothEnabled)
+                                      Padding(
+                                        padding: const EdgeInsets.only(
+                                          bottom: 8,
                                         ),
-                                      ),
-                                    ),
-                                  TextField(
-                                    controller: _rambolAmountController,
-                                    focusNode: _rambolAmountFocusNode,
-                                    onChanged: (value) {
-                                      ctrl.rambolAmount.value =
-                                          int.tryParse(value) ?? 0;
-                                      final n = int.tryParse(value) ?? 0;
-                                      final minR = game.minRambleBet ?? 0;
-                                      final maxR = game.maxRambleBet ?? 99999;
-                                      setState(() {
-                                        _rambolError = (n > 0 && n < minR)
-                                            ? 'Min: ₱$minR  •  Max: ₱$maxR'
-                                            : null;
-                                      });
-                                    },
-                                    inputFormatters: [
-                                      FilteringTextInputFormatter.digitsOnly,
-                                      _RangeFormatter(
-                                        min: game.minRambleBet ?? 0,
-                                        max: game.maxRambleBet ?? 99999,
-                                      ),
-                                    ],
-                                    decoration: InputDecoration(
-                                      hintText: 'Rambol Amount',
-                                      hintStyle: TextStyle(
-                                        color: Colors.grey[400],
-                                      ),
-                                      errorText: _rambolError,
-                                      errorStyle: const TextStyle(fontSize: 11),
-                                      contentPadding:
-                                          const EdgeInsets.symmetric(
-                                            horizontal: 16,
-                                            vertical: 14,
+                                        child: Text(
+                                          'Rambol / Box Bet',
+                                          style: TextStyle(
+                                            fontSize: 14,
+                                            fontWeight: FontWeight.w600,
+                                            color: Colors.grey[700],
                                           ),
-                                      border: OutlineInputBorder(
-                                        borderRadius: BorderRadius.circular(12),
-                                        borderSide: BorderSide(
-                                          color: Colors.grey[300]!,
                                         ),
                                       ),
-                                      enabledBorder: OutlineInputBorder(
-                                        borderRadius: BorderRadius.circular(12),
-                                        borderSide: BorderSide(
-                                          color: Colors.grey[300]!,
+                                    TextField(
+                                      controller: _rambolAmountController,
+                                      focusNode: _rambolAmountFocusNode,
+                                      enabled: !rambolBlocked,
+                                      onChanged: (value) {
+                                        ctrl.rambolAmount.value =
+                                            int.tryParse(value) ?? 0;
+                                        final n = int.tryParse(value) ?? 0;
+                                        final dpc = game.maxNumber
+                                            .toString()
+                                            .length;
+                                        final digs = <String>[];
+                                        for (
+                                          int i = 0;
+                                          i + dpc <= _lottoNumbers.length;
+                                          i += dpc
+                                        ) {
+                                          digs.add(
+                                            _lottoNumbers.substring(i, i + dpc),
+                                          );
+                                        }
+                                        final perm =
+                                            ctrl.permAvailability.value;
+                                        final pc =
+                                            perm?.rambol.permutationCount ??
+                                            (digs.isNotEmpty
+                                                ? ctrl.calculateCombinations(
+                                                    digs,
+                                                  )
+                                                : 1);
+                                        final maxR =
+                                            game.maxRambleBet ??
+                                            game.maxStraightBet;
+                                        setState(() {
+                                          _rambolError = (n > 0 && n < pc)
+                                              ? 'Min: ₱$pc  •  Max: ₱$maxR'
+                                              : null;
+                                        });
+                                      },
+                                      inputFormatters: [
+                                        FilteringTextInputFormatter.digitsOnly,
+                                        _RangeFormatter(
+                                          min: 1,
+                                          max:
+                                              game.maxRambleBet ??
+                                              game.maxStraightBet,
+                                        ),
+                                      ],
+                                      decoration: InputDecoration(
+                                        hintText: 'Rambol Amount',
+                                        hintStyle: TextStyle(
+                                          color: Colors.grey[400],
+                                        ),
+                                        errorText: _rambolError,
+                                        errorStyle: const TextStyle(
+                                          fontSize: 11,
+                                        ),
+                                        contentPadding:
+                                            const EdgeInsets.symmetric(
+                                              horizontal: 16,
+                                              vertical: 14,
+                                            ),
+                                        border: OutlineInputBorder(
+                                          borderRadius: BorderRadius.circular(
+                                            12,
+                                          ),
+                                          borderSide: BorderSide(
+                                            color: Colors.grey[300]!,
+                                          ),
+                                        ),
+                                        enabledBorder: OutlineInputBorder(
+                                          borderRadius: BorderRadius.circular(
+                                            12,
+                                          ),
+                                          borderSide: BorderSide(
+                                            color: Colors.grey[300]!,
+                                          ),
                                         ),
                                       ),
+                                      keyboardType: TextInputType.number,
                                     ),
-                                    keyboardType: TextInputType.number,
-                                  ),
-                                ],
-                              ),
+                                  ],
+                                );
+                              }),
                             ),
                         ],
                       ),
@@ -841,60 +1022,157 @@ class _BetEntryPageState extends State<BetEntryPage> {
                               if (_isAddingBet) return;
                               setState(() => _isAddingBet = true);
                               try {
-                              if (_lottoNumbers.isEmpty) {
-                                Get.snackbar('Error', 'Please select numbers');
-                                return;
-                              }
-
-                              final controller = Get.find<LotteryController>();
-                              final game = controller.currentGame;
-
-                              if (game == null) {
-                                Get.snackbar('Error', 'Please select a game');
-                                return;
-                              }
-
-                              // Calculate digits per cell based on max number
-                              int digitsPerCell = game.maxNumber
-                                  .toString()
-                                  .length;
-                              int expectedTotalDigits =
-                                  game.numberOfCombinations * digitsPerCell;
-
-                              // Validate input length
-                              if (_lottoNumbers.length != expectedTotalDigits) {
-                                String rangeText =
-                                    '${game.minNumber}-${game.maxNumber}';
-                                String numberText =
-                                    game.numberOfCombinations == 1
-                                    ? 'number'
-                                    : 'numbers';
-                                Get.snackbar(
-                                  'Error',
-                                  'Please enter ${game.numberOfCombinations} $numberText for ${game.name} (range: $rangeText)',
-                                );
-                                return;
-                              }
-
-                              // Validate that at least one amount is entered based on game settings
-                              int targetAmount =
-                                  int.tryParse(_targetAmountController.text) ??
-                                  0;
-                              int rambolAmount =
-                                  int.tryParse(_rambolAmountController.text) ??
-                                  0;
-
-                              if (game.enableStraight && game.enableRamble) {
-                                // Both enabled: at least one must be > 0
-                                if (targetAmount == 0 && rambolAmount == 0) {
+                                if (_lottoNumbers.isEmpty) {
                                   Get.snackbar(
                                     'Error',
-                                    'Please enter at least one bet amount',
+                                    'Please select numbers',
                                   );
                                   return;
                                 }
-                                // Validate ranges for whichever fields are filled
-                                if (targetAmount > 0) {
+
+                                final controller =
+                                    Get.find<LotteryController>();
+                                final game = controller.currentGame;
+
+                                if (game == null) {
+                                  Get.snackbar('Error', 'Please select a game');
+                                  return;
+                                }
+
+                                // Calculate digits per cell based on max number
+                                int digitsPerCell = game.maxNumber
+                                    .toString()
+                                    .length;
+                                int expectedTotalDigits =
+                                    game.numberOfCombinations * digitsPerCell;
+
+                                // Validate input length
+                                if (_lottoNumbers.length !=
+                                    expectedTotalDigits) {
+                                  String rangeText =
+                                      '${game.minNumber}-${game.maxNumber}';
+                                  String numberText =
+                                      game.numberOfCombinations == 1
+                                      ? 'number'
+                                      : 'numbers';
+                                  Get.snackbar(
+                                    'Error',
+                                    'Please enter ${game.numberOfCombinations} $numberText for ${game.name} (range: $rangeText)',
+                                  );
+                                  return;
+                                }
+
+                                // Build digits list (needed for permCount validation)
+                                final digits = <String>[];
+                                for (
+                                  int i = 0;
+                                  i < _lottoNumbers.length;
+                                  i += digitsPerCell
+                                ) {
+                                  digits.add(
+                                    _lottoNumbers.substring(
+                                      i,
+                                      i + digitsPerCell,
+                                    ),
+                                  );
+                                }
+                                final permCount = controller
+                                    .calculateCombinations(digits);
+
+                                // Validate that at least one amount is entered based on game settings
+                                int targetAmount =
+                                    int.tryParse(
+                                      _targetAmountController.text,
+                                    ) ??
+                                    0;
+                                int rambolAmount =
+                                    int.tryParse(
+                                      _rambolAmountController.text,
+                                    ) ??
+                                    0;
+
+                                // Rambol validation (fail fast). Returns true = valid.
+                                bool validateRambol() {
+                                  // All identical → permCount == 1
+                                  if (permCount <= 1) {
+                                    Get.snackbar(
+                                      'Invalid Bet',
+                                      'Rambol not available — all digits are identical',
+                                    );
+                                    return false;
+                                  }
+                                  // Server says rambol is disabled/sold-out
+                                  final perm =
+                                      controller.permAvailability.value;
+                                  if (perm != null &&
+                                      (perm.rambolDisabled ||
+                                          !perm.rambol.allowed)) {
+                                    Get.snackbar(
+                                      'Sold Out',
+                                      'Rambol is not available for this combination',
+                                    );
+                                    return false;
+                                  }
+                                  // Min amount: use server permCount or local fallback
+                                  final availPerms =
+                                      perm?.rambol.permutationCount ??
+                                      controller.calculateCombinations(digits);
+                                  if (rambolAmount < availPerms) {
+                                    Get.snackbar(
+                                      'Invalid Amount',
+                                      'Minimum Rambol bet is ₱$availPerms',
+                                    );
+                                    return false;
+                                  }
+                                  // Divisibility
+                                  if (availPerms > 0 &&
+                                      rambolAmount % availPerms != 0) {
+                                    Get.snackbar(
+                                      'Invalid Amount',
+                                      'Rambol amount must be divisible by $availPerms',
+                                    );
+                                    return false;
+                                  }
+                                  // Exceeds max
+                                  final maxR =
+                                      game.maxRambleBet ?? game.maxStraightBet;
+                                  if (rambolAmount > maxR) {
+                                    Get.snackbar(
+                                      'Invalid Amount',
+                                      'Rambol bet must not exceed ₱$maxR',
+                                    );
+                                    return false;
+                                  }
+                                  return true;
+                                }
+
+                                if (game.enableStraight && game.enableRamble) {
+                                  if (targetAmount == 0 && rambolAmount == 0) {
+                                    Get.snackbar(
+                                      'Error',
+                                      'Please enter at least one bet amount',
+                                    );
+                                    return;
+                                  }
+                                  if (targetAmount > 0 &&
+                                      targetAmount < game.minStraightBet) {
+                                    Get.snackbar(
+                                      'Invalid Amount',
+                                      'Target bet must be at least ₱${game.minStraightBet}',
+                                    );
+                                    return;
+                                  }
+                                  if (rambolAmount > 0 && !validateRambol()) {
+                                    return;
+                                  }
+                                } else if (game.enableStraight) {
+                                  if (targetAmount == 0) {
+                                    Get.snackbar(
+                                      'Error',
+                                      'Please enter a Target/Straight bet amount',
+                                    );
+                                    return;
+                                  }
                                   if (targetAmount < game.minStraightBet) {
                                     Get.snackbar(
                                       'Invalid Amount',
@@ -902,236 +1180,162 @@ class _BetEntryPageState extends State<BetEntryPage> {
                                     );
                                     return;
                                   }
-                                }
-                                if (rambolAmount > 0) {
-                                  final minR = game.minRambleBet ?? 0;
-                                  final maxR = game.maxRambleBet ?? 99999;
-                                  if (rambolAmount < minR) {
+                                } else if (game.enableRamble) {
+                                  if (rambolAmount == 0) {
                                     Get.snackbar(
-                                      'Invalid Amount',
-                                      'Rambol bet must be at least ₱$minR',
+                                      'Error',
+                                      'Please enter a Rambol/Box bet amount',
                                     );
                                     return;
                                   }
-                                  if (rambolAmount > maxR) {
-                                    Get.snackbar(
-                                      'Invalid Amount',
-                                      'Rambol bet must not exceed ₱$maxR',
-                                    );
-                                    return;
-                                  }
+                                  if (!validateRambol()) return;
                                 }
-                              } else if (game.enableStraight) {
-                                // Only Target enabled
-                                if (targetAmount == 0) {
-                                  Get.snackbar(
-                                    'Error',
-                                    'Please enter a Target/Straight bet amount',
-                                  );
-                                  return;
-                                }
-                                if (targetAmount < game.minStraightBet) {
-                                  Get.snackbar(
-                                    'Invalid Amount',
-                                    'Target bet must be at least ₱${game.minStraightBet}',
-                                  );
-                                  return;
-                                }
-                              } else if (game.enableRamble) {
-                                // Only Rambol enabled
-                                if (rambolAmount == 0) {
-                                  Get.snackbar(
-                                    'Error',
-                                    'Please enter a Rambol/Box bet amount',
-                                  );
-                                  return;
-                                }
-                                final minR = game.minRambleBet ?? 0;
-                                final maxR = game.maxRambleBet ?? 99999;
-                                if (rambolAmount < minR) {
-                                  Get.snackbar(
-                                    'Invalid Amount',
-                                    'Rambol bet must be at least ₱$minR',
-                                  );
-                                  return;
-                                }
-                                if (rambolAmount > maxR) {
-                                  Get.snackbar(
-                                    'Invalid Amount',
-                                    'Rambol bet must not exceed ₱$maxR',
-                                  );
-                                  return;
-                                }
-                              }
 
-                              // Build digits list
-                              final digits = <String>[];
-                              for (
-                                int i = 0;
-                                i < _lottoNumbers.length;
-                                i += digitsPerCell
-                              ) {
-                                digits.add(
-                                  _lottoNumbers.substring(i, i + digitsPerCell),
-                                );
-                              }
-
-                              // Check availability (sold-out pre-check)
-                              final totalBet = (targetAmount + rambolAmount)
-                                  .toDouble();
-
-                              // Show checking dialog
-                              Get.dialog(
-                                Dialog(
-                                  backgroundColor: Colors.transparent,
-                                  elevation: 0,
-                                  child: Center(
-                                    child: Container(
-                                      padding: const EdgeInsets.symmetric(
-                                        horizontal: 32,
-                                        vertical: 28,
-                                      ),
-                                      decoration: BoxDecoration(
-                                        color: Colors.white,
-                                        borderRadius: BorderRadius.circular(16),
-                                      ),
-                                      child: const Column(
-                                        mainAxisSize: MainAxisSize.min,
-                                        children: [
-                                          CircularProgressIndicator(
-                                            valueColor:
-                                                AlwaysStoppedAnimation<Color>(
-                                                  Color(0xFF3D5A99),
-                                                ),
-                                            strokeWidth: 3,
-                                          ),
-                                          SizedBox(height: 20),
-                                          Text(
-                                            'Checking availability...',
-                                            style: TextStyle(
-                                              fontSize: 15,
-                                              fontWeight: FontWeight.w500,
-                                              color: Colors.black87,
-                                            ),
-                                          ),
-                                        ],
-                                      ),
-                                    ),
-                                  ),
-                                ),
-                                barrierDismissible: false,
-                              );
-
-                              final available = await controller.isBetAvailable(
-                                digits: digits,
-                                totalBetAmount: totalBet,
-                              );
-
-                              // Dismiss the checking dialog
-                              if (Get.isDialogOpen ?? false) Get.back();
-
-                              if (!available) {
+                                // Show checking dialog
                                 Get.dialog(
                                   Dialog(
-                                    shape: RoundedRectangleBorder(
-                                      borderRadius: BorderRadius.circular(20),
-                                    ),
-                                    backgroundColor: Colors.white,
-                                    child: Padding(
-                                      padding: const EdgeInsets.fromLTRB(
-                                        24,
-                                        32,
-                                        24,
-                                        24,
-                                      ),
-                                      child: Column(
-                                        mainAxisSize: MainAxisSize.min,
-                                        children: [
-                                          Container(
-                                            width: 72,
-                                            height: 72,
-                                            decoration: BoxDecoration(
-                                              color: Colors.red[50],
-                                              shape: BoxShape.circle,
-                                            ),
-                                            child: Icon(
-                                              Icons.block_rounded,
-                                              color: Colors.red[400],
-                                              size: 36,
-                                            ),
+                                    backgroundColor: Colors.transparent,
+                                    elevation: 0,
+                                    child: Center(
+                                      child: Container(
+                                        padding: const EdgeInsets.symmetric(
+                                          horizontal: 32,
+                                          vertical: 28,
+                                        ),
+                                        decoration: BoxDecoration(
+                                          color: Colors.white,
+                                          borderRadius: BorderRadius.circular(
+                                            16,
                                           ),
-                                          const SizedBox(height: 20),
-                                          const Text(
-                                            'Sold Out',
-                                            style: TextStyle(
-                                              fontSize: 20,
-                                              fontWeight: FontWeight.bold,
-                                              color: Colors.black87,
+                                        ),
+                                        child: const Column(
+                                          mainAxisSize: MainAxisSize.min,
+                                          children: [
+                                            CircularProgressIndicator(
+                                              valueColor:
+                                                  AlwaysStoppedAnimation<Color>(
+                                                    Color(0xFF3D5A99),
+                                                  ),
+                                              strokeWidth: 3,
                                             ),
-                                          ),
-                                          const SizedBox(height: 12),
-                                          const Text(
-                                            'This combination is no longer available for the selected draw time.',
-                                            textAlign: TextAlign.center,
-                                            style: TextStyle(
-                                              fontSize: 15,
-                                              color: Colors.black54,
-                                              height: 1.4,
-                                            ),
-                                          ),
-                                          const SizedBox(height: 28),
-                                          SizedBox(
-                                            width: double.infinity,
-                                            child: ElevatedButton(
-                                              onPressed: () => Get.back(),
-                                              style: ElevatedButton.styleFrom(
-                                                backgroundColor: const Color(
-                                                  0xFF3D5A99,
-                                                ),
-                                                padding:
-                                                    const EdgeInsets.symmetric(
-                                                      vertical: 14,
-                                                    ),
-                                                elevation: 0,
-                                                shape: RoundedRectangleBorder(
-                                                  borderRadius:
-                                                      BorderRadius.circular(12),
-                                                ),
-                                              ),
-                                              child: const Text(
-                                                'OK',
-                                                style: TextStyle(
-                                                  fontSize: 15,
-                                                  fontWeight: FontWeight.bold,
-                                                  color: Colors.white,
-                                                ),
+                                            SizedBox(height: 20),
+                                            Text(
+                                              'Checking availability...',
+                                              style: TextStyle(
+                                                fontSize: 15,
+                                                fontWeight: FontWeight.w500,
+                                                color: Colors.black87,
                                               ),
                                             ),
-                                          ),
-                                        ],
+                                          ],
+                                        ),
                                       ),
                                     ),
                                   ),
+                                  barrierDismissible: false,
                                 );
-                                return;
-                              }
 
-                              // Convert lotto numbers to list for controller by grouping
-                              controller.selectedNumbers.clear();
-                              controller.selectedNumbers.addAll(digits);
+                                final availResult = await controller
+                                    .checkBetAvailability(
+                                      digits: digits,
+                                      targetAmount: targetAmount.toDouble(),
+                                      rambolAmount: rambolAmount.toDouble(),
+                                    );
 
-                              final ok = await controller.addBet();
+                                if (Get.isDialogOpen ?? false) Get.back();
 
-                              // Clear inputs only when the draft was created successfully
-                              if (ok) {
-                                Future.microtask(() {
-                                  setState(() {
-                                    _lottoNumbers = '';
-                                    _targetAmountController.clear();
-                                    _rambolAmountController.clear();
+                                if (availResult != null &&
+                                    availResult.exceeds) {
+                                  final bothTypes =
+                                      targetAmount > 0 &&
+                                      rambolAmount > 0 &&
+                                      !availResult.target.allowed &&
+                                      !availResult.rambol.allowed;
+
+                                  if (bothTypes) {
+                                    Get.dialog(
+                                      BatchBetChoiceModal(
+                                        targetResult: availResult,
+                                        rambolResult: availResult,
+                                        onChooseTarget:
+                                            availResult.target.allowed
+                                            ? () {
+                                                Get.back();
+                                                Future.microtask(
+                                                  () =>
+                                                      controller
+                                                              .rambolAmount
+                                                              .value =
+                                                          0,
+                                                );
+                                              }
+                                            : null,
+                                        onChooseRambol:
+                                            availResult.rambol.allowed
+                                            ? () {
+                                                Get.back();
+                                                Future.microtask(
+                                                  () =>
+                                                      controller
+                                                              .targetAmount
+                                                              .value =
+                                                          0,
+                                                );
+                                              }
+                                            : null,
+                                      ),
+                                    );
+                                  } else {
+                                    final available =
+                                        availResult.availableAmount;
+                                    Get.dialog(
+                                      ConflictNoticeModal(
+                                        result: availResult,
+                                        requestedAmount:
+                                            availResult.requestedAmount,
+                                        onUpdateAmount:
+                                            available != null && available > 0
+                                            ? () {
+                                                Get.back();
+                                                Future.microtask(() {
+                                                  if (availResult.betType ==
+                                                      BetType.target) {
+                                                    controller
+                                                        .targetAmount
+                                                        .value = available
+                                                        .toInt();
+                                                  } else {
+                                                    controller
+                                                        .rambolAmount
+                                                        .value = available
+                                                        .toInt();
+                                                  }
+                                                });
+                                              }
+                                            : null,
+                                        onAdjustManually: () => Get.back(),
+                                      ),
+                                    );
+                                  }
+                                  return;
+                                }
+
+                                // Convert lotto numbers to list for controller by grouping
+                                controller.selectedNumbers.clear();
+                                controller.selectedNumbers.addAll(digits);
+
+                                final ok = await controller.addBet();
+
+                                // Clear inputs only when the draft was created successfully
+                                if (ok) {
+                                  Future.microtask(() {
+                                    setState(() {
+                                      _lottoNumbers = '';
+                                      _targetAmountController.clear();
+                                      _rambolAmountController.clear();
+                                    });
                                   });
-                                });
-                              }
+                                }
                               } finally {
                                 if (mounted) {
                                   setState(() => _isAddingBet = false);
