@@ -7,6 +7,9 @@ import '../app_constants.dart';
 
 class TicketService {
   static const String baseUrl = '${AppConstants.apiBaseUrl}/tickets';
+  static final RegExp _uuidPattern = RegExp(
+    r'^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-5][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}$',
+  );
 
   static String _extractMessage(http.Response response) {
     try {
@@ -78,6 +81,42 @@ class TicketService {
     } catch (e) {
       print('[TicketService] Exception: $e');
       throw Exception('Error fetching tickets: $e');
+    }
+  }
+
+  static Future<String> resolveScannedTicketNumber(String scannedValue) async {
+    final trimmedValue = scannedValue.trim();
+    if (trimmedValue.isEmpty || !_uuidPattern.hasMatch(trimmedValue)) {
+      return trimmedValue;
+    }
+
+    try {
+      final authCtrl = Get.find<AuthController>();
+      final token = authCtrl.token.value;
+      final uri = Uri.parse(
+        '$baseUrl/get',
+      ).replace(queryParameters: {'id': trimmedValue});
+
+      final response = await http
+          .get(
+            uri,
+            headers: {
+              'Authorization': 'Bearer $token',
+              'Content-Type': 'application/json',
+            },
+          )
+          .timeout(const Duration(seconds: 30));
+
+      if (response.statusCode != 200) {
+        return trimmedValue;
+      }
+
+      final jsonResponse = jsonDecode(response.body) as Map<String, dynamic>;
+      final data = jsonResponse['data'] as Map<String, dynamic>?;
+      final ticketNo = data?['ticket_no'] as String?;
+      return ticketNo?.trim().isNotEmpty == true ? ticketNo!.trim() : trimmedValue;
+    } catch (_) {
+      return trimmedValue;
     }
   }
 

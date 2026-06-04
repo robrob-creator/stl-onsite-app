@@ -26,12 +26,21 @@ class WebSocketService extends GetxController {
   final Map<String, List<void Function(Map<String, dynamic> payload)>>
   _listeners = {};
 
-  /// Derive the WebSocket base URL from the REST API base URL.
-  static String get _wsBaseUrl {
-    final rest = AppConstants.apiBaseUrl; // https://host/api
-    return rest
-        .replaceFirst('https://', 'wss://')
-        .replaceFirst('http://', 'ws://');
+  /// Build the WebSocket endpoint from the REST API base URL.
+  static Uri _buildWsUri(String token) {
+    final restUri = Uri.parse(AppConstants.apiBaseUrl);
+    final pathSegments = <String>[
+      ...restUri.pathSegments.where((segment) => segment.isNotEmpty),
+      'ws',
+    ];
+
+    return Uri(
+      scheme: restUri.scheme == 'https' ? 'wss' : 'ws',
+      host: restUri.host,
+      port: restUri.hasPort ? restUri.port : null,
+      pathSegments: pathSegments,
+      queryParameters: {'token': token},
+    );
   }
 
   // ── Public API ────────────────────────────────────────────────────────────
@@ -68,10 +77,10 @@ class WebSocketService extends GetxController {
 
   Future<void> _connect(String token) async {
     try {
-      final uri = '$_wsBaseUrl/ws?token=$token';
+      final uri = _buildWsUri(token);
       print('✓ WebSocket connecting: $uri');
 
-      _socket = await WebSocket.connect(uri);
+      _socket = await WebSocket.connect(uri.toString());
       // Send a WebSocket ping frame every 20 seconds so the Go server
       // keeps the connection alive and detects stale clients via pong timeout.
       _socket!.pingInterval = const Duration(seconds: 20);

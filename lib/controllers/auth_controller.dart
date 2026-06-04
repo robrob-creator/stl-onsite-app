@@ -117,6 +117,33 @@ class AuthController extends GetxController {
     }
   }
 
+  void updateCurrentUserBalance(double newBalance) {
+    final user = currentUser.value;
+    if (user == null) return;
+
+    currentUser.value = User(
+      id: user.id,
+      name: user.name,
+      email: user.email,
+      role: user.role,
+      createdAt: user.createdAt,
+      phoneNumber: user.phoneNumber,
+      balance: newBalance,
+      isActive: user.isActive,
+      isBlocked: user.isBlocked,
+      winningsAmount: user.winningsAmount,
+      shareAmount: user.shareAmount,
+    );
+    unawaited(_saveSession());
+    update();
+  }
+
+  void syncCurrentUser(User user) {
+    currentUser.value = user;
+    unawaited(_saveSession());
+    update();
+  }
+
   void addDigit(String digit) {
     if (mpin.value.length < 6) {
       mpin.value += digit;

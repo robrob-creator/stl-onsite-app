@@ -25,6 +25,9 @@ class _HomePageState extends State<HomePage> {
   @override
   void initState() {
     super.initState();
+    if (!Get.isRegistered<LotteryController>()) {
+      Get.put(LotteryController());
+    }
     WidgetsBinding.instance.addPostFrameCallback((_) => _checkPrinter());
   }
 

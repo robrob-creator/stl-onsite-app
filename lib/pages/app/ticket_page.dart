@@ -6,6 +6,7 @@ import 'package:onstite/core/services/printer_service.dart';
 import 'package:qr_code_scanner_plus/qr_code_scanner_plus.dart';
 import 'package:permission_handler/permission_handler.dart';
 import '../../core/design_system.dart';
+import '../../core/services/ticket_service.dart';
 import '../../models/ticket.dart';
 import '../../controllers/ticket_controller.dart';
 
@@ -163,18 +164,19 @@ class _TicketPageState extends State<TicketPage> {
     });
   }
 
-  void _handleScannedQRCode(String qrCode) {
+  Future<void> _handleScannedQRCode(String qrCode) async {
     // Stop scanner
     controller?.pauseCamera();
-
-    // Set the scanned value as search query
-    _searchController.text = qrCode;
+    final resolvedTicketNumber = await TicketService.resolveScannedTicketNumber(
+      qrCode,
+    );
 
     // Trigger search
     setState(() {
       _showQRScanner = false;
     });
-    _ctrl.fetchTickets(qrCode);
+    _searchController.text = resolvedTicketNumber;
+    await _ctrl.fetchTickets(resolvedTicketNumber);
   }
 
   @override
@@ -690,13 +692,12 @@ class _TicketPageState extends State<TicketPage> {
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     Row(
-                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
                       children: [
-                        SizedBox(
-                          width: 160,
+                        Expanded(
                           child: Text(
                             ticket.ticketNo ?? 'Unknown Ticket',
-                            overflow: TextOverflow.visible,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
                             style: const TextStyle(
                               fontSize: 12,
                               fontWeight: FontWeight.w600,
@@ -704,27 +705,32 @@ class _TicketPageState extends State<TicketPage> {
                             ),
                           ),
                         ),
-                        if (_canRequestVoid(ticket))
-                          ElevatedButton(
+                        if (_canRequestVoid(ticket)) ...[
+                          const SizedBox(width: 8),
+                          ElevatedButton.icon(
                             style: ElevatedButton.styleFrom(
                               backgroundColor: AppColors.backgroundDark,
+                              foregroundColor: Colors.white,
                               padding: const EdgeInsets.symmetric(
-                                horizontal: 16,
-                                vertical: 4,
+                                horizontal: 10,
+                                vertical: 6,
+                              ),
+                              minimumSize: const Size(0, 34),
+                              tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                              visualDensity: VisualDensity.compact,
+                              textStyle: const TextStyle(
+                                fontSize: 11,
+                                fontWeight: FontWeight.w600,
                               ),
                               shape: RoundedRectangleBorder(
-                                borderRadius: BorderRadius.circular(6),
+                                borderRadius: BorderRadius.circular(16),
                               ),
                             ),
                             onPressed: () => _showVoidConfirmation(ticket),
-                            child: Row(
-                              children: [
-                                const Text('Request Void'),
-                                const SizedBox(width: 4),
-                                const Icon(Icons.close, size: 14),
-                              ],
-                            ),
+                            icon: const Icon(Icons.close, size: 12),
+                            label: const Text('Void'),
                           ),
+                        ],
                       ],
                     ),
                     const SizedBox(height: 4),

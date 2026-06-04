@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:intl/intl.dart';
 import '../../core/design_system.dart';
 import '../../models/transaction.dart';
 import '../../core/services/transaction_service.dart';
@@ -80,14 +81,9 @@ class _TransactionPageState extends State<TransactionPage> {
 
   String _formatDrawTimeLabel(String drawTime) {
     try {
-      final parts = drawTime.split(':');
-      int hour = int.parse(parts[0]);
-      final minute = int.parse(parts[1]);
-      final period = hour >= 12 ? 'PM' : 'AM';
-      hour = hour > 12 ? hour - 12 : (hour == 0 ? 12 : hour);
-      final timeLabel = minute == 0
-          ? '${hour}PM'
-          : '$hour:${minute.toString().padLeft(2, '0')}$period';
+      final parsedTime = DateFormat('HH:mm:ss').parseStrict(drawTime);
+      final locale = Localizations.localeOf(context).toLanguageTag();
+      final timeLabel = DateFormat.jm(locale).format(parsedTime);
       return '$timeLabel Transaction';
     } catch (_) {
       return 'Transaction';

@@ -20,10 +20,12 @@ class _SummaryReportPageState extends State<SummaryReportPage> {
   int _selectedGameIndex = 0;
   bool _loadingGames = true;
   Future<SummaryReportModel>? _futureReport;
+  late DateTime _selectedDate;
 
   @override
   void initState() {
     super.initState();
+    _selectedDate = DateTime.parse(widget.date);
     _loadGames();
   }
 
@@ -49,10 +51,28 @@ class _SummaryReportPageState extends State<SummaryReportPage> {
 
   Future<SummaryReportModel> _fetchReport(String gameId) {
     return SummaryReportService.fetchSummaryReport(
-      date: widget.date,
+      date: DateFormat('yyyy-MM-dd').format(_selectedDate),
       gameId: gameId,
       makerId: widget.makerId,
     );
+  }
+
+  Future<void> _pickDate() async {
+    final picked = await showDatePicker(
+      context: context,
+      initialDate: _selectedDate,
+      firstDate: DateTime(2020),
+      lastDate: DateTime.now(),
+      initialEntryMode: DatePickerEntryMode.calendarOnly,
+    );
+    if (picked == null) return;
+
+    setState(() {
+      _selectedDate = picked;
+      if (_games.isNotEmpty) {
+        _futureReport = _fetchReport(_games[_selectedGameIndex].id);
+      }
+    });
   }
 
   void _onGameTabTapped(int index) {
@@ -77,9 +97,9 @@ class _SummaryReportPageState extends State<SummaryReportPage> {
               label: Text(
                 DateFormat(
                   'EEE, MMM.dd, yyyy',
-                ).format(DateTime.parse(widget.date)),
+                ).format(_selectedDate),
               ),
-              onPressed: () {},
+              onPressed: _pickDate,
               style: OutlinedButton.styleFrom(
                 shape: RoundedRectangleBorder(
                   borderRadius: BorderRadius.circular(10),
@@ -176,7 +196,7 @@ class _SummaryReportPageState extends State<SummaryReportPage> {
                       ),
                     ),
                     const SizedBox(height: 12),
-                    _buildSummaryRow('Total Bets', draw.totalBets),
+                    _buildCountRow('Total Bets', draw.betCount),
                     _buildSummaryRow('Total Hits', draw.hits),
                     const SizedBox(height: 8),
                     Container(
@@ -239,11 +259,27 @@ class _SummaryReportPageState extends State<SummaryReportPage> {
     );
   }
 
+  Widget _buildCountRow(String label, int value) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 2.0),
+      child: Row(
+        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+        children: [
+          Text(label, style: const TextStyle(fontSize: 15)),
+          Text(
+            value.toString(),
+            style: const TextStyle(fontSize: 15),
+          ),
+        ],
+      ),
+    );
+  }
+
   String _formatDrawTime(String drawTime) {
-    // Convert "18:45:00" to "6:45 PM Draw"
     try {
       final time = DateFormat('HH:mm:ss').parse(drawTime);
-      return DateFormat('h:mm a').format(time) + ' Draw';
+      final locale = Localizations.localeOf(context).toLanguageTag();
+      return '${DateFormat.jm(locale).format(time)} Draw';
     } catch (_) {
       return drawTime;
     }

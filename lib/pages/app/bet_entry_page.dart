@@ -378,7 +378,7 @@ class _BetEntryPageState extends State<BetEntryPage> {
 
   @override
   Widget build(BuildContext context) {
-    final controller = Get.put(LotteryController());
+    final controller = Get.find<LotteryController>();
 
     return Scaffold(
       backgroundColor: Colors.white,

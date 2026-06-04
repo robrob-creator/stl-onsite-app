@@ -1,5 +1,6 @@
 import 'dart:developer';
 import 'dart:io';
+import 'dart:ui' as ui;
 import 'package:esc_pos_utils_plus/esc_pos_utils_plus.dart';
 import 'package:flutter/services.dart';
 import 'package:get/get.dart';
@@ -7,6 +8,7 @@ import 'package:get_storage/get_storage.dart';
 import 'package:image/image.dart' as img;
 import 'package:permission_handler/permission_handler.dart';
 import 'package:print_bluetooth_thermal/print_bluetooth_thermal.dart';
+import 'package:pretty_qr_code/pretty_qr_code.dart';
 import 'package:onstite/controllers/auth_controller.dart';
 import '../../controllers/lottery_controller.dart';
 import '../../models/ticket.dart';
@@ -514,21 +516,67 @@ class PrinterService {
     infoRow('Time:', timeStr);
 
     bytes.addAll(generator.hr(ch: '-'));
+    bytes.addAll(
+      generator.text(
+        'WALANG TICKET. WALANG CLAIM.',
+        styles: const PosStyles(align: PosAlign.center, bold: true),
+      ),
+    );
+    bytes.addAll(
+      generator.text(
+        'Ingatan ang tiket, Bisa ng tiket (1) taon mula sa petsa ng draw.',
+        styles: const PosStyles(align: PosAlign.center),
+      ),
+    );
 
     // ── QR Code ───────────────────────────────────────────────────
     bytes.addAll(generator.feed(1));
-    bytes.addAll(
-      generator.qrcode(
-        ticketNo,
-        align: PosAlign.center,
-        size: QRSize.size4,
-        cor: QRCorrection.M,
-      ),
-    );
+    final qrImage = await _buildQrRasterImage(ticketNo);
+    if (qrImage != null) {
+      final resizedQr = img.copyResize(
+        qrImage,
+        width: 180,
+        height: 180,
+        interpolation: img.Interpolation.nearest,
+      );
+      bytes.addAll(_imageToEscPosRaster(resizedQr));
+    } else {
+      bytes.addAll([0x1B, 0x61, 0x01]);
+      bytes.addAll(
+        generator.qrcode(
+          ticketNo,
+          align: PosAlign.center,
+          size: QRSize.size4,
+          cor: QRCorrection.M,
+        ),
+      );
+      bytes.addAll([0x1B, 0x61, 0x00]);
+    }
     bytes.addAll(generator.feed(3));
     bytes.addAll(generator.cut());
 
     return bytes;
+  }
+
+  static Future<img.Image?> _buildQrRasterImage(String data) async {
+    try {
+      final qrCode = QrCode.fromData(
+        data: data,
+        errorCorrectLevel: QrErrorCorrectLevel.M,
+      );
+      final qrImage = QrImage(qrCode);
+      final byteData = await qrImage.toImageAsBytes(
+        size: 240,
+        format: ui.ImageByteFormat.png,
+      );
+      if (byteData == null) {
+        return null;
+      }
+      return img.decodeImage(byteData.buffer.asUint8List());
+    } catch (err) {
+      log('QR raster build failed: $err', name: 'PrinterService');
+      return null;
+    }
   }
 
   /// Converts an [img.Image] to ESC/POS GS v 0 raster bytes, centered.

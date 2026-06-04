@@ -135,6 +135,7 @@ class LotteryController extends GetxController {
     try {
       final user = await ProfileService.fetchProfile();
       balance.value = user.balance;
+      Get.find<AuthController>().syncCurrentUser(user);
       update();
     } catch (e) {
       // Silently fail - keep existing balance if profile fetch fails
@@ -395,6 +396,7 @@ class LotteryController extends GetxController {
       clearNumbers();
       targetAmount.value = 0;
       rambolAmount.value = 0;
+      await loadProfile();
       update();
       return true;
     } catch (e) {
@@ -605,6 +607,13 @@ class LotteryController extends GetxController {
       final responseBody = jsonDecode(response.body);
       final responseData = responseBody['data'] as Map<String, dynamic>? ?? {};
       final teller = responseData['teller'] as Map<String, dynamic>? ?? {};
+      final responseBalance =
+          (teller['balance'] as num?)?.toDouble() ??
+          (responseData['balance'] as num?)?.toDouble();
+      if (responseBalance != null) {
+        balance.value = responseBalance;
+        authController.updateCurrentUserBalance(responseBalance);
+      }
       final ticketNo = responseData['batch_id'] as String? ?? batchTicketNo;
 
       final totalAmount = draftBets.fold<double>(
