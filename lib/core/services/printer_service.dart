@@ -2,11 +2,14 @@ import 'dart:developer';
 import 'dart:io';
 import 'package:esc_pos_utils_plus/esc_pos_utils_plus.dart';
 import 'package:flutter/services.dart';
+import 'package:get/get.dart';
 import 'package:get_storage/get_storage.dart';
 import 'package:image/image.dart' as img;
 import 'package:permission_handler/permission_handler.dart';
 import 'package:print_bluetooth_thermal/print_bluetooth_thermal.dart';
+import 'package:onstite/controllers/auth_controller.dart';
 import '../../controllers/lottery_controller.dart';
+import '../../models/ticket.dart';
 
 enum PrintError {
   noPrinterConfigured,
@@ -154,7 +157,10 @@ class PrinterService {
 
       return true;
     } catch (e) {
-      log('canReachSavedPrinter connect probe failed: $e', name: 'PrinterService');
+      log(
+        'canReachSavedPrinter connect probe failed: $e',
+        name: 'PrinterService',
+      );
       return false;
     }
   }
@@ -237,6 +243,73 @@ class PrinterService {
       log('printTicket error: $e', name: 'PrinterService');
       return const PrintResult.fail(PrintError.unknown);
     }
+  }
+
+  static Future<PrintResult> reprintTicket({required Ticket ticket}) async {
+    final betObjects = ticket.betObjects ?? const <BetData>[];
+    if (betObjects.isEmpty) {
+      return const PrintResult.fail(PrintError.unknown);
+    }
+
+    final authCtrl = Get.find<AuthController>();
+    final user = authCtrl.currentUser.value;
+    final teller = {'id': user?.id ?? '', 'name': user?.name ?? ''};
+
+    final betEntries = _buildBetEntriesFromTicketBets(betObjects);
+    if (betEntries.isEmpty) {
+      return const PrintResult.fail(PrintError.unknown);
+    }
+
+    final firstBet = betObjects.first;
+    final totalAmount = betEntries.fold<double>(
+      0,
+      (sum, entry) => sum + entry.totalBetAmount,
+    );
+
+    return printTicket(
+      betEntries: betEntries,
+      totalAmount: totalAmount,
+      ticketNo: ticket.ticketNo ?? '',
+      teller: teller,
+      gameName: firstBet.gameName ?? 'STL',
+      drawTimeLabel: firstBet.drawTime ?? '',
+    );
+  }
+
+  static List<BetEntry> _buildBetEntriesFromTicketBets(List<BetData> bets) {
+    final entries = <BetEntry>[];
+    var betNumber = 1;
+
+    for (final bet in bets) {
+      final digits = bet.digits ?? const <String>[];
+      final gameName = bet.gameName ?? 'STL';
+      if ((bet.straightBetAmount ?? 0) > 0) {
+        entries.add(
+          BetEntry(
+            betNumber: betNumber++,
+            game: gameName,
+            straightBetAmount: bet.straightBetAmount ?? 0,
+            rambleBetAmount: 0,
+            winAmount: bet.estPayout ?? 0,
+            digits: digits,
+          ),
+        );
+      }
+      if ((bet.rambleBetAmount ?? 0) > 0) {
+        entries.add(
+          BetEntry(
+            betNumber: betNumber++,
+            game: gameName,
+            straightBetAmount: 0,
+            rambleBetAmount: bet.rambleBetAmount ?? 0,
+            winAmount: bet.estPayout ?? 0,
+            digits: digits,
+          ),
+        );
+      }
+    }
+
+    return entries;
   }
 
   static Future<List<int>> _buildTicketBytes({
@@ -399,7 +472,10 @@ class PrinterService {
       bytes.addAll(
         generator.row([
           PosColumn(text: '', width: 1),
-          PosColumn(text: gameName, width: 2),
+          PosColumn(
+            text: entry.game.isNotEmpty ? entry.game : gameName,
+            width: 2,
+          ),
           PosColumn(text: formatted, width: 3),
           PosColumn(text: entry.betType, width: 3),
           PosColumn(

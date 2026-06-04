@@ -193,6 +193,26 @@ class DrawTime {
     };
   }
 
+  int get minutesSinceMidnight {
+    try {
+      final parts = drawTime.split('T');
+      if (parts.length < 2) return 0;
+
+      final timeParts = parts[1].substring(0, 5).split(':');
+      if (timeParts.length != 2) return 0;
+
+      final hour = int.parse(timeParts[0]);
+      final minute = int.parse(timeParts[1]);
+      return (hour * 60) + minute;
+    } catch (e) {
+      return 0;
+    }
+  }
+
+  static int compareChronologically(DrawTime a, DrawTime b) {
+    return a.minutesSinceMidnight.compareTo(b.minutesSinceMidnight);
+  }
+
   /// Extract time string in HH:MM AM/PM format from the draw_time field
   String getFormattedTime() {
     try {

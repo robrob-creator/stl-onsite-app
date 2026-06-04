@@ -34,6 +34,7 @@ class _LottoNumberInputState extends State<LottoNumberInput> {
   late int _cellCount;
   late int _digitsPerCell;
   late int _maxValue;
+  bool _isResettingFields = false;
 
   @override
   void initState() {
@@ -74,6 +75,12 @@ class _LottoNumberInputState extends State<LottoNumberInput> {
     String value = _controllers[index].text;
     int currentLength = value.length;
     int previousLength = _previousLengths[index];
+
+    if (_isResettingFields) {
+      _previousLengths[index] = currentLength;
+      _notifyChange();
+      return;
+    }
 
     // Detect backspace (length decreased)
     if (currentLength < previousLength) {
@@ -144,9 +151,16 @@ class _LottoNumberInputState extends State<LottoNumberInput> {
     } else if (oldWidget.initialValue != widget.initialValue &&
         widget.initialValue.isEmpty) {
       // Clear controllers if initialValue became empty
+      _isResettingFields = true;
       for (var controller in _controllers) {
         controller.clear();
       }
+      _previousLengths = List.filled(_cellCount, 0);
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        _isResettingFields = false;
+        if (!mounted || _focusNodes.isEmpty) return;
+        FocusScope.of(context).requestFocus(_focusNodes.first);
+      });
     }
   }
 

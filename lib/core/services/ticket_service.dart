@@ -8,6 +8,21 @@ import '../app_constants.dart';
 class TicketService {
   static const String baseUrl = '${AppConstants.apiBaseUrl}/tickets';
 
+  static String _extractMessage(http.Response response) {
+    try {
+      final body = jsonDecode(response.body) as Map<String, dynamic>;
+      final message = body['message'];
+      if (message is String && message.isNotEmpty) {
+        return message;
+      }
+      final error = body['error'];
+      if (error is String && error.isNotEmpty) {
+        return error;
+      }
+    } catch (_) {}
+    return 'Request failed with status ${response.statusCode}';
+  }
+
   /// Fetch tickets with optional search by ticket number and status filter
   static Future<List<Ticket>> fetchTickets({
     String? ticketNo,
@@ -68,7 +83,7 @@ class TicketService {
 
   /// Void a ticket (soft delete)
   /// Calls PUT /tickets/void-request with ticket ID
-  static Future<void> voidTicket(String ticketId, [String? reason]) async {
+  static Future<String> voidTicket(String ticketId, [String? reason]) async {
     try {
       final authCtrl = Get.find<AuthController>();
       final token = authCtrl.token.value;
@@ -92,11 +107,69 @@ class TicketService {
           )
           .timeout(const Duration(seconds: 30));
 
+      final message = _extractMessage(response);
       if (response.statusCode != 200) {
-        throw Exception('Failed to void ticket: ${response.statusCode}');
+        throw Exception(message);
       }
+      return message;
     } catch (e) {
-      throw Exception('Error voiding ticket: $e');
+      throw Exception('$e');
+    }
+  }
+
+  static Future<String> requestReprint(String ticketId) async {
+    try {
+      final authCtrl = Get.find<AuthController>();
+      final token = authCtrl.token.value;
+      final uri = Uri.parse(
+        '$baseUrl/reprint-request',
+      ).replace(queryParameters: {'id': ticketId});
+
+      final response = await http
+          .put(
+            uri,
+            headers: {
+              'Authorization': 'Bearer $token',
+              'Content-Type': 'application/json',
+            },
+          )
+          .timeout(const Duration(seconds: 30));
+
+      final message = _extractMessage(response);
+      if (response.statusCode != 200) {
+        throw Exception(message);
+      }
+      return message;
+    } catch (e) {
+      throw Exception('$e');
+    }
+  }
+
+  static Future<String> consumeApprovedReprint(String ticketId) async {
+    try {
+      final authCtrl = Get.find<AuthController>();
+      final token = authCtrl.token.value;
+      final uri = Uri.parse(
+        '$baseUrl/reprint',
+      ).replace(queryParameters: {'id': ticketId});
+
+      final response = await http
+          .post(
+            uri,
+            headers: {
+              'Authorization': 'Bearer $token',
+              'Content-Type': 'application/json',
+            },
+          )
+          .timeout(const Duration(seconds: 30));
+
+      final message = _extractMessage(response);
+      if (response.statusCode != 200) {
+        throw Exception(message);
+      }
+      return message;
+    } catch (e) {
+      throw Exception('$e');
     }
   }
 }

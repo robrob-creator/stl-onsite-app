@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/foundation.dart';
 import 'dart:async';
 import 'package:get/get.dart';
+import 'package:onstite/core/services/printer_service.dart';
 import 'package:qr_code_scanner_plus/qr_code_scanner_plus.dart';
 import 'package:permission_handler/permission_handler.dart';
 import '../../core/design_system.dart';
@@ -73,12 +74,12 @@ class _TicketPageState extends State<TicketPage> {
       case 'pending':
         return AppColors.primary;
       case 'pending_void':
-        return const Color(0xFFF97316);
+        return AppColors.warning;
       case 'void':
       case 'voided':
-        return const Color(0xFFEC4899);
+        return AppColors.error;
       case 'won':
-        return const Color(0xFF10B981);
+        return AppColors.success;
       default:
         return Colors.grey[600]!;
     }
@@ -99,6 +100,41 @@ class _TicketPageState extends State<TicketPage> {
       default:
         return status.toUpperCase();
     }
+  }
+
+  bool _canRequestVoid(Ticket ticket) =>
+      (ticket.status ?? '').toLowerCase() == 'pending' &&
+      !ticket.hasActiveRequest;
+
+  bool _canRequestReprint(Ticket ticket) {
+    final status = (ticket.status ?? '').toLowerCase();
+    return !ticket.hasActiveRequest &&
+        status != 'pending_void' &&
+        status != 'voided' &&
+        (ticket.betObjects?.isNotEmpty ?? false);
+  }
+
+  Color _getRequestStateColor(Ticket ticket) {
+    if (ticket.hasApprovedReprintRequest) {
+      return AppColors.success;
+    }
+    if (ticket.hasPendingReprintRequest || ticket.hasPendingVoidRequest) {
+      return AppColors.warning;
+    }
+    return AppColors.textSecondary;
+  }
+
+  String _getRequestStateLabel(Ticket ticket) {
+    if (ticket.hasApprovedReprintRequest) {
+      return 'REPRINT APPROVED';
+    }
+    if (ticket.hasPendingReprintRequest) {
+      return 'REPRINT NEEDS APPROVAL';
+    }
+    if (ticket.hasPendingVoidRequest) {
+      return 'VOID NEEDS APPROVAL';
+    }
+    return '';
   }
 
   @override
@@ -154,19 +190,19 @@ class _TicketPageState extends State<TicketPage> {
   }
 
   void _showVoidConfirmation(Ticket ticket) {
-    final TextEditingController _reasonController = TextEditingController();
+    final TextEditingController reasonController = TextEditingController();
 
     showDialog(
       context: context,
       builder: (context) => AlertDialog(
-        title: const Text('Void Entry'),
+        title: const Text('Request Void Approval'),
         content: SingleChildScrollView(
           child: Column(
             mainAxisSize: MainAxisSize.min,
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               Text(
-                'Void Ticket No. ${ticket.ticketNo}',
+                'Submit a void request for Ticket No. ${ticket.ticketNo}',
                 style: TextStyle(
                   fontSize: 14,
                   color: Colors.grey[600],
@@ -175,7 +211,7 @@ class _TicketPageState extends State<TicketPage> {
               ),
               const SizedBox(height: 16),
               Text(
-                'Reason for Void',
+                'Reason for Void Request',
                 style: TextStyle(
                   fontSize: 12,
                   fontWeight: FontWeight.w600,
@@ -184,10 +220,10 @@ class _TicketPageState extends State<TicketPage> {
               ),
               const SizedBox(height: 8),
               TextField(
-                controller: _reasonController,
+                controller: reasonController,
                 maxLines: 4,
                 decoration: InputDecoration(
-                  hintText: 'Enter reason for voiding this ticket',
+                  hintText: 'Enter reason for requesting a void',
                   border: OutlineInputBorder(
                     borderRadius: BorderRadius.circular(8),
                   ),
@@ -215,13 +251,13 @@ class _TicketPageState extends State<TicketPage> {
             child: ElevatedButton(
               onPressed: () {
                 Navigator.pop(context);
-                _showFinalVoidConfirmation(ticket, _reasonController.text);
+                _showFinalVoidConfirmation(ticket, reasonController.text);
               },
               style: ElevatedButton.styleFrom(
                 backgroundColor: AppColors.backgroundDark,
               ),
               child: const Text(
-                'Submit ',
+                'Submit',
                 style: TextStyle(color: Colors.white),
               ),
             ),
@@ -235,14 +271,14 @@ class _TicketPageState extends State<TicketPage> {
     showDialog(
       context: context,
       builder: (context) => AlertDialog(
-        title: const Text('Void Confirmation'),
+        title: const Text('Submit Void Request'),
         content: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
             Icon(Icons.info_outline, size: 48, color: Colors.orange[300]),
             const SizedBox(height: 16),
-            const Text(
-              'Are you sure you want to void this transaction ?',
+            Text(
+              'This will send the void request for approval before the ticket can be voided.\n\nContinue for ${ticket.ticketNo}?',
               textAlign: TextAlign.center,
               style: TextStyle(fontSize: 14),
             ),
@@ -268,12 +304,12 @@ class _TicketPageState extends State<TicketPage> {
 
   Future<void> _voidTicketAction(Ticket ticket, String reason) async {
     try {
-      await _ctrl.voidTicket(ticket.id ?? '', reason);
+      final message = await _ctrl.voidTicket(ticket.id ?? '', reason);
       Get.snackbar(
         'Success',
-        'Ticket voided successfully',
+        message,
         snackPosition: SnackPosition.BOTTOM,
-        backgroundColor: const Color(0xFF10B981),
+        backgroundColor: AppColors.success,
         colorText: Colors.white,
       );
     } catch (e) {
@@ -282,6 +318,127 @@ class _TicketPageState extends State<TicketPage> {
         'Failed to void ticket: $e',
         snackPosition: SnackPosition.BOTTOM,
         backgroundColor: Colors.red,
+        colorText: Colors.white,
+      );
+    }
+  }
+
+  void _showReprintConfirmation(Ticket ticket) {
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Request Reprint Approval'),
+        content: Text(
+          'Submit a reprint request for Ticket No. ${ticket.ticketNo}? Approval is required before this ticket can be reprinted.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('Cancel'),
+          ),
+          ElevatedButton(
+            onPressed: () {
+              Navigator.pop(context);
+              _requestReprintAction(ticket);
+            },
+            style: ElevatedButton.styleFrom(backgroundColor: AppColors.primary),
+            child: const Text('Submit', style: TextStyle(color: Colors.white)),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Future<void> _requestReprintAction(Ticket ticket) async {
+    try {
+      final message = await _ctrl.requestReprint(ticket.id ?? '');
+      Get.snackbar(
+        'Success',
+        message,
+        snackPosition: SnackPosition.BOTTOM,
+        backgroundColor: AppColors.success,
+        colorText: Colors.white,
+      );
+    } catch (e) {
+      Get.snackbar(
+        'Error',
+        '$e',
+        snackPosition: SnackPosition.BOTTOM,
+        backgroundColor: AppColors.error,
+        colorText: Colors.white,
+      );
+    }
+  }
+
+  Future<bool> _ensurePrinterReadyForReprint() async {
+    final reachability = await PrinterService.getSavedPrinterReachability();
+    switch (reachability) {
+      case PrinterReachabilityStatus.reachable:
+        return true;
+      case PrinterReachabilityStatus.notConfigured:
+        Get.snackbar(
+          'Printer Required',
+          'Connect a printer before using an approved reprint.',
+          snackPosition: SnackPosition.BOTTOM,
+          backgroundColor: AppColors.warning,
+          colorText: Colors.white,
+        );
+        return false;
+      case PrinterReachabilityStatus.permissionDenied:
+        Get.snackbar(
+          'Permission Required',
+          'Allow Nearby devices permission so the app can connect to your printer.',
+          snackPosition: SnackPosition.BOTTOM,
+          backgroundColor: AppColors.warning,
+          colorText: Colors.white,
+        );
+        return false;
+      case PrinterReachabilityStatus.unreachable:
+        Get.snackbar(
+          'Printer Unavailable',
+          'Make sure the configured printer is powered on and in Bluetooth range before reprinting.',
+          snackPosition: SnackPosition.BOTTOM,
+          backgroundColor: AppColors.warning,
+          colorText: Colors.white,
+        );
+        return false;
+    }
+  }
+
+  Future<void> _reprintTicketAction(Ticket ticket) async {
+    if (!await _ensurePrinterReadyForReprint()) {
+      return;
+    }
+
+    try {
+      await _ctrl.consumeApprovedReprint(ticket.id ?? '');
+      final result = await PrinterService.reprintTicket(ticket: ticket);
+      await _ctrl.fetchTickets();
+
+      if (result.success) {
+        Get.snackbar(
+          'Success',
+          'Ticket sent to printer successfully.',
+          snackPosition: SnackPosition.BOTTOM,
+          backgroundColor: AppColors.success,
+          colorText: Colors.white,
+        );
+        return;
+      }
+
+      Get.snackbar(
+        'Print Failed',
+        'The reprint approval was used but printing failed. Fix the printer issue and request approval again.',
+        snackPosition: SnackPosition.BOTTOM,
+        backgroundColor: AppColors.error,
+        colorText: Colors.white,
+      );
+    } catch (e) {
+      Get.snackbar(
+        'Error',
+        '$e',
+        snackPosition: SnackPosition.BOTTOM,
+        backgroundColor: AppColors.error,
         colorText: Colors.white,
       );
     }
@@ -547,7 +704,7 @@ class _TicketPageState extends State<TicketPage> {
                             ),
                           ),
                         ),
-                        if ((ticket.status ?? '').toLowerCase() == 'pending')
+                        if (_canRequestVoid(ticket))
                           ElevatedButton(
                             style: ElevatedButton.styleFrom(
                               backgroundColor: AppColors.backgroundDark,
@@ -562,7 +719,7 @@ class _TicketPageState extends State<TicketPage> {
                             onPressed: () => _showVoidConfirmation(ticket),
                             child: Row(
                               children: [
-                                Text("Void"),
+                                const Text('Request Void'),
                                 const SizedBox(width: 4),
                                 const Icon(Icons.close, size: 14),
                               ],
@@ -619,6 +776,17 @@ class _TicketPageState extends State<TicketPage> {
                       color: _getStatusColor(ticket.status ?? 'unknown'),
                     ),
                   ),
+                  if (_getRequestStateLabel(ticket).isNotEmpty) ...[
+                    const SizedBox(height: 8),
+                    Text(
+                      _getRequestStateLabel(ticket),
+                      style: TextStyle(
+                        fontSize: 12,
+                        fontWeight: FontWeight.w700,
+                        color: _getRequestStateColor(ticket),
+                      ),
+                    ),
+                  ],
                 ],
               ),
             ],
@@ -634,6 +802,93 @@ class _TicketPageState extends State<TicketPage> {
             _formatDate(ticket.createdAt),
             style: const TextStyle(fontSize: 13, color: Colors.black87),
           ),
+          if (_getRequestStateLabel(ticket).isNotEmpty) ...[
+            const SizedBox(height: 16),
+            Container(
+              width: double.infinity,
+              padding: const EdgeInsets.all(12),
+              decoration: BoxDecoration(
+                color: _getRequestStateColor(ticket).withOpacity(0.08),
+                borderRadius: BorderRadius.circular(8),
+                border: Border.all(
+                  color: _getRequestStateColor(ticket).withOpacity(0.25),
+                ),
+              ),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    _getRequestStateLabel(ticket),
+                    style: TextStyle(
+                      fontSize: 12,
+                      fontWeight: FontWeight.w700,
+                      color: _getRequestStateColor(ticket),
+                    ),
+                  ),
+                  if ((ticket.requestRemarks ?? '').isNotEmpty) ...[
+                    const SizedBox(height: 8),
+                    Text(
+                      ticket.requestRemarks!,
+                      style: TextStyle(fontSize: 12, color: Colors.grey[700]),
+                    ),
+                  ],
+                ],
+              ),
+            ),
+          ],
+          const SizedBox(height: 16),
+          if (ticket.hasApprovedReprintRequest ||
+              ticket.hasPendingReprintRequest ||
+              _canRequestReprint(ticket))
+            Wrap(
+              spacing: 8,
+              runSpacing: 8,
+              children: [
+                if (_canRequestReprint(ticket))
+                  OutlinedButton.icon(
+                    onPressed: () => _showReprintConfirmation(ticket),
+                    icon: const Icon(Icons.print_outlined, size: 16),
+                    label: const Text('Request Reprint'),
+                  ),
+                if (ticket.hasPendingReprintRequest)
+                  Container(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 12,
+                      vertical: 10,
+                    ),
+                    decoration: BoxDecoration(
+                      color: AppColors.warning.withOpacity(0.08),
+                      borderRadius: BorderRadius.circular(8),
+                      border: Border.all(
+                        color: AppColors.warning.withOpacity(0.25),
+                      ),
+                    ),
+                    child: const Text(
+                      'Reprint request sent for approval',
+                      style: TextStyle(
+                        color: AppColors.warning,
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                  ),
+                if (ticket.hasApprovedReprintRequest)
+                  ElevatedButton.icon(
+                    onPressed: () => _reprintTicketAction(ticket),
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: AppColors.primary,
+                    ),
+                    icon: const Icon(
+                      Icons.print,
+                      size: 16,
+                      color: Colors.white,
+                    ),
+                    label: const Text(
+                      'Reprint',
+                      style: TextStyle(color: Colors.white),
+                    ),
+                  ),
+              ],
+            ),
           const SizedBox(height: 16),
           // Bet details table
           if ((ticket.betObjects?.isNotEmpty ?? false) &&

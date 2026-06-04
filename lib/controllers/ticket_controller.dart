@@ -21,6 +21,15 @@ class TicketController extends GetxController {
     try {
       final ws = Get.find<WebSocketService>();
       ws.on('ticket.voided', (_) => fetchTickets());
+      ws.on('api.mutation', (payload) {
+        final endpoints =
+            (payload['endpoints_to_update'] as List<dynamic>? ?? [])
+                .map((item) => item.toString())
+                .toList();
+        if (endpoints.contains('/api/tickets')) {
+          fetchTickets();
+        }
+      });
     } catch (_) {
       // WebSocketService not yet available — safe to ignore
     }
@@ -59,8 +68,21 @@ class TicketController extends GetxController {
     }
   }
 
-  Future<void> voidTicket(String ticketId, String reason) async {
-    await TicketService.voidTicket(ticketId, reason);
+  Future<String> voidTicket(String ticketId, String reason) async {
+    final message = await TicketService.voidTicket(ticketId, reason);
     await fetchTickets();
+    return message;
+  }
+
+  Future<String> requestReprint(String ticketId) async {
+    final message = await TicketService.requestReprint(ticketId);
+    await fetchTickets();
+    return message;
+  }
+
+  Future<String> consumeApprovedReprint(String ticketId) async {
+    final message = await TicketService.consumeApprovedReprint(ticketId);
+    await fetchTickets();
+    return message;
   }
 }

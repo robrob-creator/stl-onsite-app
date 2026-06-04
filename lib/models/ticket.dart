@@ -12,6 +12,10 @@ class Ticket {
   final String? accountNumber;
   final String? deletedAt;
   final double? winningPayout;
+  final String? requestId;
+  final String? requestType;
+  final String? requestStatus;
+  final String? requestRemarks;
 
   Ticket({
     this.id,
@@ -27,10 +31,25 @@ class Ticket {
     this.accountNumber,
     this.deletedAt,
     this.winningPayout,
+    this.requestId,
+    this.requestType,
+    this.requestStatus,
+    this.requestRemarks,
   });
 
   // Backward compatibility: return betObjects for display
   List<BetData>? get betIds => betObjects;
+  bool get hasActiveRequest => requestId != null && requestId!.isNotEmpty;
+  bool get hasPendingVoidRequest =>
+      (status ?? '').toLowerCase() == 'pending_void' ||
+      ((requestType ?? '').toLowerCase() == 'void_ticket' &&
+          (requestStatus ?? '').toLowerCase() == 'pending');
+  bool get hasPendingReprintRequest =>
+      (requestType ?? '').toLowerCase() == 'reprint_ticket' &&
+      (requestStatus ?? '').toLowerCase() == 'pending';
+  bool get hasApprovedReprintRequest =>
+      (requestType ?? '').toLowerCase() == 'reprint_ticket' &&
+      (requestStatus ?? '').toLowerCase() == 'approved';
 
   factory Ticket.fromJson(Map<String, dynamic> json) {
     return Ticket(
@@ -53,6 +72,10 @@ class Ticket {
       accountNumber: json['account_number'] as String?,
       deletedAt: json['deleted_at'] as String?,
       winningPayout: json['winning_payout']?.toDouble(),
+      requestId: json['request_id'] as String?,
+      requestType: json['request_type'] as String?,
+      requestStatus: json['request_status'] as String?,
+      requestRemarks: json['request_remarks'] as String?,
     );
   }
 
@@ -71,6 +94,10 @@ class Ticket {
       'account_number': accountNumber,
       'deleted_at': deletedAt,
       'winning_payout': winningPayout,
+      'request_id': requestId,
+      'request_type': requestType,
+      'request_status': requestStatus,
+      'request_remarks': requestRemarks,
     };
   }
 }
@@ -127,6 +154,9 @@ class BetData {
   final double? estPayout;
   final String? ticketNo;
   final String? createdAt;
+  final String? gameName;
+  final String? drawTime;
+  final String? drawTimeId;
 
   BetData({
     this.id,
@@ -140,6 +170,9 @@ class BetData {
     this.estPayout,
     this.ticketNo,
     this.createdAt,
+    this.gameName,
+    this.drawTime,
+    this.drawTimeId,
   });
 
   factory BetData.fromJson(Map<String, dynamic> json) {
@@ -174,6 +207,9 @@ class BetData {
       estPayout: (json['est_payout'] as num?)?.toDouble(),
       ticketNo: json['ticket_no'] as String?,
       createdAt: json['created_at'] as String?,
+      gameName: json['game_name'] as String?,
+      drawTime: json['draw_time'] as String?,
+      drawTimeId: json['draw_time_id'] as String?,
     );
   }
 
@@ -190,6 +226,9 @@ class BetData {
       'est_payout': estPayout,
       'ticket_no': ticketNo,
       'created_at': createdAt,
+      'game_name': gameName,
+      'draw_time': drawTime,
+      'draw_time_id': drawTimeId,
     };
   }
 }

@@ -49,11 +49,15 @@ class _SplashPageState extends State<SplashPage> {
         child: LayoutBuilder(
           builder: (context, constraints) {
             final shortestSide = constraints.biggest.shortestSide;
-            final animationSize = shortestSide * 0.92;
+            final animationSize =
+                shortestSide * 5; // Scale up to 500% of the shortest side
 
             return SizedBox.square(
               dimension: animationSize,
-              child: const _SplashAnimation(),
+              child: Transform.scale(
+                scale: 1.8,
+                child: const _SplashAnimation(),
+              ),
             );
           },
         ),
@@ -71,6 +75,7 @@ class _SplashAnimation extends StatelessWidget {
       'assets/animations/splash.json',
       repeat: false,
       fit: BoxFit.contain,
+      alignment: Alignment.center,
     );
   }
 }

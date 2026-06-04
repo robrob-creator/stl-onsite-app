@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'package:get/get.dart';
 import 'package:http/http.dart' as http;
 import 'dart:convert';
@@ -179,17 +180,8 @@ class AuthController extends GetxController {
         currentUser.value = loginResponse.user;
         token.value = loginResponse.token;
 
-        // Save session to secure storage
-        await _saveSession();
-
-        Get.snackbar(
-          'Success',
-          loginResponse.message,
-          snackPosition: SnackPosition.BOTTOM,
-        );
-
-        // Navigate to home
         Get.offNamed('/home');
+        unawaited(_saveSession());
         _connectWebSocket();
       } else {
         _handleErrorResponse(response);

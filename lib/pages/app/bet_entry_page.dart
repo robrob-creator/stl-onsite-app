@@ -411,12 +411,8 @@ class _BetEntryPageState extends State<BetEntryPage> {
                                   _lottoNumbers = '';
                                 });
                                 ctrl.selectedGameId.value = game.id;
-                                // Select the first available draw time for the newly chosen game
-                                final firstAvailable = game.drawTimes
-                                    .where((dt) => dt.isAvailable())
-                                    .firstOrNull;
-                                ctrl.selectedTime.value =
-                                    firstAvailable?.id ?? '';
+                                ctrl.selectedTime.value = ctrl
+                                    .getFirstAvailableDrawTimeId(game);
                                 ctrl.update();
                               },
                               child: Container(
@@ -588,8 +584,11 @@ class _BetEntryPageState extends State<BetEntryPage> {
                       !drawTimes.any(
                         (dt) => dt.id == ctrl.selectedTime.value,
                       )) {
+                    final defaultDrawTimeId = ctrl.currentGame == null
+                        ? drawTimes.first.id
+                        : ctrl.getFirstAvailableDrawTimeId(ctrl.currentGame!);
                     WidgetsBinding.instance.addPostFrameCallback((_) {
-                      ctrl.selectedTime.value = drawTimes.first.id;
+                      ctrl.selectedTime.value = defaultDrawTimeId;
                       ctrl.update();
                     });
                   }

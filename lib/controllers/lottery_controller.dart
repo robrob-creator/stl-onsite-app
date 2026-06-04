@@ -120,13 +120,7 @@ class LotteryController extends GetxController {
       // Set the first game as selected by default
       if (games.isNotEmpty) {
         selectedGameId.value = games[0].id;
-        // Set the first *available* draw time of the selected game
-        final firstAvailable = games[0].drawTimes
-            .where((dt) => dt.isAvailable())
-            .firstOrNull;
-        if (firstAvailable != null) {
-          selectedTime.value = firstAvailable.id;
-        }
+        selectedTime.value = getFirstAvailableDrawTimeId(games[0]);
       }
       update();
     } catch (e) {
@@ -161,7 +155,15 @@ class LotteryController extends GetxController {
 
   /// Get the list of draw times for the currently selected game
   List<DrawTime> get currentDrawTimes {
-    return currentGame?.drawTimes ?? [];
+    final drawTimes = List<DrawTime>.from(currentGame?.drawTimes ?? const []);
+    drawTimes.sort(DrawTime.compareChronologically);
+    return drawTimes;
+  }
+
+  String getFirstAvailableDrawTimeId(Game game) {
+    final drawTimes = List<DrawTime>.from(game.drawTimes)
+      ..sort(DrawTime.compareChronologically);
+    return drawTimes.where((dt) => dt.isAvailable()).firstOrNull?.id ?? '';
   }
 
   /// Calculate the number of unique permutations for the given digits
