@@ -10,7 +10,6 @@ import 'transaction_page.dart';
 import 'dashboard_page.dart';
 import 'ticket_page.dart';
 import 'claim_page.dart';
-import 'live_page.dart';
 
 class HomePage extends StatefulWidget {
   const HomePage({super.key});

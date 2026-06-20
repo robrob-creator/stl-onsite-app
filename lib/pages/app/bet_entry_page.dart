@@ -1,13 +1,20 @@
+import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:get/get.dart';
 import 'package:permission_handler/permission_handler.dart';
+import 'package:http/http.dart' as http;
+
 import '../../controllers/lottery_controller.dart';
+import '../../controllers/auth_controller.dart';
+import '../../core/app_constants.dart';
 import '../../core/services/printer_service.dart';
 import '../../models/bet_availability.dart';
+import '../../models/game.dart';
 import '../../widgets/lotto_number_input.dart';
 import '../../widgets/conflict_notice_modal.dart';
 import '../../widgets/batch_bet_choice_modal.dart';
+import '../../widgets/current_slip_card_compact.dart';
 
 /// Restricts typed numeric input to [min, max].
 /// Clears the field if the value exceeds max; does NOT clamp to min on typing
@@ -49,6 +56,8 @@ class _BetEntryPageState extends State<BetEntryPage> {
   String? _rambolError;
   bool _isAddingBet = false;
   bool _isSubmitting = false;
+  // When editing an existing draft, store its index here. Null = creating new bet.
+  int? _editingIndex;
 
   @override
   void initState() {
@@ -89,6 +98,38 @@ class _BetEntryPageState extends State<BetEntryPage> {
       buffer.write(str[i]);
     }
     return buffer.toString();
+  }
+
+  Widget _labelValue(String label, String value) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
+      decoration: BoxDecoration(
+        color: Colors.grey[100],
+        borderRadius: BorderRadius.circular(6),
+      ),
+      child: RichText(
+        text: TextSpan(
+          children: [
+            TextSpan(
+              text: '$label: ',
+              style: TextStyle(
+                fontSize: 12,
+                color: Colors.grey[700],
+                fontWeight: FontWeight.w600,
+              ),
+            ),
+            TextSpan(
+              text: value,
+              style: const TextStyle(
+                fontSize: 13,
+                color: Colors.black87,
+                fontWeight: FontWeight.w500,
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
   }
 
   Future<void> _confirmSubmit(LotteryController ctrl) async {
@@ -230,8 +271,9 @@ class _BetEntryPageState extends State<BetEntryPage> {
                               try {
                                 await ctrl.submitBets();
                               } finally {
-                                if (mounted)
+                                if (mounted) {
                                   setState(() => _isSubmitting = false);
+                                }
                               }
                               // Always dismiss the loading dialog here — the dialog
                               // is owned by this page so it is the most reliable
@@ -817,7 +859,7 @@ class _BetEntryPageState extends State<BetEntryPage> {
                                           bottom: 8,
                                         ),
                                         child: Text(
-                                          'Target / Straight Bet',
+                                          'Target Bet',
                                           style: TextStyle(
                                             fontSize: 14,
                                             fontWeight: FontWeight.w600,
@@ -1168,7 +1210,7 @@ class _BetEntryPageState extends State<BetEntryPage> {
                                   if (targetAmount == 0) {
                                     Get.snackbar(
                                       'Error',
-                                      'Please enter a Target/Straight bet amount',
+                                      'Please enter a Target bet amount',
                                     );
                                     return;
                                   }
@@ -1319,6 +1361,31 @@ class _BetEntryPageState extends State<BetEntryPage> {
                                   return;
                                 }
 
+                                // If we're editing an existing draft, remove it first
+                                if (_editingIndex != null) {
+                                  final editIndex = _editingIndex!;
+                                  // Capture ID to verify deletion succeeded
+                                  final originalId =
+                                      editIndex < controller.draftBets.length
+                                      ? controller.draftBets[editIndex].id
+                                      : '';
+
+                                  await controller.removeBet(editIndex);
+
+                                  // If the original had a server ID and it still exists,
+                                  // treat the removal as failed and abort update.
+                                  if (originalId.isNotEmpty &&
+                                      controller.draftBets.any(
+                                        (d) => d.id == originalId,
+                                      )) {
+                                    Get.snackbar(
+                                      'Error',
+                                      'Failed to remove original draft. Update aborted',
+                                    );
+                                    return;
+                                  }
+                                }
+
                                 // Convert lotto numbers to list for controller by grouping
                                 controller.selectedNumbers.clear();
                                 controller.selectedNumbers.addAll(digits);
@@ -1332,6 +1399,7 @@ class _BetEntryPageState extends State<BetEntryPage> {
                                       _lottoNumbers = '';
                                       _targetAmountController.clear();
                                       _rambolAmountController.clear();
+                                      _editingIndex = null; // exit edit mode
                                     });
                                   });
                                 }
@@ -1362,7 +1430,7 @@ class _BetEntryPageState extends State<BetEntryPage> {
                               ),
                             )
                           : Text(
-                              'Add Bet',
+                              _editingIndex != null ? 'Update Bet' : 'Add Bet',
                               style: TextStyle(
                                 color: canAdd ? Colors.white : Colors.grey[500],
                                 fontWeight: FontWeight.bold,
@@ -1376,157 +1444,117 @@ class _BetEntryPageState extends State<BetEntryPage> {
 
               const SizedBox(height: 24),
 
-              // Bet List Table
+              // Bet List Table (responsive)
               GetBuilder<LotteryController>(
-                builder: (ctrl) => controller.draftBets.isEmpty
-                    ? SizedBox(
-                        height: 100,
-                        child: Center(
-                          child: Text(
-                            'No bets added yet',
-                            style: TextStyle(color: Colors.grey[400]),
-                          ),
+                builder: (ctrl) {
+                  if (controller.draftBets.isEmpty) {
+                    return SizedBox(
+                      height: 100,
+                      child: Center(
+                        child: Text(
+                          'No bets added yet',
+                          style: TextStyle(color: Colors.grey[400]),
                         ),
-                      )
-                    : Column(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          // Table Header
-                          Container(
-                            padding: const EdgeInsets.symmetric(
-                              horizontal: 12,
-                              vertical: 12,
-                            ),
-                            decoration: BoxDecoration(
-                              border: Border(
-                                bottom: BorderSide(color: Colors.grey[300]!),
+                      ),
+                    );
+                  }
+
+                  final screenWidth = MediaQuery.of(context).size.width;
+
+                  // Narrow screens: simplified CurrentSlipCard list
+                  if (screenWidth < 600) {
+                    return Column(
+                      mainAxisSize: MainAxisSize.min,
+                      children: controller.draftBets.asMap().entries.map((e) {
+                        final idx = e.key;
+                        final draft = e.value;
+                        return CurrentSlipCard(
+                          index: idx,
+                          digits: List<String>.from(draft.digits as List),
+                          gameName: draft.gameName ?? '',
+                          betType: draft.betType ?? '',
+                          straightAmount: draft.straightBetAmount ?? 0,
+                          rambolAmount: draft.rambleBetAmount ?? 0,
+                          totalAmount: draft.totalBetAmount ?? 0,
+                          estPayout: draft.estPayout ?? 0,
+                          onEdit: () {
+                            final controller = Get.find<LotteryController>();
+                            _showEditDialog(controller, idx, draft);
+                          },
+                          onDelete: () => controller.removeBet(idx),
+                        );
+                      }).toList(),
+                    );
+                  }
+
+                  // Wide screens: DataTable with horizontal scroll
+                  return SingleChildScrollView(
+                    scrollDirection: Axis.horizontal,
+                    child: DataTable(
+                      columnSpacing: 12,
+                      headingRowHeight: 48,
+                      dataRowHeight: 56,
+                      columns: [
+                        DataColumn(label: Text('#')),
+                        DataColumn(label: Text('Digits')),
+                        DataColumn(label: Text('Game')),
+                        DataColumn(label: Text('Type')),
+                        DataColumn(label: Text('Target ₱'), numeric: true),
+                        DataColumn(label: Text('Rambol ₱'), numeric: true),
+                        DataColumn(label: Text('Total ₱'), numeric: true),
+                        DataColumn(label: Text('Est. Payout'), numeric: true),
+                        DataColumn(label: Text('Action')),
+                      ],
+                      rows: controller.draftBets.asMap().entries.map((entry) {
+                        final index = entry.key;
+                        final draft = entry.value;
+                        return DataRow(
+                          cells: [
+                            DataCell(Text((index + 1).toString())),
+                            DataCell(
+                              Text(
+                                (draft.digits as List).join('-'),
                               ),
                             ),
-                            child: Row(
-                              children: [
-                                Expanded(
-                                  flex: 1,
-                                  child: Text(
-                                    'Bet #',
-                                    style: const TextStyle(
-                                      color: Color(0xFF2563EB),
-                                      fontWeight: FontWeight.bold,
-                                      fontSize: 12,
-                                    ),
-                                  ),
+                            DataCell(Text(draft.gameName ?? '')),
+                            DataCell(Text(draft.betType ?? '')),
+                            DataCell(
+                              Text(
+                                (draft.straightBetAmount ?? 0).toStringAsFixed(
+                                  0,
                                 ),
-                                Expanded(
-                                  flex: 1,
-                                  child: Text(
-                                    'Game',
-                                    style: const TextStyle(
-                                      color: Color(0xFF2563EB),
-                                      fontWeight: FontWeight.bold,
-                                      fontSize: 12,
-                                    ),
-                                  ),
-                                ),
-                                Expanded(
-                                  flex: 1,
-                                  child: Text(
-                                    'Type',
-                                    style: const TextStyle(
-                                      color: Color(0xFF2563EB),
-                                      fontWeight: FontWeight.bold,
-                                      fontSize: 12,
-                                    ),
-                                  ),
-                                ),
-                                Expanded(
-                                  flex: 1,
-                                  child: Text(
-                                    'Amount',
-                                    style: const TextStyle(
-                                      color: Color(0xFF2563EB),
-                                      fontWeight: FontWeight.bold,
-                                      fontSize: 12,
-                                    ),
-                                  ),
-                                ),
-                                Expanded(
-                                  flex: 1,
-                                  child: Text(
-                                    'Win',
-                                    style: const TextStyle(
-                                      color: Color(0xFF2563EB),
-                                      fontWeight: FontWeight.bold,
-                                      fontSize: 12,
-                                    ),
-                                  ),
-                                ),
-                                Expanded(
-                                  flex: 1,
-                                  child: Text(
-                                    'Action',
-                                    style: const TextStyle(
-                                      color: Color(0xFF2563EB),
-                                      fontWeight: FontWeight.bold,
-                                      fontSize: 12,
-                                    ),
-                                  ),
-                                ),
-                              ],
+                              ),
                             ),
-                          ),
-                          // Table Rows
-                          ...ctrl.draftBets.asMap().entries.map((entry) {
-                            int index = entry.key;
-                            var draft = entry.value;
-                            return Container(
-                              padding: const EdgeInsets.symmetric(
-                                horizontal: 12,
-                                vertical: 12,
+                            DataCell(
+                              Text(
+                                (draft.rambleBetAmount ?? 0).toStringAsFixed(0),
                               ),
-                              decoration: BoxDecoration(
-                                border: Border(
-                                  bottom: BorderSide(color: Colors.grey[200]!),
-                                ),
+                            ),
+                            DataCell(
+                              Text(
+                                (draft.totalBetAmount ?? 0).toStringAsFixed(0),
                               ),
-                              child: Row(
+                            ),
+                            DataCell(Text(_formatNumber(draft.estPayout ?? 0))),
+                            DataCell(
+                              Row(
+                                mainAxisSize: MainAxisSize.min,
                                 children: [
-                                  Expanded(
-                                    flex: 1,
-                                    child: Text(
-                                      draft.digits.join("-"),
-                                      style: const TextStyle(fontSize: 12),
+                                  IconButton(
+                                    icon: const Icon(
+                                      Icons.edit_rounded,
+                                      size: 18,
+                                      color: Color(0xFF2563EB),
                                     ),
+                                    onPressed: () {
+                                      final controller =
+                                          Get.find<LotteryController>();
+                                      _showEditDialog(controller, index, draft);
+                                    },
+                                    padding: EdgeInsets.zero,
+                                    constraints: const BoxConstraints(),
                                   ),
-                                  Expanded(
-                                    flex: 1,
-                                    child: Text(
-                                      draft.gameName,
-                                      style: const TextStyle(fontSize: 12),
-                                    ),
-                                  ),
-                                  Expanded(
-                                    flex: 1,
-                                    child: Text(
-                                      draft.betType,
-                                      style: const TextStyle(fontSize: 12),
-                                    ),
-                                  ),
-                                  Expanded(
-                                    flex: 1,
-                                    child: Text(
-                                      draft.totalBetAmount.toStringAsFixed(0),
-                                      style: const TextStyle(fontSize: 12),
-                                    ),
-                                  ),
-                                  Expanded(
-                                    flex: 1,
-                                    child: Text(
-                                      _formatNumber(draft.estPayout),
-                                      style: const TextStyle(
-                                        fontSize: 12,
-                                        fontWeight: FontWeight.w500,
-                                      ),
-                                    ),
-                                  ),
+                                  const SizedBox(width: 8),
                                   IconButton(
                                     icon: const Icon(
                                       Icons.delete,
@@ -1539,10 +1567,13 @@ class _BetEntryPageState extends State<BetEntryPage> {
                                   ),
                                 ],
                               ),
-                            );
-                          }),
-                        ],
-                      ),
+                            ),
+                          ],
+                        );
+                      }).toList(),
+                    ),
+                  );
+                },
               ),
 
               const SizedBox(height: 24),
@@ -1631,6 +1662,485 @@ class _BetEntryPageState extends State<BetEntryPage> {
               ),
 
               const SizedBox(height: 24),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  Future<void> _showEditDialog(
+    LotteryController controller,
+    int index,
+    dynamic draft,
+  ) async {
+    await Get.dialog(
+      EditDraftDialog(controller: controller, index: index, draft: draft),
+      barrierDismissible: false,
+    );
+  }
+}
+
+class EditDraftDialog extends StatefulWidget {
+  final LotteryController controller;
+  final int index;
+  final dynamic draft;
+  const EditDraftDialog({
+    super.key,
+    required this.controller,
+    required this.index,
+    required this.draft,
+  });
+
+  @override
+  State<EditDraftDialog> createState() => _EditDraftDialogState();
+}
+
+class _EditDraftDialogState extends State<EditDraftDialog> {
+  late TextEditingController _targetCtrl;
+  late TextEditingController _rambolCtrl;
+  late String _digitsStr;
+  String? _targetErr;
+  String? _rambolErr;
+  bool _isSaving = false;
+  late Game? _game;
+
+  @override
+  void initState() {
+    super.initState();
+    final draft = widget.draft;
+    _digitsStr = (draft.digits is List)
+        ? (draft.digits as List).join('')
+        : (draft.digits.toString());
+    _targetCtrl = TextEditingController(
+      text: (draft.straightBetAmount ?? 0).toInt().toString(),
+    );
+    _rambolCtrl = TextEditingController(
+      text: (draft.rambleBetAmount ?? 0).toInt().toString(),
+    );
+    try {
+      _game = widget.controller.availableGames.firstWhere(
+        (g) => g.name == draft.gameName,
+      );
+    } catch (_) {
+      _game = widget.controller.currentGame;
+    }
+  }
+
+  @override
+  void dispose() {
+    _targetCtrl.dispose();
+    _rambolCtrl.dispose();
+    super.dispose();
+  }
+
+  List<String> _getDigitsList(int digitsPerCell) {
+    final list = <String>[];
+    for (
+      int i = 0;
+      i + digitsPerCell <= _digitsStr.length;
+      i += digitsPerCell
+    ) {
+      list.add(_digitsStr.substring(i, i + digitsPerCell));
+    }
+    return list;
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final controller = widget.controller;
+    final draft = widget.draft;
+    final digitsPerCell = _game?.maxNumber.toString().length ?? 2;
+    final expectedTotalDigits =
+        (_game?.numberOfCombinations ?? draft.combinations) * digitsPerCell;
+
+    return Dialog(
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+      child: WillPopScope(
+        onWillPop: () async => !_isSaving,
+        child: Padding(
+          padding: const EdgeInsets.all(16.0),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const Text(
+                'Edit Bet',
+                style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+              ),
+              const SizedBox(height: 12),
+              LottoNumberInput(
+                gameType: _game?.name ?? '2D Lotto',
+                numberOfCombinations:
+                    _game?.numberOfCombinations ?? draft.combinations,
+                minNumber: _game?.minNumber ?? 0,
+                maxNumber: _game?.maxNumber ?? 99,
+                initialValue: _digitsStr,
+                onChanged: (v) => setState(() => _digitsStr = v),
+              ),
+              const SizedBox(height: 12),
+              Row(
+                children: [
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Padding(
+                          padding: const EdgeInsets.only(bottom: 6.0),
+                          child: Text(
+                            'Target Amount',
+                            style: TextStyle(
+                              fontSize: 13,
+                              fontWeight: FontWeight.w600,
+                              color: Colors.grey[700],
+                            ),
+                          ),
+                        ),
+                        TextField(
+                          controller: _targetCtrl,
+                          keyboardType: TextInputType.number,
+                          decoration: InputDecoration(
+                            hintText: '₱0',
+                            errorText: _targetErr,
+                          ),
+                          onChanged: (v) {
+                            setState(() {
+                              final n = int.tryParse(v) ?? 0;
+                              if (_game != null) {
+                                _targetErr =
+                                    (n > 0 &&
+                                        n <
+                                            (_game!.minStraightBet.toInt() ??
+                                                0))
+                                    ? 'Min: ₱${_game!.minStraightBet.toInt() ?? 0}'
+                                    : null;
+                              }
+                            });
+                          },
+                        ),
+                      ],
+                    ),
+                  ),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Padding(
+                          padding: const EdgeInsets.only(bottom: 6.0),
+                          child: Text(
+                            'Rambol Amount',
+                            style: TextStyle(
+                              fontSize: 13,
+                              fontWeight: FontWeight.w600,
+                              color: Colors.grey[700],
+                            ),
+                          ),
+                        ),
+                        TextField(
+                          controller: _rambolCtrl,
+                          keyboardType: TextInputType.number,
+                          decoration: InputDecoration(
+                            hintText: '₱0',
+                            errorText: _rambolErr,
+                          ),
+                          onChanged: (v) {
+                            setState(() {
+                              final n = int.tryParse(v) ?? 0;
+                              if (_game != null) {
+                                final pc = controller.calculateCombinations(
+                                  _getDigitsList(digitsPerCell),
+                                );
+                                final maxR =
+                                    _game!.maxRambleBet ??
+                                    _game!.maxStraightBet ??
+                                    0;
+                                _rambolErr = (n > 0 && n < pc)
+                                    ? 'Min: ₱$pc'
+                                    : (n > 0 && maxR > 0 && n > maxR
+                                          ? 'Max: ₱$maxR'
+                                          : null);
+                              }
+                            });
+                          },
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 16),
+              Row(
+                children: [
+                  Expanded(
+                    child: OutlinedButton(
+                      onPressed: _isSaving
+                          ? null
+                          : () {
+                              try {
+                                FocusScope.of(context).unfocus();
+                              } catch (_) {}
+                              Navigator.of(context).pop();
+                            },
+                      child: const Text('Cancel'),
+                    ),
+                  ),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: ElevatedButton(
+                      onPressed: _isSaving
+                          ? null
+                          : () async {
+                              final digits = _getDigitsList(digitsPerCell);
+                              if (digits.length !=
+                                  (_game?.numberOfCombinations ??
+                                      draft.combinations)) {
+                                Get.snackbar(
+                                  'Error',
+                                  'Please enter correct number of digits',
+                                );
+                                return;
+                              }
+                              final targetAmount =
+                                  int.tryParse(_targetCtrl.text) ?? 0;
+                              final rambolAmount =
+                                  int.tryParse(_rambolCtrl.text) ?? 0;
+
+                              if ((_game?.enableStraight ?? true) &&
+                                  (_game?.enableRamble ?? true)) {
+                                if (targetAmount == 0 && rambolAmount == 0) {
+                                  Get.snackbar(
+                                    'Error',
+                                    'Please enter at least one bet amount',
+                                  );
+                                  return;
+                                }
+                                if (targetAmount > 0 &&
+                                    targetAmount <
+                                        (_game?.minStraightBet.toInt() ?? 0)) {
+                                  Get.snackbar(
+                                    'Invalid Amount',
+                                    'Target bet must be at least ₱${_game?.minStraightBet.toInt() ?? 0}',
+                                  );
+                                  return;
+                                }
+                                if (rambolAmount > 0) {
+                                  final pc = controller.calculateCombinations(
+                                    digits,
+                                  );
+                                  if (pc <= 1) {
+                                    Get.snackbar(
+                                      'Invalid Bet',
+                                      'Rambol not available — all digits are identical',
+                                    );
+                                    return;
+                                  }
+                                  if (rambolAmount < pc) {
+                                    Get.snackbar(
+                                      'Invalid Amount',
+                                      'Minimum Rambol bet is ₱$pc',
+                                    );
+                                    return;
+                                  }
+                                  if (rambolAmount % pc != 0) {
+                                    Get.snackbar(
+                                      'Invalid Amount',
+                                      'Rambol amount must be divisible by $pc',
+                                    );
+                                    return;
+                                  }
+                                }
+                              }
+
+                              final availResult = await controller
+                                  .checkBetAvailability(
+                                    digits: digits,
+                                    targetAmount: targetAmount.toDouble(),
+                                    rambolAmount: rambolAmount.toDouble(),
+                                  );
+
+                              if (availResult != null && availResult.exceeds) {
+                                final bothTypes =
+                                    targetAmount > 0 &&
+                                    rambolAmount > 0 &&
+                                    !availResult.target.allowed &&
+                                    !availResult.rambol.allowed;
+                                if (bothTypes) {
+                                  await Get.dialog(
+                                    BatchBetChoiceModal(
+                                      targetResult: availResult,
+                                      rambolResult: availResult,
+                                      onChooseTarget: availResult.target.allowed
+                                          ? () {
+                                              Get.back();
+                                            }
+                                          : null,
+                                      onChooseRambol: availResult.rambol.allowed
+                                          ? () {
+                                              Get.back();
+                                            }
+                                          : null,
+                                    ),
+                                  );
+                                  return;
+                                } else {
+                                  final available = availResult.availableAmount;
+                                  await Get.dialog(
+                                    ConflictNoticeModal(
+                                      result: availResult,
+                                      requestedAmount:
+                                          availResult.requestedAmount,
+                                      onUpdateAmount:
+                                          (available != null && available > 0)
+                                          ? () {
+                                              Get.back();
+                                            }
+                                          : null,
+                                      onAdjustManually: () => Get.back(),
+                                    ),
+                                  );
+                                  return;
+                                }
+                              }
+
+                              setState(() => _isSaving = true);
+                              try {
+                                final gameId =
+                                    _game?.id ??
+                                    controller.selectedGameId.value;
+                                final clusterId =
+                                    (_game != null &&
+                                        _game!.clusters.isNotEmpty)
+                                    ? _game!.clusters[0].id
+                                    : '';
+                                final estPayout =
+                                    (targetAmount > 0 && _game != null)
+                                    ? targetAmount *
+                                          (_game!.straightMultiplier ?? 0)
+                                    : (rambolAmount > 0 && _game != null)
+                                    ? (rambolAmount /
+                                              (controller.calculateCombinations(
+                                                digits,
+                                              ))) *
+                                          (_game!.rambleMultiplier ?? 0)
+                                    : 0;
+
+                                final resp = await http
+                                    .put(
+                                      Uri.parse(
+                                        '${AppConstants.apiBaseUrl}/bets/update',
+                                      ),
+                                      headers: {
+                                        'Content-Type': 'application/json',
+                                        'Authorization':
+                                            'Bearer ${Get.find<AuthController>().token.value}',
+                                      },
+                                      body: jsonEncode({
+                                        'id': draft.id,
+                                        'draw_id':
+                                            controller.selectedTime.value,
+                                        'game_id': gameId,
+                                        'digits': digits,
+                                        'straight_bet_amount': targetAmount,
+                                        'ramble_bet_amount': rambolAmount,
+                                        'total_bet_amount':
+                                            targetAmount + rambolAmount,
+                                        'est_payout': estPayout,
+                                        'cluster_id': clusterId,
+                                        'draw_time_id':
+                                            controller.selectedTime.value,
+                                      }),
+                                    )
+                                    .timeout(const Duration(seconds: 30));
+
+                                if (resp.statusCode != 200 &&
+                                    resp.statusCode != 201) {
+                                  Get.snackbar(
+                                    'Error',
+                                    'Failed to update bet: ${resp.statusCode}',
+                                  );
+                                  return;
+                                }
+
+                                final respBody =
+                                    jsonDecode(resp.body)
+                                        as Map<String, dynamic>;
+                                final betJson =
+                                    respBody['data'] as Map<String, dynamic>? ??
+                                    {};
+
+                                final serverDigitsRaw = betJson['digits'];
+                                List<String> serverDigits = digits;
+                                if (serverDigitsRaw is List) {
+                                  serverDigits = List<String>.from(
+                                    serverDigitsRaw,
+                                  );
+                                } else if (serverDigitsRaw is String)
+                                  serverDigits = serverDigitsRaw
+                                      .replaceAll('{', '')
+                                      .replaceAll('}', '')
+                                      .split(',')
+                                      .map((s) => s.trim())
+                                      .toList();
+
+                                final serverStraight =
+                                    (betJson['straight_bet_amount'] as num? ??
+                                            0)
+                                        .toDouble();
+                                final serverRamble =
+                                    (betJson['ramble_bet_amount'] as num? ?? 0)
+                                        .toDouble();
+                                final serverTotal =
+                                    (betJson['total_bet_amount'] as num? ?? 0)
+                                        .toDouble();
+                                final serverEst =
+                                    (betJson['est_payout'] as num? ?? 0)
+                                        .toDouble();
+
+                                controller.draftBets[widget.index] = DraftBet(
+                                  id: betJson['id'] as String? ?? draft.id,
+                                  gameName: _game?.name ?? draft.gameName,
+                                  digits: serverDigits,
+                                  straightBetAmount: serverStraight,
+                                  rambleBetAmount: serverRamble,
+                                  totalBetAmount: serverTotal,
+                                  estPayout: serverEst,
+                                  combinations: controller
+                                      .calculateCombinations(serverDigits),
+                                );
+                                controller.update();
+
+                                try {
+                                  FocusScope.of(context).unfocus();
+                                } catch (_) {}
+                                Navigator.of(context).pop();
+                                Get.snackbar(
+                                  'Success',
+                                  'Draft updated',
+                                  snackPosition: SnackPosition.BOTTOM,
+                                );
+                              } catch (e) {
+                                Get.snackbar(
+                                  'Error',
+                                  'Failed to update bet: $e',
+                                );
+                              } finally {
+                                setState(() => _isSaving = false);
+                              }
+                            },
+                      child: _isSaving
+                          ? const SizedBox(
+                              height: 16,
+                              width: 16,
+                              child: CircularProgressIndicator(
+                                strokeWidth: 2,
+                                color: Colors.white,
+                              ),
+                            )
+                          : const Text('Save'),
+                    ),
+                  ),
+                ],
+              ),
             ],
           ),
         ),

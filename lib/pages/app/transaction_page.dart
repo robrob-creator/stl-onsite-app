@@ -3,6 +3,7 @@ import 'package:intl/intl.dart';
 import '../../core/design_system.dart';
 import '../../models/transaction.dart';
 import '../../core/services/transaction_service.dart';
+import '../../core/utils/manila_time.dart';
 import 'transaction_detail_page.dart';
 
 class TransactionPage extends StatefulWidget {
@@ -13,7 +14,7 @@ class TransactionPage extends StatefulWidget {
 }
 
 class _TransactionPageState extends State<TransactionPage> {
-  DateTime _selectedDate = DateTime.now();
+  DateTime _selectedDate = ManilaTime.today();
   late Future<List<TicketGroup>> _groupsFuture;
 
   @override
@@ -29,7 +30,7 @@ class _TransactionPageState extends State<TransactionPage> {
       context: context,
       initialDate: _selectedDate,
       firstDate: DateTime(2020),
-      lastDate: DateTime.now(),
+      lastDate: ManilaTime.today(),
       initialEntryMode: DatePickerEntryMode.calendarOnly,
       builder: (context, child) {
         return Theme(
@@ -52,31 +53,27 @@ class _TransactionPageState extends State<TransactionPage> {
   }
 
   String _formatSelectedDate() {
-    final now = DateTime.now();
-    final today = DateTime(now.year, now.month, now.day);
-    final yesterday = DateTime(now.year, now.month, now.day - 1);
-    final sel = DateTime(
-      _selectedDate.year,
-      _selectedDate.month,
-      _selectedDate.day,
-    );
-    if (sel == today) return 'Today';
-    if (sel == yesterday) return 'Yesterday';
-    const months = [
-      'Jan',
-      'Feb',
-      'Mar',
-      'Apr',
-      'May',
-      'Jun',
-      'Jul',
-      'Aug',
-      'Sep',
-      'Oct',
-      'Nov',
-      'Dec',
-    ];
-    return '${months[_selectedDate.month - 1]} ${_selectedDate.day}, ${_selectedDate.year}';
+    try {
+      final locale = Localizations.localeOf(context).toLanguageTag();
+      return DateFormat.yMMMMd(locale).format(_selectedDate);
+    } catch (_) {
+      // Fallback to explicit format if locale lookup fails
+      const months = [
+        'Jan',
+        'Feb',
+        'Mar',
+        'Apr',
+        'May',
+        'Jun',
+        'Jul',
+        'Aug',
+        'Sep',
+        'Oct',
+        'Nov',
+        'Dec',
+      ];
+      return '${months[_selectedDate.month - 1]} ${_selectedDate.day}, ${_selectedDate.year}';
+    }
   }
 
   String _formatDrawTimeLabel(String drawTime) {
@@ -94,39 +91,12 @@ class _TransactionPageState extends State<TransactionPage> {
     try {
       final utcDate = DateTime.parse(dateStr);
       final localDate = utcDate.toLocal();
-      final now = DateTime.now();
-      final today = DateTime(now.year, now.month, now.day);
-      final yesterday = DateTime(now.year, now.month, now.day - 1);
-      final dateOnly = DateTime(localDate.year, localDate.month, localDate.day);
+      final locale = Localizations.localeOf(context).toLanguageTag();
 
-      String dateLabel;
-      if (dateOnly == today) {
-        dateLabel = 'Today';
-      } else if (dateOnly == yesterday) {
-        dateLabel = 'Yesterday';
-      } else {
-        const months = [
-          'Jan',
-          'Feb',
-          'Mar',
-          'Apr',
-          'May',
-          'Jun',
-          'Jul',
-          'Aug',
-          'Sep',
-          'Oct',
-          'Nov',
-          'Dec',
-        ];
-        dateLabel = '${months[localDate.month - 1]} ${localDate.day}';
-      }
-
-      int hour = localDate.hour;
-      final minute = localDate.minute.toString().padLeft(2, '0');
-      final period = hour >= 12 ? 'PM' : 'AM';
-      hour = hour > 12 ? hour - 12 : (hour == 0 ? 12 : hour);
-      return '$dateLabel · ${hour.toString().padLeft(2, '0')}:$minute $period';
+      // Use explicit full date (e.g. June 6, 2026) and time so we don't show "Today".
+      final dateLabel = DateFormat.yMMMMd(locale).format(localDate);
+      final timeLabel = DateFormat.jm(locale).format(localDate);
+      return '$dateLabel · $timeLabel';
     } catch (e) {
       return dateStr;
     }
@@ -171,10 +141,10 @@ class _TransactionPageState extends State<TransactionPage> {
                     vertical: 8,
                   ),
                   decoration: BoxDecoration(
-                    color: AppColors.primary.withOpacity(0.08),
+                    color: AppColors.primary.withValues(alpha: 0.08),
                     borderRadius: BorderRadius.circular(8),
                     border: Border.all(
-                      color: AppColors.primary.withOpacity(0.25),
+                      color: AppColors.primary.withValues(alpha: 0.25),
                     ),
                   ),
                   child: Row(
@@ -303,77 +273,77 @@ class _TransactionPageState extends State<TransactionPage> {
             borderRadius: BorderRadius.circular(12),
             border: Border.all(color: Colors.grey[200]!),
           ),
-        child: Row(
-          children: [
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
+          child: Row(
+            children: [
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      _formatDrawTimeLabel(group.drawTime),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: const TextStyle(
+                        fontSize: 14,
+                        fontWeight: FontWeight.w600,
+                        color: Colors.black87,
+                      ),
+                    ),
+                    const SizedBox(height: 4),
+                    Text(
+                      group.createdAt.isNotEmpty
+                          ? _formatDate(group.createdAt)
+                          : _formatSelectedDate(),
+                      style: TextStyle(fontSize: 12, color: Colors.grey[600]),
+                    ),
+                    const SizedBox(height: 2),
+                    Text(
+                      '${group.count} transaction${group.count == 1 ? '' : 's'}',
+                      style: TextStyle(fontSize: 11, color: Colors.grey[500]),
+                    ),
+                  ],
+                ),
+              ),
+              Column(
+                crossAxisAlignment: CrossAxisAlignment.end,
                 children: [
                   Text(
-                    _formatDrawTimeLabel(group.drawTime),
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
+                    '₱${group.totalAmount.toStringAsFixed(2)}',
                     style: const TextStyle(
                       fontSize: 14,
                       fontWeight: FontWeight.w600,
                       color: Colors.black87,
                     ),
                   ),
-                  const SizedBox(height: 4),
-                  Text(
-                    group.createdAt.isNotEmpty
-                        ? _formatDate(group.createdAt)
-                        : _formatSelectedDate(),
-                    style: TextStyle(fontSize: 12, color: Colors.grey[600]),
-                  ),
-                  const SizedBox(height: 2),
-                  Text(
-                    '${group.count} transaction${group.count == 1 ? '' : 's'}',
-                    style: TextStyle(fontSize: 11, color: Colors.grey[500]),
+                  const SizedBox(height: 6),
+                  Container(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 8,
+                      vertical: 2,
+                    ),
+                    decoration: BoxDecoration(
+                      color: _getStatusColor(
+                        group.overallStatus,
+                      ).withValues(alpha: 0.15),
+                      borderRadius: BorderRadius.circular(4),
+                    ),
+                    child: Text(
+                      group.overallStatus.toUpperCase(),
+                      style: TextStyle(
+                        fontSize: 10,
+                        fontWeight: FontWeight.w600,
+                        color: _getStatusColor(group.overallStatus),
+                      ),
+                    ),
                   ),
                 ],
               ),
-            ),
-            Column(
-              crossAxisAlignment: CrossAxisAlignment.end,
-              children: [
-                Text(
-                  '₱${group.totalAmount.toStringAsFixed(2)}',
-                  style: const TextStyle(
-                    fontSize: 14,
-                    fontWeight: FontWeight.w600,
-                    color: Colors.black87,
-                  ),
-                ),
-                const SizedBox(height: 6),
-                Container(
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: 8,
-                    vertical: 2,
-                  ),
-                  decoration: BoxDecoration(
-                    color: _getStatusColor(
-                      group.overallStatus,
-                    ).withOpacity(0.15),
-                    borderRadius: BorderRadius.circular(4),
-                  ),
-                  child: Text(
-                    group.overallStatus.toUpperCase(),
-                    style: TextStyle(
-                      fontSize: 10,
-                      fontWeight: FontWeight.w600,
-                      color: _getStatusColor(group.overallStatus),
-                    ),
-                  ),
-                ),
-              ],
-            ),
-            const SizedBox(width: 12),
-            const Icon(Icons.arrow_forward_ios, color: Colors.grey, size: 16),
-          ],
+              const SizedBox(width: 12),
+              const Icon(Icons.arrow_forward_ios, color: Colors.grey, size: 16),
+            ],
+          ),
         ),
       ),
-    ),
     );
   }
 }

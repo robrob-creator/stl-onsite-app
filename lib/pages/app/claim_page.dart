@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/foundation.dart';
 import 'package:get/get.dart';
 import 'package:http/http.dart' as http;
+import 'package:onstite/core/services/ticket_service.dart';
 import 'dart:convert';
 import 'dart:async';
 import 'package:qr_code_scanner_plus/qr_code_scanner_plus.dart';
@@ -119,16 +120,22 @@ class _ClaimPageState extends State<ClaimPage> {
     }
   }
 
-  void _handleScannedQRCode(String qrCode) {
-    // Parse the QR code to extract ticket ID
+  void _handleScannedQRCode(String qrCode) async {
+    // Parse the QR code to extract ticket ID and resolve UUIDs to ticket_no
     String ticketId = qrCode.trim();
 
     // Cancel the subscription before closing the scanner
     _qrSubscription?.cancel();
     _qrSubscription = null;
 
-    // Fetch ticket details and verify validity
-    _fetchAndVerifyTicket(ticketId);
+    try {
+      final resolved = await TicketService.resolveScannedTicketNumber(ticketId);
+      // Fetch ticket details and verify validity using the resolved value
+      await _fetchAndVerifyTicket(resolved);
+    } catch (e) {
+      // On any error, fallback to original value
+      await _fetchAndVerifyTicket(ticketId);
+    }
   }
 
   Future<void> _fetchAndVerifyTicket(String ticketNumber) async {
@@ -984,8 +991,9 @@ class _ClaimPageState extends State<ClaimPage> {
                           width: 18,
                           child: CircularProgressIndicator(
                             strokeWidth: 2,
-                            valueColor:
-                                AlwaysStoppedAnimation<Color>(Colors.white),
+                            valueColor: AlwaysStoppedAnimation<Color>(
+                              Colors.white,
+                            ),
                           ),
                         )
                       : Text(

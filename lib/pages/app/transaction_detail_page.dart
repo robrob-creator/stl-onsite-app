@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:intl/intl.dart';
 import '../../core/design_system.dart';
 import '../../models/transaction.dart';
 import '../../core/services/transaction_service.dart';
@@ -16,7 +17,7 @@ class TransactionDetailPage extends StatelessWidget {
       final period = hour >= 12 ? 'PM' : 'AM';
       hour = hour > 12 ? hour - 12 : (hour == 0 ? 12 : hour);
       return minute == 0
-          ? '${hour}$period'
+          ? '$hour$period'
           : '$hour:${minute.toString().padLeft(2, '0')}$period';
     } catch (_) {
       return drawTime;
@@ -107,7 +108,7 @@ class _TicketCardState extends State<_TicketCard> {
       final period = hour >= 12 ? 'PM' : 'AM';
       hour = hour > 12 ? hour - 12 : (hour == 0 ? 12 : hour);
       return minute == 0
-          ? '${hour}$period'
+          ? '$hour$period'
           : '$hour:${minute.toString().padLeft(2, '0')}$period';
     } catch (_) {
       return drawTime;
@@ -122,13 +123,15 @@ class _TicketCardState extends State<_TicketCard> {
       final yesterday = DateTime(now.year, now.month, now.day - 1);
       final dateOnly = DateTime(local.year, local.month, local.day);
 
-      String dateLabel;
-      if (dateOnly == today) {
-        dateLabel = 'Today';
-      } else if (dateOnly == yesterday) {
-        dateLabel = 'Yesterday';
-      } else {
-        const months = [
+      // Always show explicit full date (e.g. June 6, 2026) followed by time
+      try {
+        final locale = Localizations.localeOf(context).toLanguageTag();
+        final dateLabel = DateFormat.yMMMMd(locale).format(local);
+        final timeLabel = DateFormat.jm(locale).format(local);
+        return '$dateLabel @ $timeLabel';
+      } catch (_) {
+        // Fallback formatting
+        final months = [
           'Jan',
           'Feb',
           'Mar',
@@ -142,16 +145,32 @@ class _TicketCardState extends State<_TicketCard> {
           'Nov',
           'Dec',
         ];
-        dateLabel = '${months[local.month - 1]}. ${local.day}, ${local.year}';
+        final dateLabel =
+            '${months[local.month - 1]}. ${local.day}, ${local.year}';
+        int hour = local.hour;
+        final minute = local.minute.toString().padLeft(2, '0');
+        final period = hour >= 12 ? 'PM' : 'AM';
+        hour = hour > 12 ? hour - 12 : (hour == 0 ? 12 : hour);
+        return '$dateLabel @ $hour:$minute $period';
       }
-
-      int hour = local.hour;
-      final minute = local.minute.toString().padLeft(2, '0');
-      final period = hour >= 12 ? 'PM' : 'AM';
-      hour = hour > 12 ? hour - 12 : (hour == 0 ? 12 : hour);
-      return '$dateLabel @ $hour:$minute $period';
     } catch (_) {
       return dateStr;
+    }
+  }
+
+  // Map ticket status to a UI color
+  Color _statusColor(String status) {
+    switch (status.toLowerCase()) {
+      case 'completed':
+        return const Color(0xFF10B981);
+      case 'failed':
+        return Colors.red;
+      case 'printed':
+        return const Color(0xFF06B6D4);
+      case 'pending':
+        return Colors.amber;
+      default:
+        return AppColors.primary;
     }
   }
 
@@ -231,11 +250,11 @@ class _TicketCardState extends State<_TicketCard> {
           ),
           child: Row(
             children: [
+              _buildTableHeader('Game', flex: 2),
               _buildTableHeader('Bet.No', flex: 2),
               _buildTableHeader('Amount', flex: 2),
               _buildTableHeader('Type', flex: 2),
               _buildTableHeader('Est. Payout', flex: 2),
-              _buildTableHeader('Soldout', flex: 2),
             ],
           ),
         ),
@@ -258,24 +277,17 @@ class _TicketCardState extends State<_TicketCard> {
               final isSoldout = bet.status.toLowerCase() == 'soldout';
               return Row(
                 children: [
+                  _buildTableCell(
+                    (bet.gameName.isNotEmpty) ? bet.gameName : bet.gameId,
+                    flex: 2,
+                  ),
                   _buildTableCell(bet.digits.join('-'), flex: 2),
                   _buildTableCell(
                     bet.totalBetAmount.toStringAsFixed(0),
                     flex: 2,
                   ),
                   _buildTableCell(bet.betType, flex: 2),
-                  _buildTableCell(
-                    bet.estPayout.toStringAsFixed(0),
-                    flex: 2,
-                  ),
-                  _buildTableCell(
-                    isSoldout ? 'Yes' : 'No',
-                    flex: 2,
-                    color: isSoldout
-                        ? const Color(0xFF10B981)
-                        : Colors.grey[600],
-                    badge: true,
-                  ),
+                  _buildTableCell(bet.estPayout.toStringAsFixed(0), flex: 2),
                 ],
               );
             },
@@ -326,6 +338,47 @@ class _TicketCardState extends State<_TicketCard> {
                         ),
                       ),
                     ),
+                    // Show ticket total amount and status chip on the right
+                    const SizedBox(width: 8),
+                    Column(
+                      crossAxisAlignment: CrossAxisAlignment.end,
+                      children: [
+                        Text(
+                          '₱${ticket.totalBetAmount.toStringAsFixed(2)}',
+                          style: const TextStyle(
+                            fontSize: 14,
+                            fontWeight: FontWeight.w700,
+                            color: Colors.black87,
+                          ),
+                        ),
+                        const SizedBox(height: 6),
+                        Container(
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 8,
+                            vertical: 4,
+                          ),
+                          decoration: BoxDecoration(
+                            color: _statusColor(
+                              ticket.status,
+                            ).withOpacity(0.12),
+                            borderRadius: BorderRadius.circular(6),
+                            border: Border.all(
+                              color: _statusColor(
+                                ticket.status,
+                              ).withOpacity(0.25),
+                            ),
+                          ),
+                          child: Text(
+                            ticket.status.toUpperCase(),
+                            style: TextStyle(
+                              fontSize: 11,
+                              fontWeight: FontWeight.w700,
+                              color: _statusColor(ticket.status),
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
                   ],
                 ),
                 const SizedBox(height: 12),
@@ -371,8 +424,7 @@ class _TicketCardState extends State<_TicketCard> {
                     children: [
                       Text(
                         'Agent:',
-                        style:
-                            TextStyle(fontSize: 12, color: Colors.grey[600]),
+                        style: TextStyle(fontSize: 12, color: Colors.grey[600]),
                       ),
                       Text(
                         ticket.customer!.name,

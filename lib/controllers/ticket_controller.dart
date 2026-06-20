@@ -9,6 +9,8 @@ class TicketController extends GetxController {
   final RxBool hasError = false.obs;
   final RxString selectedStatus = 'Tickets'.obs;
   final RxString searchQuery = ''.obs;
+  // selectedDate defaults to local today in YYYY-MM-DD format
+  final RxString selectedDate = DateTime.now().toLocal().toIso8601String().substring(0,10).obs;
 
   @override
   void onInit() {
@@ -46,11 +48,19 @@ class TicketController extends GetxController {
     isLoading.value = true;
     hasError.value = false;
     try {
+      // When searching by ticket number (e.g., scanning QR), avoid restricting
+      // by status to ensure tickets with non-standard statuses (printed,
+      // completed, etc.) are returned. Otherwise searches may erroneously
+      // report "No ticket found".
+      final isSearch = searchQuery.value.isNotEmpty;
+      final statusFilter = isSearch
+          ? null
+          : (selectedStatus.value == 'Void' ? 'pending_void,voided' : 'won,pending,lost');
+
       final result = await TicketService.fetchTickets(
         ticketNo: searchQuery.value.isNotEmpty ? searchQuery.value : null,
-        status: selectedStatus.value == 'Void'
-            ? 'pending_void,voided'
-            : 'won,pending,lost',
+        status: statusFilter,
+        drawDate: isSearch ? null : (selectedDate.value.isNotEmpty ? selectedDate.value : null),
       );
       // Sort: pending_void first
       result.sort((a, b) {
@@ -66,6 +76,12 @@ class TicketController extends GetxController {
     } finally {
       isLoading.value = false;
     }
+  }
+
+  /// Update the active date filter (expects YYYY-MM-DD) and refresh tickets
+  void setDate(String yyyyMmDd) {
+    selectedDate.value = yyyyMmDd;
+    fetchTickets();
   }
 
   Future<String> voidTicket(String ticketId, String reason) async {

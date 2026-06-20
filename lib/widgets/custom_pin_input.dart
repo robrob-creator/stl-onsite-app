@@ -10,14 +10,14 @@ class CustomPinInput extends StatefulWidget {
   final TextInputType keyboardType;
 
   const CustomPinInput({
-    Key? key,
+    super.key,
     this.length = 6,
     required this.onChanged,
     this.onComplete,
     this.controller,
     this.obscureText = true,
     this.keyboardType = TextInputType.number,
-  }) : super(key: key);
+  });
 
   @override
   State<CustomPinInput> createState() => _CustomPinInputState();

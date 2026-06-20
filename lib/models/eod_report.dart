@@ -1,4 +1,31 @@
-import 'package:flutter/material.dart';
+class EodBreakdownItem {
+  final String gameId;
+  final String gameName;
+  final int betCount;
+  final double grossSales;
+  final double hits;
+  final double net;
+
+  EodBreakdownItem({
+    required this.gameId,
+    required this.gameName,
+    required this.betCount,
+    required this.grossSales,
+    required this.hits,
+    required this.net,
+  });
+
+  factory EodBreakdownItem.fromJson(Map<String, dynamic> json) {
+    return EodBreakdownItem(
+      gameId: json['game_id'] ?? '',
+      gameName: json['game_name'] ?? '',
+      betCount: (json['bet_count'] ?? 0).toInt(),
+      grossSales: (json['gross_sales'] ?? 0).toDouble(),
+      hits: (json['hits'] ?? 0).toDouble(),
+      net: (json['net'] ?? 0).toDouble(),
+    );
+  }
+}
 
 class EodReportModel {
   final String location;
@@ -11,7 +38,7 @@ class EodReportModel {
   final double totalNet;
   final double forCollection;
   final int totalBets;
-  final List<dynamic> breakdown;
+  final List<EodBreakdownItem> breakdown;
 
   EodReportModel({
     required this.location,
@@ -39,7 +66,9 @@ class EodReportModel {
       totalNet: (json['total_net'] ?? 0).toDouble(),
       forCollection: (json['for_collection'] ?? 0).toDouble(),
       totalBets: (json['total_bets'] ?? 0).toInt(),
-      breakdown: json['breakdown'] ?? [],
+      breakdown: (json['breakdown'] as List? ?? [])
+          .map((item) => EodBreakdownItem.fromJson(item))
+          .toList(),
     );
   }
 }

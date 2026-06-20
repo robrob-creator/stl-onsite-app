@@ -64,6 +64,10 @@ class WebSocketService extends GetxController {
 
   /// Register a listener for a specific event type.
   ///
+  /// Use '*' to receive all events (wildcard). Wildcard listeners will receive
+  /// the original payload with an additional key `_eventType` containing the
+  /// event type string.
+  ///
   /// Returns a function that removes the listener when called.
   VoidCallback on(
     String eventType,
@@ -110,10 +114,32 @@ class WebSocketService extends GetxController {
       if (type == null) return;
 
       print('✓ WebSocket event: $type');
+
+      // Exact-match listeners
       final callbacks = _listeners[type];
       if (callbacks != null) {
         for (final cb in List.of(callbacks)) {
-          cb(payload);
+          try {
+            cb(payload);
+          } catch (e) {
+            print('✗ WebSocket listener error for $type: $e');
+          }
+        }
+      }
+
+      // Wildcard listeners registered under '*' receive every event and are
+      // given the payload augmented with `_eventType` to allow listeners to
+      // inspect the original event type.
+      final wildcard = _listeners['*'];
+      if (wildcard != null) {
+        final augmented = Map<String, dynamic>.from(payload);
+        augmented['_eventType'] = type;
+        for (final cb in List.of(wildcard)) {
+          try {
+            cb(augmented);
+          } catch (e) {
+            print('✗ WebSocket wildcard listener error for $type: $e');
+          }
         }
       }
     } catch (e) {

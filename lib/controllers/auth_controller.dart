@@ -3,6 +3,7 @@ import 'package:get/get.dart';
 import 'package:http/http.dart' as http;
 import 'dart:convert';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:device_info_plus/device_info_plus.dart';
 import '../models/login_response.dart';
@@ -207,9 +208,29 @@ class AuthController extends GetxController {
         currentUser.value = loginResponse.user;
         token.value = loginResponse.token;
 
+        // Remove focus and hide keyboard to ensure a smooth transition
+        try {
+          FocusManager.instance.primaryFocus?.unfocus();
+          SystemChannels.textInput.invokeMethod('TextInput.hide');
+        } catch (_) {}
+
+        // Navigate immediately to improve perceived performance
         Get.offNamed('/home');
-        unawaited(_saveSession());
-        _connectWebSocket();
+
+        // Defer saving session and websocket connection so Home can render first
+        Future.microtask(() async {
+          // Persist session (non-blocking for UI)
+          try {
+            await _saveSession();
+          } catch (_) {}
+
+          // Small delay to allow first frame on Home to paint before connecting
+          await Future.delayed(const Duration(milliseconds: 150));
+
+          try {
+            _connectWebSocket();
+          } catch (_) {}
+        });
       } else {
         _handleErrorResponse(response);
       }

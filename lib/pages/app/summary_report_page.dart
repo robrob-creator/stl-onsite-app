@@ -2,14 +2,18 @@ import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 import '../../core/services/game_service.dart';
 import '../../core/services/summary_report_service.dart';
+import '../../core/utils/manila_time.dart';
 import '../../models/game.dart';
 import '../../models/summary_report.dart';
 
 class SummaryReportPage extends StatefulWidget {
   final String date;
   final String makerId;
-  const SummaryReportPage({Key? key, required this.date, required this.makerId})
-    : super(key: key);
+  const SummaryReportPage({
+    super.key,
+    required this.date,
+    required this.makerId,
+  });
 
   @override
   State<SummaryReportPage> createState() => _SummaryReportPageState();
@@ -62,7 +66,7 @@ class _SummaryReportPageState extends State<SummaryReportPage> {
       context: context,
       initialDate: _selectedDate,
       firstDate: DateTime(2020),
-      lastDate: DateTime.now(),
+      lastDate: ManilaTime.today(),
       initialEntryMode: DatePickerEntryMode.calendarOnly,
     );
     if (picked == null) return;
@@ -95,9 +99,7 @@ class _SummaryReportPageState extends State<SummaryReportPage> {
             child: OutlinedButton.icon(
               icon: const Icon(Icons.calendar_today, size: 18),
               label: Text(
-                DateFormat(
-                  'EEE, MMM.dd, yyyy',
-                ).format(_selectedDate),
+                DateFormat('EEE, MMM.dd, yyyy').format(_selectedDate),
               ),
               onPressed: _pickDate,
               style: OutlinedButton.styleFrom(
@@ -196,7 +198,7 @@ class _SummaryReportPageState extends State<SummaryReportPage> {
                       ),
                     ),
                     const SizedBox(height: 12),
-                    _buildCountRow('Total Bets', draw.betCount),
+                    _buildSummaryRow('Total Bets', draw.totalBets),
                     _buildSummaryRow('Total Hits', draw.hits),
                     const SizedBox(height: 8),
                     Container(
@@ -266,10 +268,7 @@ class _SummaryReportPageState extends State<SummaryReportPage> {
         mainAxisAlignment: MainAxisAlignment.spaceBetween,
         children: [
           Text(label, style: const TextStyle(fontSize: 15)),
-          Text(
-            value.toString(),
-            style: const TextStyle(fontSize: 15),
-          ),
+          Text(value.toString(), style: const TextStyle(fontSize: 15)),
         ],
       ),
     );

@@ -26,10 +26,11 @@ class TicketService {
     return 'Request failed with status ${response.statusCode}';
   }
 
-  /// Fetch tickets with optional search by ticket number and status filter
+  /// Fetch tickets with optional search by ticket number, status filter, and draw date
   static Future<List<Ticket>> fetchTickets({
     String? ticketNo,
     String? status,
+    String? drawDate,
   }) async {
     try {
       final authCtrl = Get.find<AuthController>();
@@ -43,6 +44,10 @@ class TicketService {
       }
       if (status != null && status.isNotEmpty) {
         queryParams['status'] = status;
+      }
+      if (drawDate != null && drawDate.isNotEmpty) {
+        // backend expects YYYY-MM-DD
+        queryParams['draw_date'] = drawDate;
       }
 
       final uriWithQuery = queryParams.isNotEmpty
@@ -97,6 +102,8 @@ class TicketService {
         '$baseUrl/get',
       ).replace(queryParameters: {'id': trimmedValue});
 
+      print('[TicketService] Resolving scanned UUID via $uri');
+
       final response = await http
           .get(
             uri,
@@ -107,15 +114,53 @@ class TicketService {
           )
           .timeout(const Duration(seconds: 30));
 
-      if (response.statusCode != 200) {
-        return trimmedValue;
+      print('[TicketService] resolve response: ${response.statusCode} ${response.body}');
+
+      if (response.statusCode == 200) {
+        final jsonResponse = jsonDecode(response.body) as Map<String, dynamic>;
+        final data = jsonResponse['data'] as Map<String, dynamic>?;
+        final ticketNo = data?['ticket_no'] as String?;
+        print('[TicketService] Resolved ticket_no via /get: $ticketNo');
+        if (ticketNo?.trim().isNotEmpty == true) {
+          return ticketNo!.trim();
+        }
+      } else {
+        print('[TicketService] /get returned ${response.statusCode}, trying /batch fallback');
       }
 
-      final jsonResponse = jsonDecode(response.body) as Map<String, dynamic>;
-      final data = jsonResponse['data'] as Map<String, dynamic>?;
-      final ticketNo = data?['ticket_no'] as String?;
-      return ticketNo?.trim().isNotEmpty == true ? ticketNo!.trim() : trimmedValue;
-    } catch (_) {
+      // If /tickets/get did not return a ticket, try batch lookup — some flows print batch_id as QR
+      try {
+        final batchUri = Uri.parse('$baseUrl/batch').replace(queryParameters: {'batch_id': trimmedValue});
+        print('[TicketService] Trying batch lookup via $batchUri');
+        final batchResp = await http
+            .get(
+              batchUri,
+              headers: {
+                'Authorization': 'Bearer $token',
+                'Content-Type': 'application/json',
+              },
+            )
+            .timeout(const Duration(seconds: 30));
+        print('[TicketService] batch response: ${batchResp.statusCode} ${batchResp.body}');
+        if (batchResp.statusCode == 200) {
+          final batchJson = jsonDecode(batchResp.body) as Map<String, dynamic>;
+          final List<dynamic> list = batchJson['data'] as List<dynamic>;
+          if (list.isNotEmpty) {
+            final first = list[0] as Map<String, dynamic>;
+            final ticketNo = first['ticket_no'] as String?;
+            print('[TicketService] Resolved ticket_no via /batch: $ticketNo');
+            if (ticketNo?.trim().isNotEmpty == true) {
+              return ticketNo!.trim();
+            }
+          }
+        }
+      } catch (e) {
+        print('[TicketService] batch resolve error: $e');
+      }
+
+      return trimmedValue;
+    } catch (e) {
+      print('[TicketService] resolve error: $e');
       return trimmedValue;
     }
   }

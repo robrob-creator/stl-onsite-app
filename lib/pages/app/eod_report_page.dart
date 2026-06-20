@@ -1,13 +1,16 @@
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 import '../../core/services/eod_report_service.dart';
+import '../../core/services/printer_service.dart';
 import '../../models/eod_report.dart';
+import 'package:get/get.dart';
+import '../../controllers/lottery_controller.dart';
+import '../../core/services/websocket_service.dart';
 
 class EodReportPage extends StatefulWidget {
   final String makerId;
   final String date;
-  const EodReportPage({Key? key, required this.makerId, required this.date})
-    : super(key: key);
+  const EodReportPage({super.key, required this.makerId, required this.date});
 
   @override
   State<EodReportPage> createState() => _EodReportPageState();
@@ -15,14 +18,43 @@ class EodReportPage extends StatefulWidget {
 
 class _EodReportPageState extends State<EodReportPage> {
   late Future<EodReportModel> _futureReport;
+  bool _isPrinting = false;
+  late LotteryController _lotteryController;
+  final List<VoidCallback> _wsUnsubscribers = [];
 
   @override
   void initState() {
     super.initState();
+    _lotteryController = Get.find<LotteryController>();
+
+    // Initial fetch
     _futureReport = EodReportService.fetchEodReport(
       makerId: widget.makerId,
       date: widget.date,
     );
+
+    // Refresh when bets change elsewhere
+    ever(_lotteryController.drawRefreshTick, (_) => _refreshReport());
+
+    // Listen to websocket events to refresh in near real-time. Also
+    // subscribe to the wildcard '*' to catch transaction-like events that
+    // may use different event names on the backend.
+    try {
+      final ws = Get.find<WebSocketService>();
+      _wsUnsubscribers.add(ws.on('bet.placed', (_) => _refreshReport()));
+      _wsUnsubscribers.add(ws.on('bet.bulk_placed', (_) => _refreshReport()));
+      _wsUnsubscribers.add(ws.on('claim.paid', (_) => _refreshReport()));
+      _wsUnsubscribers.add(ws.on('bet.submitted', (_) => _refreshReport()));
+
+      // Wildcard listener: inspect the augmented payload's `_eventType` and
+      // refresh when it looks like a transaction/bet/claim event.
+      _wsUnsubscribers.add(ws.on('*', (payload) {
+        final type = payload['_eventType'] as String? ?? '';
+        if (type.contains('bet') || type.contains('claim') || type.contains('transaction') || type.contains('ticket')) {
+          _refreshReport();
+        }
+      }));
+    } catch (_) {}
   }
 
   @override
@@ -105,9 +137,12 @@ class _EodReportPageState extends State<EodReportPage> {
                 SizedBox(
                   width: double.infinity,
                   child: ElevatedButton.icon(
-                    onPressed: () {},
-                    icon: const Icon(Icons.print, color: Colors.white),
-                    label: const Text('Print Report'),
+                    onPressed: _isPrinting ? null : () => _handlePrint(report),
+                    icon: Icon(
+                      _isPrinting ? Icons.hourglass_top : Icons.print,
+                      color: Colors.white,
+                    ),
+                    label: Text(_isPrinting ? 'Printing...' : 'Print Report'),
                     style: ElevatedButton.styleFrom(
                       backgroundColor: Colors.blue,
                       padding: const EdgeInsets.symmetric(vertical: 14),
@@ -122,6 +157,58 @@ class _EodReportPageState extends State<EodReportPage> {
             ),
           );
         },
+      ),
+    );
+  }
+
+  @override
+  void dispose() {
+    for (final unsub in _wsUnsubscribers) {
+      try {
+        unsub();
+      } catch (_) {}
+    }
+    super.dispose();
+  }
+
+  Future<void> _refreshReport() async {
+    setState(() {
+      _futureReport = EodReportService.fetchEodReport(
+        makerId: widget.makerId,
+        date: widget.date,
+      );
+    });
+  }
+
+  Future<void> _handlePrint(EodReportModel report) async {
+    setState(() {
+      _isPrinting = true;
+    });
+
+    final result = await PrinterService.printEodReport(report: report);
+
+    if (!mounted) {
+      return;
+    }
+
+    setState(() {
+      _isPrinting = false;
+    });
+
+    final message = switch (result.error) {
+      null => 'EOD report sent to printer.',
+      PrintError.noPrinterConfigured => 'No printer configured.',
+      PrintError.permissionDenied => 'Bluetooth permission denied.',
+      PrintError.notConnected => 'Unable to connect to printer.',
+      PrintError.outOfPaper => 'Printer is out of paper.',
+      PrintError.nearEndOfPaper => 'Printer is near end of paper.',
+      PrintError.unknown => 'Failed to print EOD report.',
+    };
+
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(message),
+        backgroundColor: result.success ? Colors.green : Colors.red,
       ),
     );
   }

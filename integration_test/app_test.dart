@@ -307,7 +307,7 @@ void main() {
   // ─────────────────────────────────────────────────────────────────────────
   group('DraftBet – local state operations', () {
     /// Builds a minimal DraftBet with a given id.
-    DraftBet _makeDraft({String id = '', double straight = 10}) {
+    DraftBet makeDraft({String id = '', double straight = 10}) {
       return DraftBet(
         id: id,
         gameName: '2D Lotto',
@@ -329,7 +329,7 @@ void main() {
       // Use addPostFrameCallback so onInit async calls don't interfere.
       await tester.pump(const Duration(milliseconds: 100));
 
-      ctrl.draftBets.add(_makeDraft(id: ''));
+      ctrl.draftBets.add(makeDraft(id: ''));
       expect(ctrl.draftBets.length, equals(1));
 
       await ctrl.removeBet(0);
@@ -350,7 +350,7 @@ void main() {
     ) async {
       await _pumpGetContext(tester);
 
-      final draft = _makeDraft(straight: 20);
+      final draft = makeDraft(straight: 20);
       expect(draft.betType, equals('Target'));
     });
 

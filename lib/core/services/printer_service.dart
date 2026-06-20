@@ -11,6 +11,7 @@ import 'package:print_bluetooth_thermal/print_bluetooth_thermal.dart';
 import 'package:pretty_qr_code/pretty_qr_code.dart';
 import 'package:onstite/controllers/auth_controller.dart';
 import '../../controllers/lottery_controller.dart';
+import '../../models/eod_report.dart';
 import '../../models/ticket.dart';
 
 enum PrintError {
@@ -278,6 +279,45 @@ class PrinterService {
     );
   }
 
+  static Future<PrintResult> printEodReport({
+    required EodReportModel report,
+  }) async {
+    final mac = savedMac;
+    if (mac == null || mac.isEmpty) {
+      return const PrintResult.fail(PrintError.noPrinterConfigured);
+    }
+
+    final hasPermission = await ensureBluetoothPermissions();
+    if (!hasPermission) {
+      return const PrintResult.fail(PrintError.permissionDenied);
+    }
+
+    try {
+      try {
+        await PrintBluetoothThermal.disconnect;
+      } catch (_) {}
+      await Future.delayed(const Duration(milliseconds: 800));
+
+      final connected = await _connectWithRetry(mac);
+      if (!connected) {
+        return const PrintResult.fail(PrintError.notConnected);
+      }
+
+      final bytes = await _buildEodReportBytes(report: report);
+      final result = await PrintBluetoothThermal.writeBytes(bytes);
+      try {
+        await PrintBluetoothThermal.disconnect;
+      } catch (_) {}
+
+      return result
+          ? const PrintResult.ok()
+          : const PrintResult.fail(PrintError.unknown);
+    } catch (e) {
+      log('printEodReport error: $e', name: 'PrinterService');
+      return const PrintResult.fail(PrintError.unknown);
+    }
+  }
+
   static List<BetEntry> _buildBetEntriesFromTicketBets(List<BetData> bets) {
     final entries = <BetEntry>[];
     var betNumber = 1;
@@ -352,12 +392,12 @@ class PrinterService {
         '${hour12.toString().padLeft(2, '0')}:${now.minute.toString().padLeft(2, '0')}:${now.second.toString().padLeft(2, '0')} $period';
 
     // Teller fields from response
-    final _tellerIdRaw =
+    final tellerIdRaw =
         (teller['id'] ?? teller['teller_id'] ?? teller['code'] ?? '')
             .toString();
-    final tellerId = _tellerIdRaw.length > 7
-        ? _tellerIdRaw.substring(_tellerIdRaw.length - 7)
-        : _tellerIdRaw;
+    final tellerId = tellerIdRaw.length > 7
+        ? tellerIdRaw.substring(tellerIdRaw.length - 7)
+        : tellerIdRaw;
     final location =
         (teller['location'] ??
                 teller['area_name'] ??
@@ -367,7 +407,6 @@ class PrinterService {
             .toString();
 
     // ── Header ────────────────────────────────────────────────────
-    bytes.addAll(generator.feed(1));
     bool logoLoaded = false;
     try {
       final ByteData assetData = await rootBundle.load(
@@ -535,8 +574,8 @@ class PrinterService {
     if (qrImage != null) {
       final resizedQr = img.copyResize(
         qrImage,
-        width: 180,
-        height: 180,
+        width: 120,
+        height: 120,
         interpolation: img.Interpolation.nearest,
       );
       bytes.addAll(_imageToEscPosRaster(resizedQr));
@@ -552,9 +591,156 @@ class PrinterService {
       );
       bytes.addAll([0x1B, 0x61, 0x00]);
     }
-    bytes.addAll(generator.feed(3));
+    // Minimize trailing blank lines for ticket printing
+    bytes.addAll(generator.feed(1));
     bytes.addAll(generator.cut());
 
+    return bytes;
+  }
+
+  static Future<List<int>> _buildEodReportBytes({
+    required EodReportModel report,
+  }) async {
+    final profile = await CapabilityProfile.load();
+    final generator = Generator(PaperSize.mm58, profile);
+    final List<int> bytes = [];
+    final now = DateTime.now();
+
+    String currency(double value) => value.toStringAsFixed(2);
+
+    final reportDate = DateTime.tryParse(report.reportDate);
+    final reportDateLabel = reportDate != null
+        ? '${reportDate.month.toString().padLeft(2, '0')}/${reportDate.day.toString().padLeft(2, '0')}/${reportDate.year}'
+        : report.reportDate;
+    final printedAt =
+        '${now.month.toString().padLeft(2, '0')}/${now.day.toString().padLeft(2, '0')}/${now.year} '
+        '${((now.hour % 12) == 0 ? 12 : now.hour % 12).toString()}:'
+        '${now.minute.toString().padLeft(2, '0')} '
+        '${now.hour >= 12 ? 'PM' : 'AM'}';
+
+    void infoRow(
+      String label,
+      String value, {
+      bool numeric = false,
+      bool forceSingleLine = false,
+    }) {
+      // Match the simpler ticket layout: label (width=4, bold) on left,
+      // value (width=6) right-aligned on the same line.
+      bytes.addAll(
+        generator.row([
+          PosColumn(text: '', width: 1),
+          PosColumn(text: label, width: 4, styles: const PosStyles(bold: true)),
+          PosColumn(
+            text: value,
+            width: 6,
+            styles: const PosStyles(align: PosAlign.right),
+          ),
+          PosColumn(text: '', width: 1),
+        ]),
+      );
+    }
+
+    bool logoLoaded = false;
+    try {
+      final assetData = await rootBundle.load('assets/images/logos/header.png');
+      final rawBytes = assetData.buffer.asUint8List();
+      final decoded = img.decodeImage(rawBytes);
+      if (decoded != null) {
+        const targetWidth = 380;
+        final targetHeight = (decoded.height * targetWidth / decoded.width)
+            .round();
+        final resized = img.copyResize(
+          decoded,
+          width: targetWidth,
+          height: targetHeight,
+        );
+        bytes.addAll(_imageToEscPosRaster(resized));
+        logoLoaded = true;
+      }
+    } catch (err) {
+      log('EOD logo load failed: $err', name: 'PrinterService');
+    }
+
+    if (!logoLoaded) {
+      bytes.addAll(
+        generator.text(
+          'SMALL TOWN LOTTERY',
+          styles: const PosStyles(
+            align: PosAlign.center,
+            bold: true,
+            height: PosTextSize.size2,
+          ),
+        ),
+      );
+    }
+
+    bytes.addAll(
+      generator.text(
+        'END OF DAY REPORT',
+        styles: const PosStyles(
+          align: PosAlign.center,
+          bold: true,
+          height: PosTextSize.size2,
+        ),
+      ),
+    );
+    bytes.addAll(generator.hr(ch: '-'));
+
+    // Show only last 6 characters of teller ID for privacy/compactness
+    final displayedTellerId = (report.tellerId ?? '').toString();
+    final formattedTellerId = displayedTellerId.length > 6
+        ? displayedTellerId.substring(displayedTellerId.length - 6)
+        : displayedTellerId;
+
+    // Force single-line label/value layout for header info rows
+    infoRow('Location:', report.location, forceSingleLine: true);
+    infoRow('Teller ID:', formattedTellerId, forceSingleLine: true);
+    if (report.tellerName.isNotEmpty) {
+      infoRow('Teller:', report.tellerName, forceSingleLine: true);
+    }
+    infoRow('Rpt Date:', reportDateLabel, forceSingleLine: true);
+    infoRow('Printed:', printedAt, forceSingleLine: true);
+
+    bytes.addAll(generator.hr(ch: '-'));
+    infoRow('Gross:', currency(report.grossSales), numeric: true);
+    infoRow('Comm:', currency(report.lessCommission), numeric: true);
+    infoRow('Hits:', currency(report.hits), numeric: true);
+    infoRow('Net:', currency(report.totalNet), numeric: true);
+    infoRow('Coll:', currency(report.forCollection), numeric: true);
+    infoRow('T-Bets:', report.totalBets.toString(), numeric: true);
+
+    if (report.breakdown.isNotEmpty) {
+      bytes.addAll(generator.hr(ch: '-'));
+      bytes.addAll(
+        generator.text(
+          'GAME BREAKDOWN',
+          styles: const PosStyles(align: PosAlign.center, bold: true),
+        ),
+      );
+      bytes.addAll(generator.hr(ch: '-'));
+
+      for (final item in report.breakdown) {
+        final gameName = item.gameName.isEmpty ? 'Game' : item.gameName;
+        bytes.addAll(
+          generator.text(gameName, styles: const PosStyles(bold: true)),
+        );
+        infoRow('Bets:', item.betCount.toString(), numeric: true);
+        infoRow('Gross:', currency(item.grossSales), numeric: true);
+        infoRow('Hits:', currency(item.hits), numeric: true);
+        infoRow('Net:', currency(item.net), numeric: true);
+        bytes.addAll(generator.hr(ch: '-'));
+      }
+    }
+
+    bytes.addAll(
+      generator.text(
+        'Generated by Onstite',
+        styles: const PosStyles(align: PosAlign.center),
+      ),
+    );
+    // Minimize trailing blank lines on EOD report to reduce extra white space
+    bytes.addAll(generator.feed(1));
+    bytes.addAll(generator.cut());
     return bytes;
   }
 

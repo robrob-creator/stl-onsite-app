@@ -7,6 +7,7 @@ import 'package:qr_code_scanner_plus/qr_code_scanner_plus.dart';
 import 'package:permission_handler/permission_handler.dart';
 import '../../core/design_system.dart';
 import '../../core/services/ticket_service.dart';
+import '../../core/services/void_setup_service.dart';
 import '../../models/ticket.dart';
 import '../../controllers/ticket_controller.dart';
 
@@ -26,11 +27,43 @@ class _TicketPageState extends State<TicketPage> {
   final GlobalKey qrKey = GlobalKey(debugLabel: 'QR');
   bool _showQRScanner = false;
 
+  Timer? _clockTimer;
+  VoidSetupItem? _activeVoidSetup;
+
+  // Search focus and activation state for compact mobile UX
+  final FocusNode _searchFocusNode = FocusNode();
+  bool _isSearchActive = false;
+
   @override
   void initState() {
     super.initState();
     _ctrl = Get.put(TicketController());
     _searchController.addListener(_onSearchChanged);
+
+    // When search loses focus, collapse back to compact header
+    _searchFocusNode.addListener(() {
+      if (!_searchFocusNode.hasFocus && mounted) {
+        setState(() {
+          _isSearchActive = false;
+        });
+      }
+    });
+
+    // Start a lightweight timer to refresh countdowns/expiry UI every second.
+    _clockTimer = Timer.periodic(const Duration(seconds: 1), (_) {
+      if (mounted) setState(() {});
+    });
+
+    // Fetch admin-configured void setup (if any) and store locally
+    VoidSetupService.fetchActiveVoidSetup()
+        .then((item) {
+          if (mounted && item != null) {
+            setState(() {
+              _activeVoidSetup = item;
+            });
+          }
+        })
+        .catchError((_) {});
   }
 
   void _onSearchChanged() {
@@ -103,9 +136,30 @@ class _TicketPageState extends State<TicketPage> {
     }
   }
 
-  bool _canRequestVoid(Ticket ticket) =>
-      (ticket.status ?? '').toLowerCase() == 'pending' &&
-      !ticket.hasActiveRequest;
+  bool _canRequestVoid(Ticket ticket) {
+    final statusPending = (ticket.status ?? '').toLowerCase() == 'pending';
+    if (!statusPending || ticket.hasActiveRequest) return false;
+
+    // If ticket has its own void configuration, rely on that
+    if (ticket.voidExpiresAt != null || ticket.voidWindowMinutes != null) {
+      return ticket.isVoidWindowActive();
+    }
+
+    // Otherwise, consult global admin-configured void setup (if available and active)
+    if (_activeVoidSetup != null &&
+        _activeVoidSetup!.isActive &&
+        ticket.createdAt != null) {
+      final created = DateTime.tryParse(ticket.createdAt!)?.toLocal();
+      if (created == null) return false;
+      final allowedUntil = created.add(
+        Duration(minutes: _activeVoidSetup!.minutes),
+      );
+      return DateTime.now().isBefore(allowedUntil);
+    }
+
+    // No admin config and no per-ticket config — fall back to previous behavior: allow void while pending
+    return true;
+  }
 
   bool _canRequestReprint(Ticket ticket) {
     final status = (ticket.status ?? '').toLowerCase();
@@ -125,13 +179,55 @@ class _TicketPageState extends State<TicketPage> {
     return AppColors.textSecondary;
   }
 
+  /// Compute remaining time left for void window. Returns null if no window configured.
+  Duration? _voidTimeLeft(Ticket ticket) {
+    final now = DateTime.now();
+    // If the ticket has explicit expires timestamp
+    final expires = ticket.voidExpires;
+    if (expires != null) {
+      final diff = expires.difference(now);
+      return diff.isNegative ? Duration.zero : diff;
+    }
+    // Ticket-level window takes precedence
+    if (ticket.voidWindowMinutes != null && ticket.createdAt != null) {
+      try {
+        final created = DateTime.parse(ticket.createdAt!).toLocal();
+        final allowedUntil = created.add(
+          Duration(minutes: ticket.voidWindowMinutes!),
+        );
+        final diff = allowedUntil.difference(now);
+        return diff.isNegative ? Duration.zero : diff;
+      } catch (_) {
+        return null;
+      }
+    }
+
+    // Fallback to global admin-configured void setup if present
+    if (_activeVoidSetup != null &&
+        ticket.createdAt != null &&
+        _activeVoidSetup!.isActive) {
+      try {
+        final created = DateTime.parse(ticket.createdAt!).toLocal();
+        final allowedUntil = created.add(
+          Duration(minutes: _activeVoidSetup!.minutes),
+        );
+        final diff = allowedUntil.difference(now);
+        return diff.isNegative ? Duration.zero : diff;
+      } catch (_) {
+        return null;
+      }
+    }
+
+    return null;
+  }
+
   String _getRequestStateLabel(Ticket ticket) {
     if (ticket.hasApprovedReprintRequest) {
       return 'REPRINT APPROVED';
     }
-    if (ticket.hasPendingReprintRequest) {
-      return 'REPRINT NEEDS APPROVAL';
-    }
+    // For pending reprint requests we show a friendlier message below
+    // ('Reprint request sent for approval') so avoid duplicating the
+    // uppercase label here. Only show void-related labels from this helper.
     if (ticket.hasPendingVoidRequest) {
       return 'VOID NEEDS APPROVAL';
     }
@@ -140,8 +236,10 @@ class _TicketPageState extends State<TicketPage> {
 
   @override
   void dispose() {
+    _clockTimer?.cancel();
     _debounceTimer?.cancel();
     _searchController.dispose();
+    _searchFocusNode.dispose();
     controller?.dispose();
     Get.delete<TicketController>();
     super.dispose();
@@ -545,49 +643,158 @@ class _TicketPageState extends State<TicketPage> {
             ],
           ),
         ),
-        // Search and scan button
+        // Compact header: either collapsed (date + icons) or expanded search field
         Padding(
           padding: const EdgeInsets.symmetric(horizontal: 16.0, vertical: 8),
-          child: Row(
-            children: [
-              Expanded(
-                child: TextField(
-                  controller: _searchController,
-                  decoration: InputDecoration(
-                    hintText: 'Ticket number (e.g., TKT-369)',
-                    prefixIcon: const Icon(Icons.search),
-                    border: OutlineInputBorder(
-                      borderRadius: BorderRadius.circular(8),
-                      borderSide: BorderSide(color: Colors.grey[300]!),
-                    ),
-                    enabledBorder: OutlineInputBorder(
-                      borderRadius: BorderRadius.circular(8),
-                      borderSide: BorderSide(
-                        color: Colors.grey[300]!,
-                        width: 1,
+          child: _isSearchActive
+              ? Row(
+                  children: [
+                    Expanded(
+                      child: TextField(
+                        focusNode: _searchFocusNode,
+                        controller: _searchController,
+                        textInputAction: TextInputAction.search,
+                        onSubmitted: (_) {
+                          _searchFocusNode.unfocus();
+                        },
+                        decoration: InputDecoration(
+                          hintText: 'Search ticket number',
+                          prefixIcon: const Icon(Icons.search),
+                          suffixIcon: IconButton(
+                            icon: const Icon(Icons.close),
+                            onPressed: () {
+                              _searchController.clear();
+                              _searchFocusNode.unfocus();
+                              setState(() {
+                                _isSearchActive = false;
+                              });
+                              // refresh list with cleared query
+                              _ctrl.fetchTickets();
+                            },
+                          ),
+                          border: OutlineInputBorder(
+                            borderRadius: BorderRadius.circular(8),
+                            borderSide: BorderSide(color: Colors.grey[300]!),
+                          ),
+                          enabledBorder: OutlineInputBorder(
+                            borderRadius: BorderRadius.circular(8),
+                            borderSide: BorderSide(
+                              color: Colors.grey[300]!,
+                              width: 1,
+                            ),
+                          ),
+                          contentPadding: const EdgeInsets.symmetric(
+                            vertical: 12,
+                            horizontal: 0,
+                          ),
+                        ),
                       ),
                     ),
-                    contentPadding: const EdgeInsets.symmetric(
-                      vertical: 12,
-                      horizontal: 0,
+                  ],
+                )
+              : Row(
+                  children: [
+                    // Date chip
+                    Expanded(
+                      child: Obx(() {
+                        final current = _ctrl.selectedDate.value;
+                        DateTime initial;
+                        try {
+                          initial = DateTime.parse(current);
+                        } catch (_) {
+                          initial = DateTime.now();
+                        }
+                        return InkWell(
+                          onTap: () async {
+                            final picked = await showDatePicker(
+                              context: context,
+                              initialDate: initial,
+                              firstDate: DateTime(2000),
+                              lastDate: DateTime.now().add(
+                                const Duration(days: 365),
+                              ),
+                            );
+                            if (picked != null) {
+                              final yyyyMmDd = picked
+                                  .toLocal()
+                                  .toIso8601String()
+                                  .substring(0, 10);
+                              _ctrl.setDate(yyyyMmDd);
+                            }
+                          },
+                          child: Container(
+                            height: 48,
+                            padding: const EdgeInsets.symmetric(horizontal: 12),
+                            decoration: BoxDecoration(
+                              border: Border.all(color: Colors.grey[300]!),
+                              borderRadius: BorderRadius.circular(8),
+                              color: Colors.white,
+                            ),
+                            alignment: Alignment.centerLeft,
+                            child: Row(
+                              children: [
+                                const Icon(
+                                  Icons.calendar_today,
+                                  size: 18,
+                                  color: Colors.grey,
+                                ),
+                                const SizedBox(width: 8),
+                                Text(
+                                  current,
+                                  style: TextStyle(
+                                    color: Colors.grey[800],
+                                    fontWeight: FontWeight.w600,
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                        );
+                      }),
                     ),
-                  ),
+                    const SizedBox(width: 8),
+                    // Search button (activates inline search)
+                    Container(
+                      height: 48,
+                      decoration: BoxDecoration(
+                        border: Border.all(color: Colors.grey[300]!),
+                        borderRadius: BorderRadius.circular(8),
+                        color: Colors.white,
+                      ),
+                      child: IconButton(
+                        icon: const Icon(Icons.search),
+                        onPressed: () {
+                          setState(() {
+                            _isSearchActive = true;
+                          });
+                          // focus after frame
+                          Future.delayed(Duration(milliseconds: 50), () {
+                            if (mounted)
+                              FocusScope.of(
+                                context,
+                              ).requestFocus(_searchFocusNode);
+                          });
+                        },
+                        color: Colors.grey[600],
+                      ),
+                    ),
+                    const SizedBox(width: 8),
+                    // QR scan button
+                    Container(
+                      height: 48,
+                      decoration: BoxDecoration(
+                        border: Border.all(color: Colors.grey[300]!),
+                        borderRadius: BorderRadius.circular(8),
+                        color: Colors.white,
+                      ),
+                      child: IconButton(
+                        icon: const Icon(Icons.qr_code_scanner),
+                        onPressed: _startQRScan,
+                        color: Colors.grey[600],
+                      ),
+                    ),
+                  ],
                 ),
-              ),
-              const SizedBox(width: 12),
-              Container(
-                decoration: BoxDecoration(
-                  border: Border.all(color: Colors.grey[300]!),
-                  borderRadius: BorderRadius.circular(8),
-                ),
-                child: IconButton(
-                  icon: const Icon(Icons.qr_code_scanner),
-                  onPressed: _startQRScan,
-                  color: Colors.grey[600],
-                ),
-              ),
-            ],
-          ),
         ),
         const SizedBox(height: 8),
         // Ticket list
@@ -707,28 +914,67 @@ class _TicketPageState extends State<TicketPage> {
                         ),
                         if (_canRequestVoid(ticket)) ...[
                           const SizedBox(width: 8),
-                          ElevatedButton.icon(
-                            style: ElevatedButton.styleFrom(
-                              backgroundColor: AppColors.backgroundDark,
-                              foregroundColor: Colors.white,
-                              padding: const EdgeInsets.symmetric(
-                                horizontal: 10,
-                                vertical: 6,
+                          Column(
+                            crossAxisAlignment: CrossAxisAlignment.end,
+                            children: [
+                              ElevatedButton.icon(
+                                style: ElevatedButton.styleFrom(
+                                  backgroundColor: AppColors.backgroundDark,
+                                  foregroundColor: Colors.white,
+                                  padding: const EdgeInsets.symmetric(
+                                    horizontal: 10,
+                                    vertical: 6,
+                                  ),
+                                  minimumSize: const Size(0, 34),
+                                  tapTargetSize:
+                                      MaterialTapTargetSize.shrinkWrap,
+                                  visualDensity: VisualDensity.compact,
+                                  textStyle: const TextStyle(
+                                    fontSize: 11,
+                                    fontWeight: FontWeight.w600,
+                                  ),
+                                  shape: RoundedRectangleBorder(
+                                    borderRadius: BorderRadius.circular(16),
+                                  ),
+                                ),
+                                onPressed: () => _showVoidConfirmation(ticket),
+                                icon: const Icon(Icons.close, size: 12),
+                                label: const Text('Void'),
                               ),
-                              minimumSize: const Size(0, 34),
-                              tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                              visualDensity: VisualDensity.compact,
-                              textStyle: const TextStyle(
-                                fontSize: 11,
-                                fontWeight: FontWeight.w600,
+                              const SizedBox(height: 4),
+                              Builder(
+                                builder: (context) {
+                                  final left = _voidTimeLeft(ticket);
+                                  if (left == null) return const SizedBox();
+                                  if (left.inSeconds <= 0) {
+                                    // expired — won't be shown because _canRequestVoid checks isVoidWindowActive,
+                                    // but guard defensively
+                                    return const Text(
+                                      'Void window expired',
+                                      style: TextStyle(
+                                        fontSize: 11,
+                                        color: Colors.grey,
+                                      ),
+                                    );
+                                  }
+                                  final mm = left.inMinutes
+                                      .remainder(60)
+                                      .toString()
+                                      .padLeft(2, '0');
+                                  final ss = left.inSeconds
+                                      .remainder(60)
+                                      .toString()
+                                      .padLeft(2, '0');
+                                  return Text(
+                                    'Expires in $mm:$ss',
+                                    style: const TextStyle(
+                                      fontSize: 11,
+                                      color: Colors.orange,
+                                    ),
+                                  );
+                                },
                               ),
-                              shape: RoundedRectangleBorder(
-                                borderRadius: BorderRadius.circular(16),
-                              ),
-                            ),
-                            onPressed: () => _showVoidConfirmation(ticket),
-                            icon: const Icon(Icons.close, size: 12),
-                            label: const Text('Void'),
+                            ],
                           ),
                         ],
                       ],
@@ -800,7 +1046,7 @@ class _TicketPageState extends State<TicketPage> {
           const SizedBox(height: 12),
           // Transaction date
           Text(
-            'Created:',
+            'Printed Date:',
             style: TextStyle(fontSize: 12, color: Colors.grey[600]),
           ),
           const SizedBox(height: 4),
@@ -857,25 +1103,40 @@ class _TicketPageState extends State<TicketPage> {
                     label: const Text('Request Reprint'),
                   ),
                 if (ticket.hasPendingReprintRequest)
-                  Container(
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: 12,
-                      vertical: 10,
-                    ),
-                    decoration: BoxDecoration(
-                      color: AppColors.warning.withOpacity(0.08),
-                      borderRadius: BorderRadius.circular(8),
-                      border: Border.all(
-                        color: AppColors.warning.withOpacity(0.25),
+                  Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Container(
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 12,
+                          vertical: 10,
+                        ),
+                        decoration: BoxDecoration(
+                          color: AppColors.warning.withOpacity(0.08),
+                          borderRadius: BorderRadius.circular(8),
+                          border: Border.all(
+                            color: AppColors.warning.withOpacity(0.25),
+                          ),
+                        ),
+                        child: const Text(
+                          'Reprint request sent for approval',
+                          style: TextStyle(
+                            color: AppColors.warning,
+                            fontWeight: FontWeight.w600,
+                          ),
+                        ),
                       ),
-                    ),
-                    child: const Text(
-                      'Reprint request sent for approval',
-                      style: TextStyle(
-                        color: AppColors.warning,
-                        fontWeight: FontWeight.w600,
-                      ),
-                    ),
+                      const SizedBox(height: 6),
+                      if (ticket.reprintRequests != null ||
+                          ticket.printCount != null)
+                        Text(
+                          'Requests: ${ticket.reprintRequests ?? 0}  ·  Prints: ${ticket.printCount ?? 0}',
+                          style: TextStyle(
+                            fontSize: 12,
+                            color: Colors.grey[600],
+                          ),
+                        ),
+                    ],
                   ),
                 if (ticket.hasApprovedReprintRequest)
                   ElevatedButton.icon(
@@ -977,8 +1238,8 @@ class _TicketPageState extends State<TicketPage> {
                   // Table rows
                   ...?ticket.betObjects?.map((bet) {
                     String betType = (bet.straightBetAmount ?? 0) > 0
-                        ? 'Straight'
-                        : 'Ramble';
+                        ? 'Target'
+                        : 'Rambol';
                     return Column(
                       children: [
                         Divider(color: Colors.grey[200], height: 1),
@@ -1052,7 +1313,7 @@ class _TicketPageState extends State<TicketPage> {
                         ),
                       ],
                     );
-                  }).toList(),
+                  }),
                 ],
               ),
             ),

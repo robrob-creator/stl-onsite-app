@@ -4,7 +4,7 @@ import 'package:onstite/pages/app/eod_report_page.dart';
 import 'package:onstite/pages/app/summary_report_page.dart';
 import 'package:onstite/pages/app/live_page.dart';
 import '../controllers/auth_controller.dart';
-import 'design_system.dart';
+import 'utils/manila_time.dart';
 
 /// Main layout widget with AppBar and BottomNavigationBar
 class MainLayout extends StatefulWidget {
@@ -21,7 +21,7 @@ class MainLayout extends StatefulWidget {
   final String? activeDrawerItem;
 
   const MainLayout({
-    Key? key,
+    super.key,
     required this.body,
     this.title,
     this.appBarActions,
@@ -33,7 +33,7 @@ class MainLayout extends StatefulWidget {
     this.backgroundColor = Colors.white,
     this.appBarTrailing,
     this.activeDrawerItem,
-  }) : super(key: key);
+  });
 
   @override
   State<MainLayout> createState() => _MainLayoutState();
@@ -226,9 +226,7 @@ class _MainLayoutState extends State<MainLayout> {
                           Navigator.pop(context);
                           final userId = authCtrl.currentUser.value?.id;
                           if (userId != null && userId.isNotEmpty) {
-                            final today = DateTime.now();
-                            final dateStr =
-                                "${today.year.toString().padLeft(4, '0')}-${today.month.toString().padLeft(2, '0')}-${today.day.toString().padLeft(2, '0')}";
+                            final dateStr = ManilaTime.dateString();
                             Navigator.of(context).push(
                               MaterialPageRoute(
                                 builder: (_) => SummaryReportPage(
@@ -265,9 +263,7 @@ class _MainLayoutState extends State<MainLayout> {
                         Navigator.pop(context);
                         final userId = authCtrl.currentUser.value?.id;
                         if (userId != null && userId.isNotEmpty) {
-                          final today = DateTime.now();
-                          final dateStr =
-                              "${today.year.toString().padLeft(4, '0')}-${today.month.toString().padLeft(2, '0')}-${today.day.toString().padLeft(2, '0')}";
+                          final dateStr = ManilaTime.dateString();
                           Navigator.of(context).push(
                             MaterialPageRoute(
                               builder: (_) =>
@@ -310,50 +306,6 @@ class _MainLayoutState extends State<MainLayout> {
                       minLeadingWidth: 0,
                     ),
                     const SizedBox(height: 2),
-                    // Notification with badge
-                    ListTile(
-                      leading: const Icon(
-                        Icons.notifications_none_rounded,
-                        color: Color(0xFF222222),
-                      ),
-                      title: Row(
-                        children: [
-                          const Text(
-                            'Notification',
-                            style: TextStyle(
-                              fontWeight: FontWeight.w500,
-                              color: Color(0xFF222222),
-                            ),
-                          ),
-                          const SizedBox(width: 8),
-                          Container(
-                            padding: const EdgeInsets.symmetric(
-                              horizontal: 6,
-                              vertical: 2,
-                            ),
-                            decoration: BoxDecoration(
-                              color: Color(0xFFFF2D55),
-                              borderRadius: BorderRadius.circular(12),
-                            ),
-                            child: const Text(
-                              '2',
-                              style: TextStyle(
-                                color: Colors.white,
-                                fontSize: 12,
-                                fontWeight: FontWeight.bold,
-                              ),
-                            ),
-                          ),
-                        ],
-                      ),
-                      onTap: () {},
-                      contentPadding: const EdgeInsets.symmetric(
-                        horizontal: 12,
-                        vertical: 0,
-                      ),
-                      dense: true,
-                      minLeadingWidth: 0,
-                    ),
                   ],
                 ),
               ),
@@ -379,7 +331,7 @@ class _MainLayoutState extends State<MainLayout> {
                       255,
                       255,
                       255,
-                    ).withOpacity(0.1),
+                    ).withValues(alpha: 0.1),
                     padding: const EdgeInsets.symmetric(
                       vertical: 12,
                       horizontal: 16,
@@ -409,26 +361,6 @@ class _MainLayoutState extends State<MainLayout> {
           ),
         ),
       ),
-    );
-  }
-
-  Widget _buildDrawerItem({
-    required IconData icon,
-    required String label,
-    required VoidCallback onTap,
-  }) {
-    return ListTile(
-      leading: Icon(icon, color: AppColors.primary, size: 20),
-      title: Text(
-        label,
-        style: const TextStyle(
-          fontSize: 14,
-          fontWeight: FontWeight.w500,
-          color: Colors.black87,
-        ),
-      ),
-      onTap: onTap,
-      contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
     );
   }
 

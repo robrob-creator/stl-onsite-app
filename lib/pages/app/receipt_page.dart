@@ -78,7 +78,7 @@ class ReceiptPage extends StatelessWidget {
                 children: [
                   _buildReceiptRow(
                     'Batch ID:',
-                    batchId.substring(0, 8) + '...',
+                    '${batchId.substring(0, 8)}...',
                   ),
                   _buildReceiptRow(
                     'Transaction ID:',
@@ -299,7 +299,7 @@ class ReceiptPage extends StatelessWidget {
                               DataCell(
                                 Text(
                                   description.length > 20
-                                      ? description.substring(0, 20) + '...'
+                                      ? '${description.substring(0, 20)}...'
                                       : description,
                                   style: const TextStyle(fontSize: 11),
                                 ),

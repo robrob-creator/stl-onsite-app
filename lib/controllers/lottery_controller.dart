@@ -2,10 +2,16 @@ import 'package:flutter/material.dart';
 import 'package:get/get.dart';
 import 'package:http/http.dart' as http;
 import 'package:permission_handler/permission_handler.dart';
+import 'package:connectivity_plus/connectivity_plus.dart';
+import 'package:flutter/services.dart';
+import 'dart:async';
 import 'dart:convert';
+import 'dart:io';
+import 'dart:developer' as developer;
 import 'auth_controller.dart';
 import '../core/app_constants.dart';
 import '../models/game.dart';
+import '../core/utils/manila_time.dart';
 import '../models/bet_availability.dart';
 import '../models/permutation_availability.dart';
 import '../core/services/game_service.dart';
@@ -13,6 +19,8 @@ import '../core/services/printer_service.dart';
 import '../core/services/profile_service.dart';
 import '../core/services/websocket_service.dart';
 import '../core/services/sold_out_service.dart';
+import '../core/services/draw_results_service.dart';
+import '../core/services/ticket_service.dart';
 
 class BetEntry {
   final int betNumber;
@@ -86,6 +94,9 @@ class LotteryController extends GetxController {
   final RxList<DraftBet> draftBets = <DraftBet>[].obs;
   final RxDouble balance = 0.0.obs;
   final RxBool isLoading = false.obs;
+  // Increment this tick whenever bets are placed/changed so UI pages (Dashboard)
+  // can react and refresh cached draw summaries.
+  final RxInt drawRefreshTick = 0.obs;
 
   // Permutation availability from server (preview endpoint)
   final Rx<PermutationAvailability?> permAvailability =
@@ -139,7 +150,7 @@ class LotteryController extends GetxController {
       update();
     } catch (e) {
       // Silently fail - keep existing balance if profile fetch fails
-      print('Failed to load profile: $e');
+      debugPrint('Failed to load profile: $e');
     }
   }
 
@@ -234,6 +245,34 @@ class LotteryController extends GetxController {
   /// Sends the current bet inputs to `POST /bets/draft-bulk` and appends
   /// the returned draft to [draftBets]. Returns `true` on success.
   Future<bool> addBet() async {
+    // Verify internet connectivity before attempting to add a bet
+    if (!await _hasInternetConnection()) {
+      // Run a quick diagnostic to capture connectivity and server reachability
+      final diag = await _diagnoseConnectivity();
+      // Log diagnostic to developer console for debugging
+      try {
+        developer.log('Connectivity diagnostic: $diag', name: 'LotteryController');
+      } catch (_) {}
+      debugPrint('LotteryController: Connectivity diagnostic: $diag');
+
+      Get.snackbar(
+        'No internet connection',
+        'Please check your network connection and try again.',
+        snackPosition: SnackPosition.BOTTOM,
+      );
+      return false;
+    }
+
+    // Ensure location/GPS permission is granted for compliance
+    if (!await _ensureLocationEnabled()) {
+      Get.snackbar(
+        'Location Required',
+        'Location/GPS is required to place bets. Please enable location services and grant permission.',
+        snackPosition: SnackPosition.BOTTOM,
+      );
+      return false;
+    }
+
     if (selectedNumbers.isEmpty) {
       Get.snackbar('Error', 'Please select numbers');
       return false;
@@ -397,6 +436,22 @@ class LotteryController extends GetxController {
       targetAmount.value = 0;
       rambolAmount.value = 0;
       await loadProfile();
+
+      // Try to force-refresh draw summaries on the server so Dashboard shows
+      // updated gross/totalBet values as soon as possible.
+      try {
+        final gameId = game.id;
+        final drawDate = ManilaTime.dateString();
+        await DrawResultsService.getLatestResultsByGameAndDate(
+          gameId: gameId,
+          drawDate: drawDate,
+        );
+      } catch (_) {}
+
+      // Notify interested UI (Dashboard) to refresh draw summaries/gross totals
+      try {
+        drawRefreshTick.value = drawRefreshTick.value + 1;
+      } catch (_) {}
       update();
       return true;
     } catch (e) {
@@ -465,7 +520,7 @@ class LotteryController extends GetxController {
     final game = currentGame;
     if (game == null) return;
     final drawTimeId = selectedTime.value;
-    final drawDate = DateTime.now().toIso8601String().substring(0, 10);
+    final drawDate = ManilaTime.dateString();
     try {
       final result = await SoldOutService.checkPermutations(
         gameId: game.id,
@@ -492,7 +547,7 @@ class LotteryController extends GetxController {
     if (game == null) return null;
 
     final drawTimeId = selectedTime.value;
-    final drawDate = DateTime.now().toIso8601String().substring(0, 10);
+    final drawDate = ManilaTime.dateString();
 
     final cartBets = <Map<String, dynamic>>[];
     for (final d in draftBets) {
@@ -536,7 +591,229 @@ class LotteryController extends GetxController {
     }
   }
 
+  /// Check internet connectivity with fallbacks.
+  ///
+  /// Prefer using connectivity_plus, but if that check throws we fall back to
+  /// a quick API GET (treat HTTP 2xx-4xx as reachable) and finally a DNS
+  /// lookup. This accounts for devices where the connectivity plugin may
+  /// throw (some Android devices or permission issues) while the network is
+  /// still functional.
+  Future<bool> _hasInternetConnection() async {
+    // 1) Basic interface check
+    try {
+      try {
+        final connectivityResult = await Connectivity().checkConnectivity();
+        if (connectivityResult != ConnectivityResult.none) return true;
+      } on MissingPluginException catch (e) {
+        // Plugin not available on this platform (e.g., unit tests or unsupported)
+        debugPrint('LotteryController: connectivity plugin missing: $e');
+      } catch (e) {
+        // Other connectivity errors - log and continue to active checks
+        try {
+          developer.log('Connectivity check failed: $e', name: 'LotteryController');
+        } catch (_) {}
+        debugPrint('LotteryController: Connectivity check failed: $e');
+      }
+
+      // 2) Quick reachability check against API ping endpoint (longer timeout)
+      try {
+        var uri = Uri.parse(AppConstants.apiPing);
+        if ((uri.host == '127.0.0.1' || uri.host == 'localhost') && Platform.isAndroid) {
+          uri = uri.replace(host: '10.0.2.2');
+        }
+        final resp = await http.get(uri).timeout(const Duration(seconds: 5));
+        if (resp.statusCode >= 200 && resp.statusCode < 500) return true;
+      } on TimeoutException catch (e) {
+        // Ping timed out — try health endpoint as a slightly heavier fallback
+        debugPrint('LotteryController: ping timeout, trying health endpoint: $e');
+        try {
+          var uri = Uri.parse('${AppConstants.apiBaseUrl}/health');
+          if ((uri.host == '127.0.0.1' || uri.host == 'localhost') && Platform.isAndroid) {
+            uri = uri.replace(host: '10.0.2.2');
+          }
+          final resp = await http.get(uri).timeout(const Duration(seconds: 3));
+          if (resp.statusCode >= 200 && resp.statusCode < 500) return true;
+        } catch (e) {
+          try {
+            developer.log('Health endpoint reachability check failed: $e', name: 'LotteryController');
+          } catch (_) {}
+          debugPrint('LotteryController: Health endpoint reachability check failed: $e');
+        }
+      } catch (e) {
+        try {
+          developer.log('API reachability check failed: $e', name: 'LotteryController');
+        } catch (_) {}
+        debugPrint('LotteryController: API reachability check failed: $e');
+      }
+
+      // 3) DNS lookup fallback
+      try {
+        final lookup = await InternetAddress.lookup('example.com').timeout(const Duration(seconds: 3));
+        return lookup.isNotEmpty;
+      } catch (e) {
+        try {
+          developer.log('DNS lookup failed: $e', name: 'LotteryController');
+        } catch (_) {}
+        debugPrint('LotteryController: DNS lookup failed: $e');
+        return false;
+      }
+    } catch (_) {
+      return false;
+    }
+  }
+
+  /// Ensure location permission is granted (used for compliance/location checks).
+  Future<bool> _ensureLocationEnabled() async {
+    try {
+      final status = await Permission.locationWhenInUse.status;
+      // If already granted, we're good.
+      if (status.isGranted) return true;
+
+      // Ask the system permission prompt first.
+      final req = await Permission.locationWhenInUse.request();
+      if (req.isGranted) return true;
+
+      // If permission is permanently denied or still denied, show an in-app
+      // dialog explaining why location is needed with a button to open app
+      // settings. Also show a snackbar as a lightweight notification.
+      await _showLocationPrompt();
+      return false;
+    } catch (_) {
+      return false;
+    }
+  }
+
+  /// Diagnostic helper that returns a short string describing connectivity
+  /// state, API reachability, and DNS lookup result. Intended for debugging
+  /// emulator/device connectivity issues.
+  Future<String> _diagnoseConnectivity() async {
+    final parts = <String>[];
+    try {
+      final connectivityResult = await Connectivity().checkConnectivity();
+      parts.add('iface=${connectivityResult.toString().split('.').last}');
+    } catch (e) {
+      parts.add('iface=err');
+    }
+
+    // Quick GET to API ping endpoint (longer timeout) with health fallback
+    try {
+      var uri = Uri.parse(AppConstants.apiPing);
+      if ((uri.host == '127.0.0.1' || uri.host == 'localhost') && Platform.isAndroid) {
+        uri = uri.replace(host: '10.0.2.2');
+      }
+      final resp = await http.get(uri).timeout(const Duration(seconds: 5));
+      parts.add('api_status=${resp.statusCode}');
+    } on TimeoutException catch (e) {
+      parts.add('api_err=ping_timeout');
+      // Try health endpoint as fallback
+      try {
+        var uri = Uri.parse('${AppConstants.apiBaseUrl}/health');
+        if ((uri.host == '127.0.0.1' || uri.host == 'localhost') && Platform.isAndroid) {
+          uri = uri.replace(host: '10.0.2.2');
+        }
+        final resp = await http.get(uri).timeout(const Duration(seconds: 3));
+        parts.add('api_health=${resp.statusCode}');
+      } catch (e) {
+        parts.add('api_health_err=${e.runtimeType}');
+      }
+    } catch (e) {
+      parts.add('api_err=${e.runtimeType}');
+    }
+
+    // DNS lookup
+    try {
+      final lookup = await InternetAddress.lookup('example.com').timeout(const Duration(seconds: 3));
+      parts.add('dns=${lookup.isNotEmpty ? 'ok' : 'empty'}');
+    } catch (e) {
+      parts.add('dns_err=${e.runtimeType}');
+    }
+
+    return parts.join('; ');
+  }
+
+  Future<void> _showLocationPrompt() async {
+    // Lightweight notification (snackbar)
+    try {
+      Get.snackbar(
+        'Location Required',
+        'Location access is required to place bets. Please enable Location in Settings.',
+        snackPosition: SnackPosition.BOTTOM,
+        duration: const Duration(seconds: 6),
+      );
+    } catch (_) {}
+
+    // Show modal dialog with Open Settings action
+    try {
+      await Get.dialog(
+        Dialog(
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+          child: Padding(
+            padding: const EdgeInsets.fromLTRB(20, 20, 20, 16),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const Text(
+                  'Location Permission',
+                  style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+                ),
+                const SizedBox(height: 12),
+                const Text(
+                  'This app requires location access to comply with regulatory checks when placing bets. Please enable Location permission in your device settings.',
+                ),
+                const SizedBox(height: 18),
+                Row(
+                  children: [
+                    Expanded(
+                      child: OutlinedButton(
+                        onPressed: () {
+                          Get.back();
+                        },
+                        child: const Text('Later'),
+                      ),
+                    ),
+                    const SizedBox(width: 12),
+                    Expanded(
+                      child: ElevatedButton(
+                        onPressed: () {
+                          Get.back();
+                          openAppSettings();
+                        },
+                        child: const Text('Open Settings'),
+                      ),
+                    ),
+                  ],
+                ),
+              ],
+            ),
+          ),
+        ),
+        barrierDismissible: false,
+      );
+    } catch (_) {}
+  }
+
   Future<void> submitBets() async {
+    // Verify internet connectivity before submitting bets
+    if (!await _hasInternetConnection()) {
+      Get.snackbar(
+        'No internet connection',
+        'No internet connection. Please check your network connection and try again.',
+        snackPosition: SnackPosition.BOTTOM,
+      );
+      return;
+    }
+
+    // Ensure location/GPS permission is granted before submitting
+    if (!await _ensureLocationEnabled()) {
+      Get.snackbar(
+        'Location Required',
+        'Location/GPS is required to submit bets. Please enable location services and grant permission.',
+        snackPosition: SnackPosition.BOTTOM,
+      );
+      return;
+    }
+
     if (draftBets.isEmpty) {
       Get.snackbar('Error', 'Please add at least one bet');
       return;
@@ -567,7 +844,7 @@ class LotteryController extends GetxController {
           ? game.clusters[0].id.substring(0, 3).toUpperCase()
           : 'UNK';
 
-      final now = DateTime.now();
+      final now = ManilaTime.now();
       final uniqueTimestamp =
           '${now.hour.toString().padLeft(2, '0')}${now.minute.toString().padLeft(2, '0')}${now.second.toString().padLeft(2, '0')}${now.millisecond.toString().padLeft(3, '0')}';
       final batchTicketNo =
@@ -702,14 +979,36 @@ class LotteryController extends GetxController {
 
   /// Shows a brief "Printing Ticket…" snackbar and sends the ticket to
   /// the configured Bluetooth thermal printer in the background.
-  void _triggerPrint({
+  Future<void> _triggerPrint({
     required List<BetEntry> betEntries,
     required double totalAmount,
     required String ticketNo,
     required Map<String, dynamic> teller,
     required String gameName,
     required String drawTimeLabel,
-  }) {
+  }) async {
+    // Verify saved printer reachability before attempting to print
+    final reach = await PrinterService.getSavedPrinterReachability();
+    if (reach != PrinterReachabilityStatus.reachable) {
+      Get.dialog(
+        _printerAlertDialog(
+          icon: Icons.bluetooth_disabled,
+          title: 'Printer Unavailable',
+          message: reach == PrinterReachabilityStatus.notConfigured
+              ? 'No printer configured. Please set up a Bluetooth printer to print tickets.'
+              : reach == PrinterReachabilityStatus.permissionDenied
+              ? 'Bluetooth permission denied. Please grant Bluetooth permissions in settings.'
+              : 'Saved printer is not reachable. Ensure Bluetooth is enabled and the printer is paired.',
+          actionLabel: 'Set Up Printer',
+          onAction: () {
+            Get.back();
+            Get.toNamed('/printer-settings');
+          },
+        ),
+      );
+      return;
+    }
+
     // Show user-facing "Printing Ticket…" feedback immediately
     Get.snackbar(
       '',
@@ -1000,11 +1299,20 @@ class LotteryController extends GetxController {
         return {'success': false, 'error': 'Please log in first'};
       }
 
+      // If QR encodes a UUID, resolve it to ticket_no first (robustness for different QR formats)
+      try {
+        final resolved = await TicketService.resolveScannedTicketNumber(ticketNumber);
+        if (resolved.isNotEmpty && resolved != ticketNumber) {
+          ticketNumber = resolved;
+        }
+      } catch (_) {}
+
       final token = authController.token.value;
       final uri = Uri.parse(
         '${AppConstants.apiBaseUrl}/tickets',
       ).replace(queryParameters: {'ticket_no': ticketNumber});
 
+      print('[LotteryController] GET $uri');
       final response = await http
           .get(
             uri,
@@ -1014,6 +1322,8 @@ class LotteryController extends GetxController {
             },
           )
           .timeout(const Duration(seconds: 30));
+
+      print('[LotteryController] Response (${response.statusCode}): ${response.body}');
 
       if (response.statusCode != 200) {
         try {

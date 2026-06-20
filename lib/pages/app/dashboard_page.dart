@@ -23,6 +23,12 @@ class _DashboardPageState extends State<DashboardPage> {
   void initState() {
     super.initState();
     lotteryController = Get.find<LotteryController>();
+
+    // Refresh draw results whenever bets change elsewhere in the app
+    ever(lotteryController.drawRefreshTick, (v) {
+      _fetchDrawResults();
+    });
+
     _fetchDrawResults();
   }
 

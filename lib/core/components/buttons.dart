@@ -21,7 +21,7 @@ class AppButton extends StatefulWidget {
   final TextStyle? textStyle;
 
   const AppButton({
-    Key? key,
+    super.key,
     required this.label,
     required this.onPressed,
     this.isLoading = false,
@@ -38,7 +38,7 @@ class AppButton extends StatefulWidget {
       vertical: AppSpacing.md,
     ),
     this.textStyle,
-  }) : super(key: key);
+  });
 
   @override
   State<AppButton> createState() => _AppButtonState();
@@ -138,7 +138,7 @@ class SecondaryButton extends StatefulWidget {
   final TextStyle? textStyle;
 
   const SecondaryButton({
-    Key? key,
+    super.key,
     required this.label,
     required this.onPressed,
     this.isLoading = false,
@@ -155,7 +155,7 @@ class SecondaryButton extends StatefulWidget {
       vertical: AppSpacing.md,
     ),
     this.textStyle,
-  }) : super(key: key);
+  });
 
   @override
   State<SecondaryButton> createState() => _SecondaryButtonState();
@@ -253,13 +253,13 @@ class TextOnlyButton extends StatelessWidget {
   final double underlineWidth;
 
   const TextOnlyButton({
-    Key? key,
+    super.key,
     required this.label,
     required this.onPressed,
     this.color = AppColors.primary,
     this.textStyle,
     this.underlineWidth = 0,
-  }) : super(key: key);
+  });
 
   @override
   Widget build(BuildContext context) {
@@ -291,7 +291,7 @@ class AppIconButton extends StatelessWidget {
   final EdgeInsets padding;
 
   const AppIconButton({
-    Key? key,
+    super.key,
     required this.icon,
     required this.onPressed,
     this.color = AppColors.primary,
@@ -300,7 +300,7 @@ class AppIconButton extends StatelessWidget {
     this.iconSize = 24,
     this.tooltip,
     this.padding = EdgeInsets.zero,
-  }) : super(key: key);
+  });
 
   @override
   Widget build(BuildContext context) {
@@ -339,14 +339,14 @@ class AppFAB extends StatelessWidget {
   final double size;
 
   const AppFAB({
-    Key? key,
+    super.key,
     required this.icon,
     required this.onPressed,
     this.label = '',
     this.backgroundColor = AppColors.primary,
     this.foregroundColor = Colors.white,
     this.size = 56,
-  }) : super(key: key);
+  });
 
   @override
   Widget build(BuildContext context) {

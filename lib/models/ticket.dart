@@ -16,6 +16,12 @@ class Ticket {
   final String? requestType;
   final String? requestStatus;
   final String? requestRemarks;
+  // Admin-configured void window data (optional, may be present in API)
+  final String? voidExpiresAt; // explicit timestamp when voiding expires
+  final int? voidWindowMinutes; // alternative: minutes from creation when voiding allowed
+  // Reprint tracking
+  final int? printCount;
+  final int? reprintRequests;
 
   Ticket({
     this.id,
@@ -35,6 +41,10 @@ class Ticket {
     this.requestType,
     this.requestStatus,
     this.requestRemarks,
+    this.voidExpiresAt,
+    this.voidWindowMinutes,
+    this.printCount,
+    this.reprintRequests,
   });
 
   // Backward compatibility: return betObjects for display
@@ -76,6 +86,14 @@ class Ticket {
       requestType: json['request_type'] as String?,
       requestStatus: json['request_status'] as String?,
       requestRemarks: json['request_remarks'] as String?,
+      voidExpiresAt: json['void_expires_at'] as String? ?? json['void_until'] as String?,
+      voidWindowMinutes: json['void_window_minutes'] as int? ?? (json['void_window_minutes'] is String ? int.tryParse(json['void_window_minutes']) : null),
+      printCount: (json['print_count'] is int)
+          ? (json['print_count'] as int)
+          : (json['print_count'] is String ? int.tryParse(json['print_count']) : null),
+      reprintRequests: (json['reprint_requests'] is int)
+          ? (json['reprint_requests'] as int)
+          : (json['reprint_requests'] is String ? int.tryParse(json['reprint_requests']) : null),
     );
   }
 
@@ -98,7 +116,42 @@ class Ticket {
       'request_type': requestType,
       'request_status': requestStatus,
       'request_remarks': requestRemarks,
-    };
+      'void_expires_at': voidExpiresAt,
+     'void_window_minutes': voidWindowMinutes,
+     'print_count': printCount,
+     'reprint_requests': reprintRequests,
+   };
+  }
+
+  /// Helper: returns DateTime when voiding expires, if provided.
+  DateTime? get voidExpires {
+    if (voidExpiresAt == null) return null;
+    try {
+      return DateTime.parse(voidExpiresAt!).toLocal();
+    } catch (_) {
+      return null;
+    }
+  }
+
+  /// Helper: compute if void window is still active based on either explicit expires timestamp
+  /// or a window measured in minutes from ticket creation time.
+  bool isVoidWindowActive() {
+    final now = DateTime.now();
+    final expires = voidExpires;
+    if (expires != null) {
+      return now.isBefore(expires);
+    }
+    if (voidWindowMinutes != null && createdAt != null) {
+      try {
+        final created = DateTime.parse(createdAt!).toLocal();
+        final allowedUntil = created.add(Duration(minutes: voidWindowMinutes!));
+        return now.isBefore(allowedUntil);
+      } catch (_) {
+        return true;
+      }
+    }
+    // No admin config provided — default to allow voiding
+    return true;
   }
 }
 

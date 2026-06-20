@@ -12,7 +12,7 @@ class LottoNumberInput extends StatefulWidget {
   onLastNumberEntered; // Callback when last number is entered
 
   const LottoNumberInput({
-    Key? key,
+    super.key,
     required this.gameType,
     required this.numberOfCombinations,
     required this.minNumber,
@@ -20,7 +20,7 @@ class LottoNumberInput extends StatefulWidget {
     required this.onChanged,
     this.initialValue = '',
     this.onLastNumberEntered,
-  }) : super(key: key);
+  });
 
   @override
   State<LottoNumberInput> createState() => _LottoNumberInputState();
