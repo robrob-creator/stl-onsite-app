@@ -662,25 +662,82 @@ class LotteryController extends GetxController {
     }
   }
 
-  /// Ensure location permission is granted (used for compliance/location checks).
+  /// Ensure location service (GPS) is on AND permission is granted.
   Future<bool> _ensureLocationEnabled() async {
     try {
-      final status = await Permission.locationWhenInUse.status;
-      // If already granted, we're good.
-      if (status.isGranted) return true;
+      // First verify the location service (GPS hardware) is enabled
+      final serviceStatus = await Permission.locationWhenInUse.serviceStatus;
+      if (serviceStatus == ServiceStatus.disabled) {
+        await _showLocationServicesPrompt();
+        return false;
+      }
 
-      // Ask the system permission prompt first.
+      final status = await Permission.locationWhenInUse.status;
+      if (status.isGranted) return true;
       final req = await Permission.locationWhenInUse.request();
       if (req.isGranted) return true;
-
-      // If permission is permanently denied or still denied, show an in-app
-      // dialog explaining why location is needed with a button to open app
-      // settings. Also show a snackbar as a lightweight notification.
       await _showLocationPrompt();
       return false;
     } catch (_) {
       return false;
     }
+  }
+
+  Future<void> _showLocationServicesPrompt() async {
+    try {
+      Get.snackbar(
+        'GPS Disabled',
+        'Location/GPS services must be enabled to place bets.',
+        snackPosition: SnackPosition.BOTTOM,
+        duration: const Duration(seconds: 6),
+      );
+    } catch (_) {}
+    try {
+      await Get.dialog(
+        Dialog(
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+          child: Padding(
+            padding: const EdgeInsets.fromLTRB(20, 20, 20, 16),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const Text(
+                  'Location Services Disabled',
+                  style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+                ),
+                const SizedBox(height: 12),
+                const Text(
+                  'Location/GPS must be enabled to comply with regulatory requirements when placing bets. Please enable Location Services in your device settings.',
+                ),
+                const SizedBox(height: 18),
+                Row(
+                  children: [
+                    Expanded(
+                      child: OutlinedButton(
+                        onPressed: () => Get.back(),
+                        child: const Text('Later'),
+                      ),
+                    ),
+                    const SizedBox(width: 12),
+                    Expanded(
+                      child: ElevatedButton(
+                        onPressed: () {
+                          Get.back();
+                          openAppSettings();
+                        },
+                        child: const Text('Open Settings'),
+                      ),
+                    ),
+                  ],
+                ),
+              ],
+            ),
+          ),
+        ),
+        barrierDismissible: false,
+      );
+    } catch (_) {}
   }
 
   /// Diagnostic helper that returns a short string describing connectivity
@@ -955,6 +1012,9 @@ class LotteryController extends GetxController {
       selectedNumbers.clear();
       targetAmount.value = 0;
       rambolAmount.value = 0;
+
+      // Signal Dashboard to re-fetch gross amounts after bets are finalized
+      drawRefreshTick.value = drawRefreshTick.value + 1;
 
       Get.snackbar(
         'Success',

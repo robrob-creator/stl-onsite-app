@@ -243,9 +243,8 @@ class _LivePageState extends State<LivePage> {
       ..setBackgroundColor(Colors.black)
       ..loadRequest(uri);
 
-    setState(() {
-      _webViewController = controller;
-    });
+    // Assign directly — called from initState before first build so setState is not needed
+    _webViewController = controller;
   }
 
   String _currentManilaDate() {

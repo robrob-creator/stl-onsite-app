@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:get/get.dart';
 import 'package:onstite/core/design_system.dart';
 import 'package:permission_handler/permission_handler.dart';
+import 'package:print_bluetooth_thermal/print_bluetooth_thermal.dart';
 import '../../../core/main_layout.dart';
 import '../../../controllers/lottery_controller.dart';
 import '../../../core/services/printer_service.dart';
@@ -31,6 +32,25 @@ class _HomePageState extends State<HomePage> {
   }
 
   Future<void> _checkPrinter() async {
+    // Verify Bluetooth service is enabled before printer checks
+    try {
+      final btEnabled = await PrintBluetoothThermal.bluetoothEnabled;
+      if (!btEnabled) {
+        Get.snackbar(
+          'Bluetooth Required',
+          'Bluetooth must be enabled for printer connectivity and ticket printing. Please enable Bluetooth.',
+          icon: const Icon(Icons.bluetooth_disabled, color: Colors.white),
+          backgroundColor: const Color(0xFFE53E3E),
+          colorText: Colors.white,
+          snackPosition: SnackPosition.BOTTOM,
+          duration: const Duration(seconds: 5),
+          borderRadius: 12,
+          margin: const EdgeInsets.all(16),
+        );
+        return;
+      }
+    } catch (_) {}
+
     final mac = PrinterService.savedMac;
 
     if (mac == null) {

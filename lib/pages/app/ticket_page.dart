@@ -8,6 +8,7 @@ import 'package:permission_handler/permission_handler.dart';
 import '../../core/design_system.dart';
 import '../../core/services/ticket_service.dart';
 import '../../core/services/void_setup_service.dart';
+import '../../core/services/reprint_setup_service.dart';
 import '../../models/ticket.dart';
 import '../../controllers/ticket_controller.dart';
 
@@ -29,6 +30,7 @@ class _TicketPageState extends State<TicketPage> {
 
   Timer? _clockTimer;
   VoidSetupItem? _activeVoidSetup;
+  ReprintSetupItem? _activeReprintSetup;
 
   // Search focus and activation state for compact mobile UX
   final FocusNode _searchFocusNode = FocusNode();
@@ -60,6 +62,17 @@ class _TicketPageState extends State<TicketPage> {
           if (mounted && item != null) {
             setState(() {
               _activeVoidSetup = item;
+            });
+          }
+        })
+        .catchError((_) {});
+
+    // Fetch admin-configured reprint setup to validate reprint requests
+    ReprintSetupService.fetchActiveReprintSetup()
+        .then((item) {
+          if (mounted && item != null) {
+            setState(() {
+              _activeReprintSetup = item;
             });
           }
         })
@@ -163,10 +176,30 @@ class _TicketPageState extends State<TicketPage> {
 
   bool _canRequestReprint(Ticket ticket) {
     final status = (ticket.status ?? '').toLowerCase();
-    return !ticket.hasActiveRequest &&
-        status != 'pending_void' &&
-        status != 'voided' &&
-        (ticket.betObjects?.isNotEmpty ?? false);
+    if (ticket.hasActiveRequest ||
+        status == 'pending_void' ||
+        status == 'voided' ||
+        (ticket.betObjects?.isEmpty ?? true)) {
+      return false;
+    }
+
+    // Validate against admin-configured reprint limits if available
+    if (_activeReprintSetup != null && _activeReprintSetup!.isActive) {
+      final currentRequests = ticket.reprintRequests ?? 0;
+      final maxRequests = _activeReprintSetup!.maxReprintRequests;
+      if (maxRequests > 0 && currentRequests >= maxRequests) {
+        return false;
+      }
+
+      final currentPrints = ticket.printCount ?? 0;
+      final maxPrints = _activeReprintSetup!.maxPrints;
+      // Only block reprint request if both print AND request limits are reached
+      if (maxPrints > 0 && currentPrints >= maxPrints && maxRequests == 0) {
+        return false;
+      }
+    }
+
+    return true;
   }
 
   Color _getRequestStateColor(Ticket ticket) {
@@ -1186,9 +1219,22 @@ class _TicketPageState extends State<TicketPage> {
                     child: Row(
                       children: [
                         Expanded(
-                          flex: 1,
+                          flex: 3,
                           child: Text(
                             'Bet No',
+                            textAlign: TextAlign.center,
+                            style: TextStyle(
+                              fontSize: 11,
+                              fontWeight: FontWeight.w600,
+                              color: Colors.grey[700],
+                            ),
+                          ),
+                        ),
+                        Expanded(
+                          flex: 3,
+                          child: Text(
+                            'Amount',
+                            textAlign: TextAlign.center,
                             style: TextStyle(
                               fontSize: 11,
                               fontWeight: FontWeight.w600,
@@ -1199,18 +1245,8 @@ class _TicketPageState extends State<TicketPage> {
                         Expanded(
                           flex: 2,
                           child: Text(
-                            'Amount',
-                            style: TextStyle(
-                              fontSize: 11,
-                              fontWeight: FontWeight.w600,
-                              color: Colors.grey[700],
-                            ),
-                          ),
-                        ),
-                        Expanded(
-                          flex: 1,
-                          child: Text(
                             'Type',
+                            textAlign: TextAlign.center,
                             style: TextStyle(
                               fontSize: 11,
                               fontWeight: FontWeight.w600,
@@ -1219,16 +1255,14 @@ class _TicketPageState extends State<TicketPage> {
                           ),
                         ),
                         Expanded(
-                          flex: 1,
-                          child: Align(
-                            alignment: Alignment.centerRight,
-                            child: Text(
-                              'Status',
-                              style: TextStyle(
-                                fontSize: 11,
-                                fontWeight: FontWeight.w600,
-                                color: Colors.grey[700],
-                              ),
+                          flex: 3,
+                          child: Text(
+                            'Status',
+                            textAlign: TextAlign.center,
+                            style: TextStyle(
+                              fontSize: 11,
+                              fontWeight: FontWeight.w600,
+                              color: Colors.grey[700],
                             ),
                           ),
                         ),
@@ -1248,11 +1282,12 @@ class _TicketPageState extends State<TicketPage> {
                           child: Row(
                             children: [
                               Expanded(
-                                flex: 1,
+                                flex: 3,
                                 child: Text(
                                   (bet.digits?.isNotEmpty ?? false)
                                       ? bet.digits!.join('-')
                                       : 'N/A',
+                                  textAlign: TextAlign.center,
                                   style: const TextStyle(
                                     fontSize: 12,
                                     color: Colors.black87,
@@ -1260,9 +1295,10 @@ class _TicketPageState extends State<TicketPage> {
                                 ),
                               ),
                               Expanded(
-                                flex: 2,
+                                flex: 3,
                                 child: Text(
-                                  '₱ ${(bet.totalBetAmount ?? 0).toStringAsFixed(2)}',
+                                  '₱${(bet.totalBetAmount ?? 0).toStringAsFixed(2)}',
+                                  textAlign: TextAlign.center,
                                   style: const TextStyle(
                                     fontSize: 12,
                                     fontWeight: FontWeight.w500,
@@ -1271,9 +1307,10 @@ class _TicketPageState extends State<TicketPage> {
                                 ),
                               ),
                               Expanded(
-                                flex: 1,
+                                flex: 2,
                                 child: Text(
                                   betType,
+                                  textAlign: TextAlign.center,
                                   style: TextStyle(
                                     fontSize: 11,
                                     color: Colors.grey[600],
@@ -1281,12 +1318,11 @@ class _TicketPageState extends State<TicketPage> {
                                 ),
                               ),
                               Expanded(
-                                flex: 1,
-                                child: Align(
-                                  alignment: Alignment.centerRight,
+                                flex: 3,
+                                child: Center(
                                   child: Container(
                                     padding: const EdgeInsets.symmetric(
-                                      horizontal: 6,
+                                      horizontal: 4,
                                       vertical: 2,
                                     ),
                                     decoration: BoxDecoration(
@@ -1297,6 +1333,7 @@ class _TicketPageState extends State<TicketPage> {
                                     ),
                                     child: Text(
                                       _getStatusLabel(bet.status ?? ''),
+                                      textAlign: TextAlign.center,
                                       style: TextStyle(
                                         fontSize: 10,
                                         fontWeight: FontWeight.w600,

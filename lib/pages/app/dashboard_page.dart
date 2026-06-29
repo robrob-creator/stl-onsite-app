@@ -18,33 +18,38 @@ class _DashboardPageState extends State<DashboardPage> {
   DrawResultsResponse? drawResults;
   bool isLoadingResults = false;
   bool _hasError = false;
+  Worker? _refreshWorker;
 
   @override
   void initState() {
     super.initState();
     lotteryController = Get.find<LotteryController>();
 
-    // Refresh draw results whenever bets change elsewhere in the app
-    ever(lotteryController.drawRefreshTick, (v) {
-      _fetchDrawResults();
+    // Refresh draw results whenever bets are submitted elsewhere in the app
+    _refreshWorker = ever(lotteryController.drawRefreshTick, (_) {
+      if (mounted) _fetchDrawResults();
     });
 
     _fetchDrawResults();
   }
 
+  @override
+  void dispose() {
+    _refreshWorker?.dispose();
+    super.dispose();
+  }
+
   Future<void> _fetchDrawResults() async {
+    if (!mounted) return;
     setState(() {
       isLoadingResults = true;
       _hasError = false;
     });
 
     try {
-      // Get the game ID based on selected tab
       final games = lotteryController.availableGames;
       if (games.isEmpty) {
-        setState(() {
-          isLoadingResults = false;
-        });
+        if (mounted) setState(() { isLoadingResults = false; });
         return;
       }
 
@@ -57,11 +62,13 @@ class _DashboardPageState extends State<DashboardPage> {
         drawDate: drawDate,
       );
 
+      if (!mounted) return;
       setState(() {
         drawResults = results;
         isLoadingResults = false;
       });
     } catch (e) {
+      if (!mounted) return;
       setState(() {
         isLoadingResults = false;
         _hasError = true;
@@ -364,15 +371,47 @@ class _DashboardPageState extends State<DashboardPage> {
             ],
           ),
           const SizedBox(height: 12),
-          // Status badge
-          Text(
-            _formatAmount(winningAmnt),
-            style: TextStyle(
-              fontSize: 12,
-              color: Colors.grey[700],
-              fontWeight: FontWeight.w500,
-            ),
+          // Gross Amount row — always shown from bet summary
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              Text(
+                'Gross Amt:',
+                style: TextStyle(fontSize: 12, color: Colors.grey[600]),
+              ),
+              Text(
+                _formatAmount(totalBet.toString()),
+                style: TextStyle(
+                  fontSize: 13,
+                  fontWeight: FontWeight.w700,
+                  color: totalBet > 0
+                      ? const Color(0xFF2563EB)
+                      : Colors.grey[500],
+                ),
+              ),
+            ],
           ),
+          // Prize payout — only shown when a draw result has been posted
+          if (winningAmnt != null && winningAmnt != '0') ...[
+            const SizedBox(height: 6),
+            Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              children: [
+                Text(
+                  'Prize:',
+                  style: TextStyle(fontSize: 12, color: Colors.grey[600]),
+                ),
+                Text(
+                  _formatAmount(winningAmnt),
+                  style: const TextStyle(
+                    fontSize: 12,
+                    fontWeight: FontWeight.w600,
+                    color: Color(0xFF10B981),
+                  ),
+                ),
+              ],
+            ),
+          ],
         ],
       ),
     );

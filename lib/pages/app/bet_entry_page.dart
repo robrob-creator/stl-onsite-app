@@ -89,6 +89,24 @@ class _BetEntryPageState extends State<BetEntryPage> {
   }
 
   /// Formats a number with comma separators, e.g. 1000 → "1,000"
+  List<String> _generatePermutations(List<String> digits) {
+    if (digits.isEmpty) return [];
+    final result = <String>{};
+    void permute(List<String> arr, int start) {
+      if (start == arr.length) { result.add(arr.join('-')); return; }
+      final seen = <String>{};
+      for (int i = start; i < arr.length; i++) {
+        if (seen.contains(arr[i])) continue;
+        seen.add(arr[i]);
+        final tmp = arr[start]; arr[start] = arr[i]; arr[i] = tmp;
+        permute(arr, start + 1);
+        arr[start] = arr[i]; arr[i] = tmp;
+      }
+    }
+    permute(List<String>.from(digits), 0);
+    return result.toList()..sort();
+  }
+
   String _formatNumber(double value) {
     final intVal = value.toInt();
     final str = intVal.toString();
@@ -1477,10 +1495,6 @@ class _BetEntryPageState extends State<BetEntryPage> {
                           rambolAmount: draft.rambleBetAmount ?? 0,
                           totalAmount: draft.totalBetAmount ?? 0,
                           estPayout: draft.estPayout ?? 0,
-                          onEdit: () {
-                            final controller = Get.find<LotteryController>();
-                            _showEditDialog(controller, idx, draft);
-                          },
                           onDelete: () => controller.removeBet(idx),
                         );
                       }).toList(),
@@ -1499,73 +1513,50 @@ class _BetEntryPageState extends State<BetEntryPage> {
                         DataColumn(label: Text('Digits')),
                         DataColumn(label: Text('Game')),
                         DataColumn(label: Text('Type')),
+                        DataColumn(label: Text('Permutations')),
                         DataColumn(label: Text('Target ₱'), numeric: true),
                         DataColumn(label: Text('Rambol ₱'), numeric: true),
                         DataColumn(label: Text('Total ₱'), numeric: true),
                         DataColumn(label: Text('Est. Payout'), numeric: true),
-                        DataColumn(label: Text('Action')),
+                        DataColumn(label: Text('Delete')),
                       ],
                       rows: controller.draftBets.asMap().entries.map((entry) {
                         final index = entry.key;
                         final draft = entry.value;
+                        final digits = List<String>.from(draft.digits ?? []);
+                        final isRambol = (draft.betType ?? '').contains('Rambol') || draft.betType == 'Both';
+                        final perms = isRambol ? _generatePermutations(digits) : <String>[];
                         return DataRow(
                           cells: [
                             DataCell(Text((index + 1).toString())),
-                            DataCell(
-                              Text(
-                                (draft.digits as List).join('-'),
-                              ),
-                            ),
+                            DataCell(Text(digits.join('-'))),
                             DataCell(Text(draft.gameName ?? '')),
                             DataCell(Text(draft.betType ?? '')),
                             DataCell(
-                              Text(
-                                (draft.straightBetAmount ?? 0).toStringAsFixed(
-                                  0,
-                                ),
-                              ),
+                              perms.isNotEmpty
+                                  ? Wrap(
+                                      spacing: 4,
+                                      children: perms.map((p) => Chip(
+                                        label: Text(p, style: const TextStyle(fontSize: 11, fontWeight: FontWeight.w700)),
+                                        backgroundColor: const Color(0xFFF5F3FF),
+                                        side: const BorderSide(color: Color(0xFFDDD6FE)),
+                                        padding: EdgeInsets.zero,
+                                        labelPadding: const EdgeInsets.symmetric(horizontal: 6),
+                                        visualDensity: VisualDensity.compact,
+                                      )).toList(),
+                                    )
+                                  : const Text('—'),
                             ),
-                            DataCell(
-                              Text(
-                                (draft.rambleBetAmount ?? 0).toStringAsFixed(0),
-                              ),
-                            ),
-                            DataCell(
-                              Text(
-                                (draft.totalBetAmount ?? 0).toStringAsFixed(0),
-                              ),
-                            ),
+                            DataCell(Text((draft.straightBetAmount ?? 0).toStringAsFixed(0))),
+                            DataCell(Text((draft.rambleBetAmount ?? 0).toStringAsFixed(0))),
+                            DataCell(Text((draft.totalBetAmount ?? 0).toStringAsFixed(0))),
                             DataCell(Text(_formatNumber(draft.estPayout ?? 0))),
                             DataCell(
-                              Row(
-                                mainAxisSize: MainAxisSize.min,
-                                children: [
-                                  IconButton(
-                                    icon: const Icon(
-                                      Icons.edit_rounded,
-                                      size: 18,
-                                      color: Color(0xFF2563EB),
-                                    ),
-                                    onPressed: () {
-                                      final controller =
-                                          Get.find<LotteryController>();
-                                      _showEditDialog(controller, index, draft);
-                                    },
-                                    padding: EdgeInsets.zero,
-                                    constraints: const BoxConstraints(),
-                                  ),
-                                  const SizedBox(width: 8),
-                                  IconButton(
-                                    icon: const Icon(
-                                      Icons.delete,
-                                      size: 18,
-                                      color: Color(0xFFC7472D),
-                                    ),
-                                    onPressed: () => ctrl.removeBet(index),
-                                    padding: EdgeInsets.zero,
-                                    constraints: const BoxConstraints(),
-                                  ),
-                                ],
+                              IconButton(
+                                icon: const Icon(Icons.delete, size: 18, color: Color(0xFFC7472D)),
+                                onPressed: () => ctrl.removeBet(index),
+                                padding: EdgeInsets.zero,
+                                constraints: const BoxConstraints(),
                               ),
                             ),
                           ],
