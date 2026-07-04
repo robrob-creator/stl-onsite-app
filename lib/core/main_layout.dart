@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:get/get.dart';
 import 'package:onstite/pages/app/eod_report_page.dart';
 import 'package:onstite/pages/app/summary_report_page.dart';
@@ -173,11 +174,40 @@ class _MainLayoutState extends State<MainLayout> {
                                   ),
                                 ),
                                 const SizedBox(height: 2),
-                                Text(
-                                  'IMEI No. ${authCtrl.imei.value.isNotEmpty ? authCtrl.imei.value : 'N/A'}',
-                                  style: const TextStyle(
-                                    fontSize: 13,
-                                    color: Color(0xFF888888),
+                                GestureDetector(
+                                  onTap: () {
+                                    final imei = authCtrl.imei.value;
+                                    if (imei.isNotEmpty) {
+                                      Clipboard.setData(ClipboardData(text: imei));
+                                      Get.snackbar(
+                                        'Copied',
+                                        'IMEI copied to clipboard',
+                                        snackPosition: SnackPosition.BOTTOM,
+                                        duration: const Duration(seconds: 2),
+                                      );
+                                    }
+                                  },
+                                  child: Row(
+                                    children: [
+                                      Flexible(
+                                        child: Text(
+                                          'IMEI No. ${authCtrl.imei.value.isNotEmpty ? authCtrl.imei.value : 'N/A'}',
+                                          style: const TextStyle(
+                                            fontSize: 13,
+                                            color: Color(0xFF888888),
+                                          ),
+                                        ),
+                                      ),
+                                      if (authCtrl.imei.value.isNotEmpty)
+                                        const Padding(
+                                          padding: EdgeInsets.only(left: 4),
+                                          child: Icon(
+                                            Icons.copy_rounded,
+                                            size: 13,
+                                            color: Color(0xFFAAAAAA),
+                                          ),
+                                        ),
+                                    ],
                                   ),
                                 ),
                               ],

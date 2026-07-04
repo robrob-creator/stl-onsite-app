@@ -155,28 +155,57 @@ class _ClaimPageState extends State<ClaimPage> {
           // Check if ticket is within 1 year validity period
           final isValid = _isTicketValidForClaim(ticketData);
 
-          if (isValid) {
-            // Store ticket data and show details dialog
-            setState(() {
-              _scannedTicketData = ticketData;
-              _showQRScanner = false;
-            });
-
-            // Show ticket details for verification
-            _showTicketDetailsForVerification(ticketData);
-          } else {
-            // Show error - ticket expired
+          if (!isValid) {
             _showErrorModal(
               'Ticket Expired',
               'This ticket is no longer valid for claiming. Tickets can only be claimed within one (1) year from the date of issuance.',
             );
-
-            // Resume camera for another scan
             if (mounted) {
-              setState(() {
-                _showQRScanner = true;
-              });
+              setState(() => _showQRScanner = true);
               controller?.resumeCamera();
+            }
+          } else {
+            // Gate on draw status before allowing claim
+            final ticketStatus = (ticketData['status'] as String? ?? '').toLowerCase();
+            final isVoided = ticketStatus == 'voided' || ticketStatus == 'void';
+            final isLost = ticketStatus == 'lost';
+            final isWon = ticketStatus == 'won';
+            final isPending = ticketStatus == 'pending' || ticketStatus == 'pending_void';
+
+            if (isVoided) {
+              _showErrorModal('Ticket Voided', 'This ticket has been voided and cannot be claimed.');
+              if (mounted) {
+                setState(() => _showQRScanner = true);
+                controller?.resumeCamera();
+              }
+            } else if (isLost) {
+              _showErrorModal('Not a Winner', 'This ticket did not win in the draw.');
+              if (mounted) {
+                setState(() => _showQRScanner = true);
+                controller?.resumeCamera();
+              }
+            } else if (isPending) {
+              _showErrorModal(
+                'Draw Not Yet Completed',
+                'The draw for this ticket has not yet taken place or results are not yet available. Please try again after the draw.',
+              );
+              if (mounted) {
+                setState(() => _showQRScanner = true);
+                controller?.resumeCamera();
+              }
+            } else if (isWon) {
+              setState(() {
+                _scannedTicketData = ticketData;
+                _showQRScanner = false;
+              });
+              _showTicketDetailsForVerification(ticketData);
+            } else {
+              // Unknown status — fall through to verification, backend will validate
+              setState(() {
+                _scannedTicketData = ticketData;
+                _showQRScanner = false;
+              });
+              _showTicketDetailsForVerification(ticketData);
             }
           }
         } else {

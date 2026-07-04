@@ -14,7 +14,7 @@ import '../../models/game.dart';
 import '../../widgets/lotto_number_input.dart';
 import '../../widgets/conflict_notice_modal.dart';
 import '../../widgets/batch_bet_choice_modal.dart';
-import '../../widgets/current_slip_card_compact.dart';
+import '../../widgets/current_slip_card.dart';
 
 /// Restricts typed numeric input to [min, max].
 /// Clears the field if the value exceeds max; does NOT clamp to min on typing
@@ -93,16 +93,23 @@ class _BetEntryPageState extends State<BetEntryPage> {
     if (digits.isEmpty) return [];
     final result = <String>{};
     void permute(List<String> arr, int start) {
-      if (start == arr.length) { result.add(arr.join('-')); return; }
+      if (start == arr.length) {
+        result.add(arr.join('-'));
+        return;
+      }
       final seen = <String>{};
       for (int i = start; i < arr.length; i++) {
         if (seen.contains(arr[i])) continue;
         seen.add(arr[i]);
-        final tmp = arr[start]; arr[start] = arr[i]; arr[i] = tmp;
+        final tmp = arr[start];
+        arr[start] = arr[i];
+        arr[i] = tmp;
         permute(arr, start + 1);
-        arr[start] = arr[i]; arr[i] = tmp;
+        arr[start] = arr[i];
+        arr[i] = tmp;
       }
     }
+
     permute(List<String>.from(digits), 0);
     return result.toList()..sort();
   }
@@ -1462,142 +1469,148 @@ class _BetEntryPageState extends State<BetEntryPage> {
 
               const SizedBox(height: 24),
 
-              // Bet List Table (responsive)
+              // Bet List
               GetBuilder<LotteryController>(
                 builder: (ctrl) {
-                  if (controller.draftBets.isEmpty) {
-                    return SizedBox(
+                  if (ctrl.draftBets.isEmpty) {
+                    return Container(
                       height: 100,
-                      child: Center(
-                        child: Text(
-                          'No bets added yet',
-                          style: TextStyle(color: Colors.grey[400]),
-                        ),
+                      alignment: Alignment.center,
+                      child: Text(
+                        'No bets added yet',
+                        style: TextStyle(color: Colors.grey[400], fontSize: 14),
                       ),
                     );
                   }
 
-                  final screenWidth = MediaQuery.of(context).size.width;
-
-                  // Narrow screens: simplified CurrentSlipCard list
-                  if (screenWidth < 600) {
-                    return Column(
-                      mainAxisSize: MainAxisSize.min,
-                      children: controller.draftBets.asMap().entries.map((e) {
-                        final idx = e.key;
-                        final draft = e.value;
-                        return CurrentSlipCard(
-                          index: idx,
-                          digits: List<String>.from(draft.digits as List),
-                          gameName: draft.gameName ?? '',
-                          betType: draft.betType ?? '',
-                          straightAmount: draft.straightBetAmount ?? 0,
-                          rambolAmount: draft.rambleBetAmount ?? 0,
-                          totalAmount: draft.totalBetAmount ?? 0,
-                          estPayout: draft.estPayout ?? 0,
-                          onDelete: () => controller.removeBet(idx),
-                        );
-                      }).toList(),
-                    );
-                  }
-
-                  // Wide screens: DataTable with horizontal scroll
-                  return SingleChildScrollView(
-                    scrollDirection: Axis.horizontal,
-                    child: DataTable(
-                      columnSpacing: 12,
-                      headingRowHeight: 48,
-                      dataRowHeight: 56,
-                      columns: [
-                        DataColumn(label: Text('#')),
-                        DataColumn(label: Text('Digits')),
-                        DataColumn(label: Text('Game')),
-                        DataColumn(label: Text('Type')),
-                        DataColumn(label: Text('Permutations')),
-                        DataColumn(label: Text('Target ₱'), numeric: true),
-                        DataColumn(label: Text('Rambol ₱'), numeric: true),
-                        DataColumn(label: Text('Total ₱'), numeric: true),
-                        DataColumn(label: Text('Est. Payout'), numeric: true),
-                        DataColumn(label: Text('Delete')),
-                      ],
-                      rows: controller.draftBets.asMap().entries.map((entry) {
-                        final index = entry.key;
-                        final draft = entry.value;
-                        final digits = List<String>.from(draft.digits ?? []);
-                        final isRambol = (draft.betType ?? '').contains('Rambol') || draft.betType == 'Both';
-                        final perms = isRambol ? _generatePermutations(digits) : <String>[];
-                        return DataRow(
-                          cells: [
-                            DataCell(Text((index + 1).toString())),
-                            DataCell(Text(digits.join('-'))),
-                            DataCell(Text(draft.gameName ?? '')),
-                            DataCell(Text(draft.betType ?? '')),
-                            DataCell(
-                              perms.isNotEmpty
-                                  ? Wrap(
-                                      spacing: 4,
-                                      children: perms.map((p) => Chip(
-                                        label: Text(p, style: const TextStyle(fontSize: 11, fontWeight: FontWeight.w700)),
-                                        backgroundColor: const Color(0xFFF5F3FF),
-                                        side: const BorderSide(color: Color(0xFFDDD6FE)),
-                                        padding: EdgeInsets.zero,
-                                        labelPadding: const EdgeInsets.symmetric(horizontal: 6),
-                                        visualDensity: VisualDensity.compact,
-                                      )).toList(),
-                                    )
-                                  : const Text('—'),
+                  return Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      // Header: "Your Bets · N  /  Clear all"
+                      Padding(
+                        padding: const EdgeInsets.only(bottom: 12),
+                        child: Row(
+                          children: [
+                            RichText(
+                              text: TextSpan(
+                                children: [
+                                  const TextSpan(
+                                    text: 'Your Bets',
+                                    style: TextStyle(
+                                      fontSize: 15,
+                                      fontWeight: FontWeight.w800,
+                                      color: Color(0xFF0F172A),
+                                    ),
+                                  ),
+                                  TextSpan(
+                                    text: ' · ${ctrl.draftBets.length}',
+                                    style: const TextStyle(
+                                      fontSize: 15,
+                                      fontWeight: FontWeight.w500,
+                                      color: Color(0xFF94A3B8),
+                                    ),
+                                  ),
+                                ],
+                              ),
                             ),
-                            DataCell(Text((draft.straightBetAmount ?? 0).toStringAsFixed(0))),
-                            DataCell(Text((draft.rambleBetAmount ?? 0).toStringAsFixed(0))),
-                            DataCell(Text((draft.totalBetAmount ?? 0).toStringAsFixed(0))),
-                            DataCell(Text(_formatNumber(draft.estPayout ?? 0))),
-                            DataCell(
-                              IconButton(
-                                icon: const Icon(Icons.delete, size: 18, color: Color(0xFFC7472D)),
-                                onPressed: () => ctrl.removeBet(index),
-                                padding: EdgeInsets.zero,
-                                constraints: const BoxConstraints(),
+                            const Spacer(),
+                            GestureDetector(
+                              onTap: () => ctrl.clearDraftBets(),
+                              child: const Text(
+                                'Clear all',
+                                style: TextStyle(
+                                  fontSize: 13,
+                                  fontWeight: FontWeight.w600,
+                                  color: Color(0xFF5050C8),
+                                ),
                               ),
                             ),
                           ],
+                        ),
+                      ),
+                      // Cards
+                      ...ctrl.draftBets.asMap().entries.map((e) {
+                        final idx = e.key;
+                        final draft = e.value;
+                        return CurrentSlipCard(
+                          key: ValueKey(
+                            draft.id.isNotEmpty ? draft.id : 'draft_$idx',
+                          ),
+                          index: idx,
+                          digits: List<String>.from(draft.digits),
+                          gameName: draft.gameName,
+                          betType: draft.betType,
+                          straightAmount: draft.straightBetAmount,
+                          rambolAmount: draft.rambleBetAmount,
+                          totalAmount: draft.totalBetAmount,
+                          estPayout: draft.estPayout,
+                          drawTimeLabel: draft.drawTimeLabel,
+                          onDelete: () => ctrl.removeBet(idx),
                         );
-                      }).toList(),
-                    ),
+                      }),
+                    ],
                   );
                 },
               ),
 
-              const SizedBox(height: 24),
+              const SizedBox(height: 16),
 
-              // Totals Section
+              // Totals footer
               GetBuilder<LotteryController>(
-                builder: (ctrl) => Container(
-                  padding: const EdgeInsets.all(16),
-                  decoration: BoxDecoration(
-                    color: Colors.grey[50],
-                    borderRadius: BorderRadius.circular(8),
-                  ),
-                  child: Row(
-                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                    children: [
-                      Text(
-                        'Total Bets: ${ctrl.draftBets.length}',
-                        style: const TextStyle(
-                          fontSize: 14,
-                          fontWeight: FontWeight.w500,
+                builder: (ctrl) {
+                  if (ctrl.draftBets.isEmpty) return const SizedBox.shrink();
+                  final total = ctrl.draftBets.fold<double>(
+                    0,
+                    (sum, d) => sum + d.totalBetAmount,
+                  );
+                  return Container(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 16,
+                      vertical: 14,
+                    ),
+                    decoration: BoxDecoration(
+                      color: const Color(0xFFF8F9FA),
+                      borderRadius: BorderRadius.circular(12),
+                    ),
+                    child: Row(
+                      children: [
+                        Text(
+                          'Total Bets: ${ctrl.draftBets.length}',
+                          style: const TextStyle(
+                            fontSize: 14,
+                            fontWeight: FontWeight.w700,
+                            color: Color(0xFF0F172A),
+                          ),
                         ),
-                      ),
-                      Text(
-                        'Total: ₱ ${ctrl.draftBets.fold<double>(0, (prev, draft) => prev + draft.totalBetAmount).toStringAsFixed(2)}',
-                        style: const TextStyle(
-                          fontSize: 14,
-                          fontWeight: FontWeight.bold,
-                          color: Color(0xFF2563EB),
+                        const Spacer(),
+                        Column(
+                          crossAxisAlignment: CrossAxisAlignment.end,
+                          children: [
+                            const Text(
+                              'TOTAL AMOUNT',
+                              style: TextStyle(
+                                fontSize: 10,
+                                fontWeight: FontWeight.w700,
+                                color: Color(0xFF94A3B8),
+                                letterSpacing: 0.5,
+                              ),
+                            ),
+                            const SizedBox(height: 2),
+                            Text(
+                              '₱${total.toStringAsFixed(0)}',
+                              style: const TextStyle(
+                                fontSize: 22,
+                                fontWeight: FontWeight.w800,
+                                color: Color(0xFF3B4FFF),
+                                letterSpacing: -0.5,
+                              ),
+                            ),
+                          ],
                         ),
-                      ),
-                    ],
-                  ),
-                ),
+                      ],
+                    ),
+                  );
+                },
               ),
 
               const SizedBox(height: 24),

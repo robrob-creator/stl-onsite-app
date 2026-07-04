@@ -54,22 +54,28 @@ class BetEntry {
 class DraftBet {
   final String id;
   final String gameName;
+  final String gameId;
   final List<String> digits;
   final double straightBetAmount;
   final double rambleBetAmount;
   final double totalBetAmount;
   final double estPayout;
   final int combinations;
+  final String drawTimeLabel;
+  final String drawTimeId;
 
   DraftBet({
     required this.id,
     required this.gameName,
+    this.gameId = '',
     required this.digits,
     required this.straightBetAmount,
     required this.rambleBetAmount,
     required this.totalBetAmount,
     required this.estPayout,
     required this.combinations,
+    this.drawTimeLabel = '',
+    this.drawTimeId = '',
   });
 
   String get betType {
@@ -242,6 +248,11 @@ class LotteryController extends GetxController {
     update();
   }
 
+  void clearDraftBets() {
+    draftBets.clear();
+    update();
+  }
+
   /// Sends the current bet inputs to `POST /bets/draft-bulk` and appends
   /// the returned draft to [draftBets]. Returns `true` on success.
   Future<bool> addBet() async {
@@ -298,6 +309,9 @@ class LotteryController extends GetxController {
     try {
       final token = Get.find<AuthController>().token.value;
       final drawId = selectedTime.value;
+      final selectedDt = currentDrawTimes.cast<DrawTime?>().firstWhere(
+        (dt) => dt?.id == drawId, orElse: () => null);
+      final drawTimeLabel = selectedDt?.getFormattedTime() ?? '';
       final clusterId = game.clusters.isNotEmpty ? game.clusters[0].id : '';
       final combinations = calculateCombinations(selectedNumbers);
       final digits = List<String>.from(selectedNumbers);
@@ -356,6 +370,7 @@ class LotteryController extends GetxController {
       final responseData = jsonDecode(response.body) as Map<String, dynamic>;
       final betsJson = (responseData['data'] as List?) ?? [];
 
+      final currentDrawId = selectedTime.value;
       if (betsJson.isEmpty) {
         // Fallback: build placeholder drafts from local intent so the user
         // can still see and submit what they added.
@@ -364,12 +379,15 @@ class LotteryController extends GetxController {
             DraftBet(
               id: '',
               gameName: game.name,
+              gameId: game.id,
               digits: digits,
               straightBetAmount: straightAmount,
               rambleBetAmount: 0,
               totalBetAmount: straightAmount,
               estPayout: straightAmount * game.straightMultiplier,
               combinations: combinations,
+              drawTimeLabel: drawTimeLabel,
+              drawTimeId: currentDrawId,
             ),
           );
         }
@@ -378,6 +396,7 @@ class LotteryController extends GetxController {
             DraftBet(
               id: '',
               gameName: game.name,
+              gameId: game.id,
               digits: digits,
               straightBetAmount: 0,
               rambleBetAmount: rambleAmount,
@@ -385,13 +404,12 @@ class LotteryController extends GetxController {
               estPayout:
                   (rambleAmount / combinations) * (game.rambleMultiplier ?? 0),
               combinations: combinations,
+              drawTimeLabel: drawTimeLabel,
+              drawTimeId: currentDrawId,
             ),
           );
         }
       } else {
-        // Map each returned bet to a DraftBet.
-        // The server sends back one record per item we submitted so the
-        // count should match betItems.length, but we iterate what we get.
         for (final betJson in betsJson) {
           final serverStraight = (betJson['straight_bet_amount'] as num? ?? 0)
               .toDouble();
@@ -402,9 +420,7 @@ class LotteryController extends GetxController {
           final serverEstPayout = (betJson['est_payout'] as num? ?? 0)
               .toDouble();
 
-          // Parse digits from the server response (may be a JSON list or
-          // PostgreSQL-array literal like "{25,17}").
-          List<String> serverDigits = digits; // default to what we sent
+          List<String> serverDigits = digits;
           final rawDigits = betJson['digits'];
           if (rawDigits is List) {
             serverDigits = List<String>.from(rawDigits);
@@ -421,12 +437,15 @@ class LotteryController extends GetxController {
             DraftBet(
               id: betJson['id'] as String? ?? '',
               gameName: game.name,
+              gameId: game.id,
               digits: serverDigits,
               straightBetAmount: serverStraight,
               rambleBetAmount: serverRamble,
               totalBetAmount: serverTotal,
               estPayout: serverEstPayout,
               combinations: combinations,
+              drawTimeLabel: drawTimeLabel,
+              drawTimeId: currentDrawId,
             ),
           );
         }
@@ -893,7 +912,6 @@ class LotteryController extends GetxController {
         return;
       }
 
-      final drawId = selectedTime.value;
       final token = authController.token.value;
 
       final clusterId = game.clusters.isNotEmpty ? game.clusters[0].id : '';
@@ -901,110 +919,120 @@ class LotteryController extends GetxController {
           ? game.clusters[0].id.substring(0, 3).toUpperCase()
           : 'UNK';
 
-      final now = ManilaTime.now();
-      final uniqueTimestamp =
-          '${now.hour.toString().padLeft(2, '0')}${now.minute.toString().padLeft(2, '0')}${now.second.toString().padLeft(2, '0')}${now.millisecond.toString().padLeft(3, '0')}';
-      final batchTicketNo =
-          'TKT-$clusterCode-${now.year}-${now.month.toString().padLeft(2, '0')}-${now.day.toString().padLeft(2, '0')}-$uniqueTimestamp';
-
-      // Collect unique draft bet IDs (exclude empty-id fallback entries)
-      final betIds = draftBets
-          .map((d) => d.id)
-          .where((id) => id.isNotEmpty)
-          .toSet()
-          .toList();
-
-      final payload = {
-        'bet_ids': betIds,
-        'ticket_no': batchTicketNo,
-        'draw_id': drawId,
-        'cluster_id': clusterId,
-        'payment_method': 'cash',
-      };
-
-      final response = await http
-          .post(
-            Uri.parse('${AppConstants.apiBaseUrl}/bets/submit-draft'),
-            headers: {
-              'Content-Type': 'application/json',
-              'Authorization': 'Bearer $token',
-            },
-            body: jsonEncode(payload),
-          )
-          .timeout(const Duration(seconds: 30));
-
-      if (response.statusCode != 200 && response.statusCode != 201) {
-        _handleBetError(response, 0);
-        return;
+      // Group draft bets by draw time — each group prints as a separate ticket
+      final groups = <String, List<DraftBet>>{};
+      for (final draft in draftBets) {
+        final key = draft.drawTimeId.isNotEmpty ? draft.drawTimeId : selectedTime.value;
+        groups.putIfAbsent(key, () => []).add(draft);
       }
 
-      final responseBody = jsonDecode(response.body);
-      final responseData = responseBody['data'] as Map<String, dynamic>? ?? {};
-      final teller = responseData['teller'] as Map<String, dynamic>? ?? {};
-      final responseBalance =
-          (teller['balance'] as num?)?.toDouble() ??
-          (responseData['balance'] as num?)?.toDouble();
-      if (responseBalance != null) {
-        balance.value = responseBalance;
-        authController.updateCurrentUserBalance(responseBalance);
-      }
-      final ticketNo = responseData['batch_id'] as String? ?? batchTicketNo;
+      Map<String, dynamic> lastTeller = {};
+      double? lastBalance;
 
-      final totalAmount = draftBets.fold<double>(
-        0,
-        (prev, draft) => prev + draft.totalBetAmount,
-      );
+      for (final entry in groups.entries) {
+        final groupDrawId = entry.key;
+        final groupBets = entry.value;
 
-      // Capture context before clearing state
-      final gameName = game.name;
-      final selectedDt = currentDrawTimes.cast<DrawTime?>().firstWhere(
-        (d) => d?.id == selectedTime.value,
-        orElse: () => null,
-      );
-      final drawTimeLabel = selectedDt?.getFormattedTime() ?? '';
+        final now = ManilaTime.now();
+        final uniqueTimestamp =
+            '${now.hour.toString().padLeft(2, '0')}${now.minute.toString().padLeft(2, '0')}${now.second.toString().padLeft(2, '0')}${now.millisecond.toString().padLeft(3, '0')}';
+        final batchTicketNo =
+            'TKT-$clusterCode-${now.year}-${now.month.toString().padLeft(2, '0')}-${now.day.toString().padLeft(2, '0')}-$uniqueTimestamp';
 
-      // Convert DraftBet entries to BetEntry for printing
-      final printEntries = draftBets.expand((draft) {
-        final entries = <BetEntry>[];
-        if (draft.straightBetAmount > 0) {
-          entries.add(
-            BetEntry(
+        final betIds = groupBets
+            .map((d) => d.id)
+            .where((id) => id.isNotEmpty)
+            .toSet()
+            .toList();
+
+        final payload = {
+          'bet_ids': betIds,
+          'ticket_no': batchTicketNo,
+          'draw_id': groupDrawId,
+          'cluster_id': clusterId,
+          'payment_method': 'cash',
+        };
+
+        final response = await http
+            .post(
+              Uri.parse('${AppConstants.apiBaseUrl}/bets/submit-draft'),
+              headers: {
+                'Content-Type': 'application/json',
+                'Authorization': 'Bearer $token',
+              },
+              body: jsonEncode(payload),
+            )
+            .timeout(const Duration(seconds: 30));
+
+        if (response.statusCode != 200 && response.statusCode != 201) {
+          _handleBetError(response, 0);
+          return;
+        }
+
+        final responseBody = jsonDecode(response.body);
+        final responseData = responseBody['data'] as Map<String, dynamic>? ?? {};
+        final teller = responseData['teller'] as Map<String, dynamic>? ?? {};
+        final responseBalance =
+            (teller['balance'] as num?)?.toDouble() ??
+            (responseData['balance'] as num?)?.toDouble();
+        if (responseBalance != null) {
+          lastBalance = responseBalance;
+        }
+        lastTeller = teller;
+
+        final ticketNo = responseData['batch_id'] as String? ?? batchTicketNo;
+        final groupTotal = groupBets.fold<double>(0, (s, d) => s + d.totalBetAmount);
+
+        // Resolve draw time label for this group
+        final groupDt = currentDrawTimes.cast<DrawTime?>().firstWhere(
+          (d) => d?.id == groupDrawId, orElse: () => null);
+        final groupDrawTimeLabel = groupBets.isNotEmpty && groupBets[0].drawTimeLabel.isNotEmpty
+            ? groupBets[0].drawTimeLabel
+            : (groupDt?.getFormattedTime() ?? '');
+
+        final groupGameName = groupBets.isNotEmpty ? groupBets[0].gameName : game.name;
+
+        final printEntries = groupBets.expand((draft) {
+          final entries = <BetEntry>[];
+          if (draft.straightBetAmount > 0) {
+            entries.add(BetEntry(
               betNumber: 0,
               game: draft.gameName,
               straightBetAmount: draft.straightBetAmount,
               rambleBetAmount: 0,
-              winAmount: draft.straightBetAmount * (game.straightMultiplier),
+              winAmount: draft.straightBetAmount * game.straightMultiplier,
               digits: List<String>.from(draft.digits),
               combinations: draft.combinations,
-            ),
-          );
-        }
-        if (draft.rambleBetAmount > 0) {
-          entries.add(
-            BetEntry(
+            ));
+          }
+          if (draft.rambleBetAmount > 0) {
+            entries.add(BetEntry(
               betNumber: 0,
               game: draft.gameName,
               straightBetAmount: 0,
               rambleBetAmount: draft.rambleBetAmount,
-              winAmount:
-                  (draft.rambleBetAmount / draft.combinations) *
-                  (game.rambleMultiplier ?? 0),
+              winAmount: (draft.rambleBetAmount / draft.combinations) * (game.rambleMultiplier ?? 0),
               digits: List<String>.from(draft.digits),
               combinations: draft.combinations,
-            ),
-          );
-        }
-        return entries;
-      }).toList();
+            ));
+          }
+          return entries;
+        }).toList();
 
-      _triggerPrint(
-        betEntries: printEntries,
-        totalAmount: totalAmount,
-        ticketNo: ticketNo,
-        teller: teller,
-        gameName: gameName,
-        drawTimeLabel: drawTimeLabel,
-      );
+        _triggerPrint(
+          betEntries: printEntries,
+          totalAmount: groupTotal,
+          ticketNo: ticketNo,
+          teller: lastTeller,
+          gameName: groupGameName,
+          drawTimeLabel: groupDrawTimeLabel,
+        );
+      }
+
+      if (lastBalance != null) {
+        balance.value = lastBalance!;
+        authController.updateCurrentUserBalance(lastBalance!);
+      }
 
       await loadProfile();
 

@@ -26,11 +26,13 @@ class TicketService {
     return 'Request failed with status ${response.statusCode}';
   }
 
-  /// Fetch tickets with optional search by ticket number, status filter, and draw date
+  /// Fetch tickets with optional search, status filter, and date range
   static Future<List<Ticket>> fetchTickets({
     String? ticketNo,
     String? status,
     String? drawDate,
+    String? dateFrom,
+    String? dateTo,
   }) async {
     try {
       final authCtrl = Get.find<AuthController>();
@@ -45,9 +47,13 @@ class TicketService {
       if (status != null && status.isNotEmpty) {
         queryParams['status'] = status;
       }
-      if (drawDate != null && drawDate.isNotEmpty) {
-        // backend expects YYYY-MM-DD
+      if (dateFrom != null && dateFrom.isNotEmpty) {
+        queryParams['date_from'] = dateFrom;
+      } else if (drawDate != null && drawDate.isNotEmpty) {
         queryParams['draw_date'] = drawDate;
+      }
+      if (dateTo != null && dateTo.isNotEmpty) {
+        queryParams['date_to'] = dateTo;
       }
 
       final uriWithQuery = queryParams.isNotEmpty

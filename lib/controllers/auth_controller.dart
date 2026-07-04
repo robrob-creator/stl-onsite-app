@@ -10,10 +10,12 @@ import '../models/login_response.dart';
 import '../core/app_constants.dart';
 import '../core/services/websocket_service.dart';
 import '../models/user.dart';
+import 'lottery_controller.dart';
 
 class AuthController extends GetxController {
   final RxString phoneNumber = ''.obs;
   final RxString imei = ''.obs;
+  final RxString deviceImei = ''.obs; // hardware IMEI, never overwritten
   final RxString mpin = ''.obs;
   final RxBool isLoading = false.obs;
   final Rx<User?> currentUser = Rx<User?>(null);
@@ -47,6 +49,7 @@ class AuthController extends GetxController {
       final imeiValue = await _getDeviceImei();
       if (imeiValue.isNotEmpty) {
         imei.value = imeiValue;
+        deviceImei.value = imeiValue;
         print('✓ Device IMEI: $imeiValue');
       } else {
         print('⚠ Warning: Could not retrieve device IMEI');
@@ -74,6 +77,10 @@ class AuthController extends GetxController {
       }
     }
   }
+
+  void setCustomImei(String value) => imei.value = value.trim();
+  void resetToDeviceImei() => imei.value = deviceImei.value;
+  bool get isUsingCustomImei => imei.value != deviceImei.value;
 
   /// Restore user session from secure storage if available
   Future<void> restoreSession() async {
@@ -324,6 +331,12 @@ class AuthController extends GetxController {
         colorText: Colors.white,
         duration: const Duration(seconds: 5),
       );
+      // Refresh balance and gross sales now that void is approved
+      try {
+        final lc = Get.find<LotteryController>();
+        lc.loadProfile();
+        lc.drawRefreshTick.value = lc.drawRefreshTick.value + 1;
+      } catch (_) {}
     });
 
     wsService.on('bet.placed', (payload) {

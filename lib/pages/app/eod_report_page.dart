@@ -45,6 +45,7 @@ class _EodReportPageState extends State<EodReportPage> {
       _wsUnsubscribers.add(ws.on('bet.bulk_placed', (_) => _refreshReport()));
       _wsUnsubscribers.add(ws.on('claim.paid', (_) => _refreshReport()));
       _wsUnsubscribers.add(ws.on('bet.submitted', (_) => _refreshReport()));
+      _wsUnsubscribers.add(ws.on('ticket.voided', (_) => _refreshReport()));
 
       // Wildcard listener: inspect the augmented payload's `_eventType` and
       // refresh when it looks like a transaction/bet/claim event.

@@ -8,9 +8,13 @@ class TicketController extends GetxController {
   final RxBool isLoading = false.obs;
   final RxBool hasError = false.obs;
   final RxString selectedStatus = 'Tickets'.obs;
+  final RxInt activeTabCount = 0.obs;
+  final RxInt voidTabCount = 0.obs;
   final RxString searchQuery = ''.obs;
-  // selectedDate defaults to local today in YYYY-MM-DD format
   final RxString selectedDate = DateTime.now().toLocal().toIso8601String().substring(0,10).obs;
+  // Date range filter (YYYY-MM-DD); defaults to today
+  final RxString dateFrom = DateTime.now().toLocal().toIso8601String().substring(0,10).obs;
+  final RxString dateTo   = DateTime.now().toLocal().toIso8601String().substring(0,10).obs;
 
   @override
   void onInit() {
@@ -60,7 +64,8 @@ class TicketController extends GetxController {
       final result = await TicketService.fetchTickets(
         ticketNo: searchQuery.value.isNotEmpty ? searchQuery.value : null,
         status: statusFilter,
-        drawDate: isSearch ? null : (selectedDate.value.isNotEmpty ? selectedDate.value : null),
+        dateFrom: isSearch ? null : (dateFrom.value.isNotEmpty ? dateFrom.value : null),
+        dateTo:   isSearch ? null : (dateTo.value.isNotEmpty   ? dateTo.value   : null),
       );
       // Sort: pending_void first
       result.sort((a, b) {
@@ -71,6 +76,11 @@ class TicketController extends GetxController {
         return 0;
       });
       tickets.value = result;
+      if (selectedStatus.value == 'Void') {
+        voidTabCount.value = result.length;
+      } else {
+        activeTabCount.value = result.length;
+      }
     } catch (_) {
       hasError.value = true;
     } finally {
@@ -81,6 +91,24 @@ class TicketController extends GetxController {
   /// Update the active date filter (expects YYYY-MM-DD) and refresh tickets
   void setDate(String yyyyMmDd) {
     selectedDate.value = yyyyMmDd;
+    dateFrom.value = yyyyMmDd;
+    dateTo.value = yyyyMmDd;
+    fetchTickets();
+  }
+
+  /// Update date range filter and refresh
+  void setDateRange(String from, String to) {
+    dateFrom.value = from;
+    dateTo.value = to;
+    selectedDate.value = from;
+    fetchTickets();
+  }
+
+  /// Clear date filter (show all dates)
+  void clearDateFilter() {
+    dateFrom.value = '';
+    dateTo.value = '';
+    selectedDate.value = '';
     fetchTickets();
   }
 

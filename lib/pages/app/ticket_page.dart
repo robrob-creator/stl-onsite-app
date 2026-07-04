@@ -2,15 +2,30 @@ import 'package:flutter/material.dart';
 import 'package:flutter/foundation.dart';
 import 'dart:async';
 import 'package:get/get.dart';
-import 'package:onstite/core/services/printer_service.dart';
 import 'package:qr_code_scanner_plus/qr_code_scanner_plus.dart';
 import 'package:permission_handler/permission_handler.dart';
-import '../../core/design_system.dart';
 import '../../core/services/ticket_service.dart';
 import '../../core/services/void_setup_service.dart';
 import '../../core/services/reprint_setup_service.dart';
 import '../../models/ticket.dart';
 import '../../controllers/ticket_controller.dart';
+
+// ── palette ──────────────────────────────────────────────────────────────────
+const _blue = Color(0xFF2563EB);
+const _blueD = Color(0xFF1E40AF);
+const _blueL = Color(0xFFEAF0FC);
+const _green = Color(0xFF059669);
+const _greenL = Color(0xFFECFDF5);
+const _red = Color(0xFFDC2626);
+const _redL = Color(0xFFFEF2F2);
+const _ink = Color(0xFF0F172A);
+const _ink2 = Color(0xFF1F2937);
+const _muted = Color(0xFF6B7280);
+const _muted2 = Color(0xFF94A3B8);
+const _faint = Color(0xFFCBD5E1);
+const _border = Color(0xFFE5E7EB);
+const _hair = Color(0xFFF1F5F9);
+const _bg = Color(0xFFF4F5F7);
 
 class TicketPage extends StatefulWidget {
   const TicketPage({super.key});
@@ -23,75 +38,123 @@ class _TicketPageState extends State<TicketPage> {
   late final TicketController _ctrl;
   final TextEditingController _searchController = TextEditingController();
   Timer? _debounceTimer;
-  bool showDetails = false;
-  QRViewController? controller;
-  final GlobalKey qrKey = GlobalKey(debugLabel: 'QR');
-  bool _showQRScanner = false;
-
   Timer? _clockTimer;
   VoidSetupItem? _activeVoidSetup;
   ReprintSetupItem? _activeReprintSetup;
 
-  // Search focus and activation state for compact mobile UX
+  // QR
+  QRViewController? _qrCtrl;
+  final GlobalKey _qrKey = GlobalKey(debugLabel: 'QR');
+  bool _showQRScanner = false;
+
+  // Date range popover
+  bool _datePopOpen = false;
+  bool _dateExplicitlySet = false;
+  String _dateFromInput = '';
+  String _dateToInput = '';
+  static const _presets = [
+    ('Today', 0, 0),
+    ('Yesterday', -1, -1),
+    ('This week', -6, 0),
+  ];
+
+  // Expanded cards (ticket id → bool)
+  final Set<String> _expandedCards = {};
+
+  // Search focus
+  bool _searchFocused = false;
   final FocusNode _searchFocusNode = FocusNode();
-  bool _isSearchActive = false;
 
   @override
   void initState() {
     super.initState();
     _ctrl = Get.put(TicketController());
     _searchController.addListener(_onSearchChanged);
-
-    // When search loses focus, collapse back to compact header
     _searchFocusNode.addListener(() {
-      if (!_searchFocusNode.hasFocus && mounted) {
-        setState(() {
-          _isSearchActive = false;
-        });
-      }
+      if (mounted) setState(() => _searchFocused = _searchFocusNode.hasFocus);
     });
-
-    // Start a lightweight timer to refresh countdowns/expiry UI every second.
     _clockTimer = Timer.periodic(const Duration(seconds: 1), (_) {
       if (mounted) setState(() {});
     });
-
-    // Fetch admin-configured void setup (if any) and store locally
     VoidSetupService.fetchActiveVoidSetup()
-        .then((item) {
-          if (mounted && item != null) {
-            setState(() {
-              _activeVoidSetup = item;
-            });
-          }
+        .then((v) {
+          if (mounted && v != null) setState(() => _activeVoidSetup = v);
+        })
+        .catchError((_) {});
+    ReprintSetupService.fetchActiveReprintSetup()
+        .then((v) {
+          if (mounted && v != null) setState(() => _activeReprintSetup = v);
         })
         .catchError((_) {});
 
-    // Fetch admin-configured reprint setup to validate reprint requests
-    ReprintSetupService.fetchActiveReprintSetup()
-        .then((item) {
-          if (mounted && item != null) {
-            setState(() {
-              _activeReprintSetup = item;
-            });
-          }
-        })
-        .catchError((_) {});
+    // init date inputs to match controller
+    _dateFromInput = _ctrl.dateFrom.value;
+    _dateToInput = _ctrl.dateTo.value;
   }
+
+  @override
+  void dispose() {
+    _clockTimer?.cancel();
+    _debounceTimer?.cancel();
+    _searchController.dispose();
+    _searchFocusNode.dispose();
+    _qrCtrl?.dispose();
+    Get.delete<TicketController>();
+    super.dispose();
+  }
+
+  @override
+  void reassemble() {
+    super.reassemble();
+    if (_qrCtrl != null) {
+      if (defaultTargetPlatform == TargetPlatform.android) {
+        _qrCtrl!.pauseCamera();
+      } else {
+        _qrCtrl!.resumeCamera();
+      }
+    }
+  }
+
+  // ── helpers ────────────────────────────────────────────────────────────────
 
   void _onSearchChanged() {
     _debounceTimer?.cancel();
-    _debounceTimer = Timer(const Duration(milliseconds: 500), () {
+    _debounceTimer = Timer(const Duration(milliseconds: 400), () {
       _ctrl.fetchTickets(_searchController.text);
     });
   }
 
-  String _formatDate(String? dateStr) {
-    if (dateStr == null || dateStr.isEmpty) return 'N/A';
+  String _today() =>
+      DateTime.now().toLocal().toIso8601String().substring(0, 10);
+
+  String _addDays(int n) {
+    final d = DateTime.now().toLocal().add(Duration(days: n));
+    return d.toIso8601String().substring(0, 10);
+  }
+
+  String _shortId(String? id) {
+    if (id == null || id.isEmpty) return '—';
+    final parts = id.split('-');
+    if (parts.length < 2) return id;
+    final head = parts.take(2).join('-');
+    final tail = parts.last.length >= 4
+        ? parts.last.substring(parts.last.length - 4)
+        : parts.last;
+    return '$head…$tail';
+  }
+
+  String _fmtDateLabel() {
+    final f = _ctrl.dateFrom.value;
+    final t = _ctrl.dateTo.value;
+    if (f.isEmpty && t.isEmpty) return 'All dates';
+    if (f == t) return _fmtShort(f);
+    return '${_fmtShort(f)} – ${_fmtShort(t)}';
+  }
+
+  String _fmtShort(String iso) {
     try {
-      final utcDate = DateTime.parse(dateStr);
-      final localDate = utcDate.toLocal();
-      final months = [
+      final d = DateTime.parse('${iso}T00:00:00');
+      const months = [
         'Jan',
         'Feb',
         'Mar',
@@ -105,123 +168,59 @@ class _TicketPageState extends State<TicketPage> {
         'Nov',
         'Dec',
       ];
-      int hour = localDate.hour;
-      final minute = localDate.minute.toString().padLeft(2, '0');
-      final period = hour >= 12 ? 'PM' : 'AM';
-      hour = hour > 12 ? hour - 12 : (hour == 0 ? 12 : hour);
-      final timeStr = '${hour.toString().padLeft(2, '0')}:$minute $period';
-      return '${months[localDate.month - 1]}. ${localDate.day.toString().padLeft(2, '0')}, ${localDate.year} @ $timeStr';
-    } catch (e) {
-      return dateStr;
+      return '${months[d.month - 1]} ${d.day}';
+    } catch (_) {
+      return iso;
     }
   }
 
-  Color _getStatusColor(String status) {
-    switch (status.toLowerCase()) {
-      case 'pending':
-        return AppColors.primary;
-      case 'pending_void':
-        return AppColors.warning;
-      case 'void':
-      case 'voided':
-        return AppColors.error;
-      case 'won':
-        return AppColors.success;
-      default:
-        return Colors.grey[600]!;
+  String _fmtPrinted(String? iso) {
+    if (iso == null) return '—';
+    try {
+      final d = DateTime.parse(iso).toLocal();
+      const months = [
+        'Jan',
+        'Feb',
+        'Mar',
+        'Apr',
+        'May',
+        'Jun',
+        'Jul',
+        'Aug',
+        'Sep',
+        'Oct',
+        'Nov',
+        'Dec',
+      ];
+      int h = d.hour;
+      final m = d.minute.toString().padLeft(2, '0');
+      final period = h >= 12 ? 'PM' : 'AM';
+      h = h > 12 ? h - 12 : (h == 0 ? 12 : h);
+      return '${months[d.month - 1]} ${d.day} · $h:$m $period';
+    } catch (_) {
+      return iso;
     }
   }
 
-  String _getStatusLabel(String status) {
-    switch (status.toLowerCase()) {
-      case 'pending_void':
-        return 'VOID REQUEST';
-      case 'voided':
-        return 'VOIDED';
-      case 'pending':
-        return 'PENDING';
-      case 'won':
-        return 'WON';
-      case 'lost':
-        return 'LOST';
-      default:
-        return status.toUpperCase();
-    }
+  String _fmtAmount(double? v) {
+    if (v == null) return '—';
+    return '₱${v.toStringAsFixed(0).replaceAllMapped(RegExp(r'\B(?=(\d{3})+(?!\d))'), (_) => ',')}';
   }
 
-  bool _canRequestVoid(Ticket ticket) {
-    final statusPending = (ticket.status ?? '').toLowerCase() == 'pending';
-    if (!statusPending || ticket.hasActiveRequest) return false;
-
-    // If ticket has its own void configuration, rely on that
-    if (ticket.voidExpiresAt != null || ticket.voidWindowMinutes != null) {
-      return ticket.isVoidWindowActive();
-    }
-
-    // Otherwise, consult global admin-configured void setup (if available and active)
-    if (_activeVoidSetup != null &&
-        _activeVoidSetup!.isActive &&
-        ticket.createdAt != null) {
-      final created = DateTime.tryParse(ticket.createdAt!)?.toLocal();
-      if (created == null) return false;
-      final allowedUntil = created.add(
-        Duration(minutes: _activeVoidSetup!.minutes),
-      );
-      return DateTime.now().isBefore(allowedUntil);
-    }
-
-    // No admin config and no per-ticket config — fall back to previous behavior: allow void while pending
-    return true;
+  String _fmtClock(Duration d) {
+    final s = d.inSeconds.clamp(0, 99 * 60 + 59);
+    final mm = (s ~/ 60).toString().padLeft(2, '0');
+    final ss = (s % 60).toString().padLeft(2, '0');
+    return '$mm:$ss';
   }
 
-  bool _canRequestReprint(Ticket ticket) {
-    final status = (ticket.status ?? '').toLowerCase();
-    if (ticket.hasActiveRequest ||
-        status == 'pending_void' ||
-        status == 'voided' ||
-        (ticket.betObjects?.isEmpty ?? true)) {
-      return false;
-    }
-
-    // Validate against admin-configured reprint limits if available
-    if (_activeReprintSetup != null && _activeReprintSetup!.isActive) {
-      final currentRequests = ticket.reprintRequests ?? 0;
-      final maxRequests = _activeReprintSetup!.maxReprintRequests;
-      if (maxRequests > 0 && currentRequests >= maxRequests) {
-        return false;
-      }
-
-      final currentPrints = ticket.printCount ?? 0;
-      final maxPrints = _activeReprintSetup!.maxPrints;
-      // Only block reprint request if both print AND request limits are reached
-      if (maxPrints > 0 && currentPrints >= maxPrints && maxRequests == 0) {
-        return false;
-      }
-    }
-
-    return true;
-  }
-
-  Color _getRequestStateColor(Ticket ticket) {
-    if (ticket.hasApprovedReprintRequest) {
-      return AppColors.success;
-    }
-    if (ticket.hasPendingReprintRequest || ticket.hasPendingVoidRequest) {
-      return AppColors.warning;
-    }
-    return AppColors.textSecondary;
-  }
-
-  /// Compute remaining time left for void window. Returns null if no window configured.
   Duration? _voidTimeLeft(Ticket ticket) {
     final now = DateTime.now();
-    // If the ticket has explicit expires timestamp
     final expires = ticket.voidExpires;
     if (expires != null) {
       final diff = expires.difference(now);
       return diff.isNegative ? Duration.zero : diff;
     }
-    // Ticket-level window takes precedence
     if (ticket.voidWindowMinutes != null && ticket.createdAt != null) {
       try {
         final created = DateTime.parse(ticket.createdAt!).toLocal();
@@ -234,8 +233,6 @@ class _TicketPageState extends State<TicketPage> {
         return null;
       }
     }
-
-    // Fallback to global admin-configured void setup if present
     if (_activeVoidSetup != null &&
         ticket.createdAt != null &&
         _activeVoidSetup!.isActive) {
@@ -250,1271 +247,1492 @@ class _TicketPageState extends State<TicketPage> {
         return null;
       }
     }
-
     return null;
   }
 
-  String _getRequestStateLabel(Ticket ticket) {
-    if (ticket.hasApprovedReprintRequest) {
-      return 'REPRINT APPROVED';
+  bool _canVoid(Ticket ticket) {
+    final status = (ticket.status ?? '').toLowerCase();
+    if (status != 'pending' || ticket.hasActiveRequest) return false;
+    if (ticket.voidExpiresAt != null || ticket.voidWindowMinutes != null) {
+      return ticket.isVoidWindowActive();
     }
-    // For pending reprint requests we show a friendlier message below
-    // ('Reprint request sent for approval') so avoid duplicating the
-    // uppercase label here. Only show void-related labels from this helper.
-    if (ticket.hasPendingVoidRequest) {
-      return 'VOID NEEDS APPROVAL';
+    if (_activeVoidSetup != null &&
+        _activeVoidSetup!.isActive &&
+        ticket.createdAt != null) {
+      final created = DateTime.tryParse(ticket.createdAt!)?.toLocal();
+      if (created == null) return false;
+      return DateTime.now().isBefore(
+        created.add(Duration(minutes: _activeVoidSetup!.minutes)),
+      );
     }
-    return '';
+    return true;
   }
 
-  @override
-  void dispose() {
-    _clockTimer?.cancel();
-    _debounceTimer?.cancel();
-    _searchController.dispose();
-    _searchFocusNode.dispose();
-    controller?.dispose();
-    Get.delete<TicketController>();
-    super.dispose();
+  bool _canReprint(Ticket ticket) {
+    final status = (ticket.status ?? '').toLowerCase();
+    if (ticket.hasActiveRequest ||
+        status == 'pending_void' ||
+        status == 'voided') {
+      return false;
+    }
+    if (ticket.betObjects?.isEmpty ?? true) return false;
+    if (_activeReprintSetup != null && _activeReprintSetup!.isActive) {
+      final cur = ticket.reprintRequests ?? 0;
+      final maxR = _activeReprintSetup!.maxReprintRequests;
+      if (maxR > 0 && cur >= maxR) return false;
+    }
+    return true;
   }
+
+  // ── QR ─────────────────────────────────────────────────────────────────────
 
   Future<void> _startQRScan() async {
     final status = await Permission.camera.request();
     if (!status.isGranted) {
       Get.snackbar(
         'Permission Denied',
-        'Camera permission is required to scan QR codes',
+        'Camera permission required',
         backgroundColor: Colors.red,
         colorText: Colors.white,
       );
       return;
     }
-
-    setState(() {
-      _showQRScanner = true;
-    });
+    setState(() => _showQRScanner = true);
   }
 
-  Future<void> _handleScannedQRCode(String qrCode) async {
-    // Stop scanner
-    controller?.pauseCamera();
-    final resolvedTicketNumber = await TicketService.resolveScannedTicketNumber(
-      qrCode,
-    );
-
-    // Trigger search
-    setState(() {
-      _showQRScanner = false;
-    });
-    _searchController.text = resolvedTicketNumber;
-    await _ctrl.fetchTickets(resolvedTicketNumber);
+  Future<void> _handleScannedQR(String code) async {
+    _qrCtrl?.pauseCamera();
+    final resolved = await TicketService.resolveScannedTicketNumber(code);
+    setState(() => _showQRScanner = false);
+    _searchController.text = resolved;
+    await _ctrl.fetchTickets(resolved);
   }
 
-  @override
-  void reassemble() {
-    super.reassemble();
-    if (controller != null) {
-      if (defaultTargetPlatform == TargetPlatform.android) {
-        controller!.pauseCamera();
-      } else if (defaultTargetPlatform == TargetPlatform.iOS) {
-        controller!.resumeCamera();
-      }
-    }
-  }
+  // ── void actions ───────────────────────────────────────────────────────────
 
-  void _showVoidConfirmation(Ticket ticket) {
-    final TextEditingController reasonController = TextEditingController();
-
-    showDialog(
+  void _showVoidSheet(Ticket ticket) {
+    showModalBottomSheet(
       context: context,
-      builder: (context) => AlertDialog(
-        title: const Text('Request Void Approval'),
-        content: SingleChildScrollView(
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text(
-                'Submit a void request for Ticket No. ${ticket.ticketNo}',
-                style: TextStyle(
-                  fontSize: 14,
-                  color: Colors.grey[600],
-                  fontWeight: FontWeight.w500,
-                ),
-              ),
-              const SizedBox(height: 16),
-              Text(
-                'Reason for Void Request',
-                style: TextStyle(
-                  fontSize: 12,
-                  fontWeight: FontWeight.w600,
-                  color: Colors.grey[700],
-                ),
-              ),
-              const SizedBox(height: 8),
-              TextField(
-                controller: reasonController,
-                maxLines: 4,
-                decoration: InputDecoration(
-                  hintText: 'Enter reason for requesting a void',
-                  border: OutlineInputBorder(
-                    borderRadius: BorderRadius.circular(8),
-                  ),
-                  contentPadding: const EdgeInsets.all(12),
-                ),
-              ),
-              const SizedBox(height: 16),
-
-              // Bet details table
-            ],
-          ),
-        ),
-        actionsAlignment: MainAxisAlignment.spaceBetween,
-        actions: [
-          SizedBox(
-            width: MediaQuery.of(context).size.width * 0.3,
-            child: OutlinedButton(
-              style: ButtonStyle(alignment: Alignment.center),
-              onPressed: () => Navigator.pop(context),
-              child: const Text('Cancel'),
-            ),
-          ),
-          SizedBox(
-            width: MediaQuery.of(context).size.width * 0.3,
-            child: ElevatedButton(
-              onPressed: () {
-                Navigator.pop(context);
-                _showFinalVoidConfirmation(ticket, reasonController.text);
-              },
-              style: ElevatedButton.styleFrom(
-                backgroundColor: AppColors.backgroundDark,
-              ),
-              child: const Text(
-                'Submit',
-                style: TextStyle(color: Colors.white),
-              ),
-            ),
-          ),
-        ],
+      backgroundColor: Colors.white,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      builder: (_) => _VoidConfirmSheet(
+        ticketId: _shortId(ticket.id),
+        onKeep: () => Navigator.pop(context),
+        onVoid: () {
+          Navigator.pop(context);
+          _doVoid(ticket);
+        },
       ),
     );
   }
 
-  void _showFinalVoidConfirmation(Ticket ticket, String reason) {
-    showDialog(
-      context: context,
-      builder: (context) => AlertDialog(
-        title: const Text('Submit Void Request'),
-        content: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Icon(Icons.info_outline, size: 48, color: Colors.orange[300]),
-            const SizedBox(height: 16),
-            Text(
-              'This will send the void request for approval before the ticket can be voided.\n\nContinue for ${ticket.ticketNo}?',
-              textAlign: TextAlign.center,
-              style: TextStyle(fontSize: 14),
-            ),
-          ],
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context),
-            child: const Text('Cancel'),
-          ),
-          ElevatedButton(
-            onPressed: () {
-              Navigator.pop(context);
-              _voidTicketAction(ticket, reason);
-            },
-            style: ElevatedButton.styleFrom(backgroundColor: AppColors.primary),
-            child: const Text('Confirm', style: TextStyle(color: Colors.white)),
-          ),
-        ],
-      ),
-    );
-  }
-
-  Future<void> _voidTicketAction(Ticket ticket, String reason) async {
+  Future<void> _doVoid(Ticket ticket) async {
     try {
-      final message = await _ctrl.voidTicket(ticket.id ?? '', reason);
+      final msg = await _ctrl.voidTicket(ticket.id ?? '', '');
       Get.snackbar(
         'Success',
-        message,
+        msg,
         snackPosition: SnackPosition.BOTTOM,
-        backgroundColor: AppColors.success,
+        backgroundColor: _green,
         colorText: Colors.white,
       );
     } catch (e) {
       Get.snackbar(
         'Error',
-        'Failed to void ticket: $e',
+        'Failed to void: $e',
         snackPosition: SnackPosition.BOTTOM,
-        backgroundColor: Colors.red,
+        backgroundColor: _red,
         colorText: Colors.white,
       );
     }
   }
 
-  void _showReprintConfirmation(Ticket ticket) {
-    showDialog(
-      context: context,
-      builder: (context) => AlertDialog(
-        title: const Text('Request Reprint Approval'),
-        content: Text(
-          'Submit a reprint request for Ticket No. ${ticket.ticketNo}? Approval is required before this ticket can be reprinted.',
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context),
-            child: const Text('Cancel'),
-          ),
-          ElevatedButton(
-            onPressed: () {
-              Navigator.pop(context);
-              _requestReprintAction(ticket);
-            },
-            style: ElevatedButton.styleFrom(backgroundColor: AppColors.primary),
-            child: const Text('Submit', style: TextStyle(color: Colors.white)),
-          ),
-        ],
-      ),
-    );
-  }
-
-  Future<void> _requestReprintAction(Ticket ticket) async {
+  Future<void> _doReprint(Ticket ticket) async {
     try {
-      final message = await _ctrl.requestReprint(ticket.id ?? '');
+      final msg = await _ctrl.requestReprint(ticket.id ?? '');
       Get.snackbar(
         'Success',
-        message,
+        msg,
         snackPosition: SnackPosition.BOTTOM,
-        backgroundColor: AppColors.success,
+        backgroundColor: _green,
         colorText: Colors.white,
       );
     } catch (e) {
       Get.snackbar(
         'Error',
-        '$e',
+        'Failed to request reprint: $e',
         snackPosition: SnackPosition.BOTTOM,
-        backgroundColor: AppColors.error,
+        backgroundColor: _red,
         colorText: Colors.white,
       );
     }
   }
 
-  Future<bool> _ensurePrinterReadyForReprint() async {
-    final reachability = await PrinterService.getSavedPrinterReachability();
-    switch (reachability) {
-      case PrinterReachabilityStatus.reachable:
-        return true;
-      case PrinterReachabilityStatus.notConfigured:
-        Get.snackbar(
-          'Printer Required',
-          'Connect a printer before using an approved reprint.',
-          snackPosition: SnackPosition.BOTTOM,
-          backgroundColor: AppColors.warning,
-          colorText: Colors.white,
-        );
-        return false;
-      case PrinterReachabilityStatus.permissionDenied:
-        Get.snackbar(
-          'Permission Required',
-          'Allow Nearby devices permission so the app can connect to your printer.',
-          snackPosition: SnackPosition.BOTTOM,
-          backgroundColor: AppColors.warning,
-          colorText: Colors.white,
-        );
-        return false;
-      case PrinterReachabilityStatus.unreachable:
-        Get.snackbar(
-          'Printer Unavailable',
-          'Make sure the configured printer is powered on and in Bluetooth range before reprinting.',
-          snackPosition: SnackPosition.BOTTOM,
-          backgroundColor: AppColors.warning,
-          colorText: Colors.white,
-        );
-        return false;
+  // ── date popover actions ───────────────────────────────────────────────────
+
+  void _applyDates() {
+    var f = _dateFromInput;
+    var t = _dateToInput;
+    if (f.isNotEmpty && t.isNotEmpty && f.compareTo(t) > 0) {
+      final tmp = f;
+      f = t;
+      t = tmp;
+    }
+    if (f.isEmpty && t.isEmpty) {
+      setState(() {
+        _datePopOpen = false;
+        _dateExplicitlySet = false;
+      });
+      _ctrl.clearDateFilter();
+    } else {
+      setState(() {
+        _datePopOpen = false;
+        _dateExplicitlySet = true;
+      });
+      _ctrl.setDateRange(f.isNotEmpty ? f : t, t.isNotEmpty ? t : f);
     }
   }
 
-  Future<void> _reprintTicketAction(Ticket ticket) async {
-    if (!await _ensurePrinterReadyForReprint()) {
-      return;
-    }
-
-    try {
-      await _ctrl.consumeApprovedReprint(ticket.id ?? '');
-      final result = await PrinterService.reprintTicket(ticket: ticket);
-      await _ctrl.fetchTickets();
-
-      if (result.success) {
-        Get.snackbar(
-          'Success',
-          'Ticket sent to printer successfully.',
-          snackPosition: SnackPosition.BOTTOM,
-          backgroundColor: AppColors.success,
-          colorText: Colors.white,
-        );
-        return;
-      }
-
-      Get.snackbar(
-        'Print Failed',
-        'The reprint approval was used but printing failed. Fix the printer issue and request approval again.',
-        snackPosition: SnackPosition.BOTTOM,
-        backgroundColor: AppColors.error,
-        colorText: Colors.white,
-      );
-    } catch (e) {
-      Get.snackbar(
-        'Error',
-        '$e',
-        snackPosition: SnackPosition.BOTTOM,
-        backgroundColor: AppColors.error,
-        colorText: Colors.white,
-      );
-    }
+  void _clearDates() {
+    setState(() {
+      _dateFromInput = '';
+      _dateToInput = '';
+      _datePopOpen = false;
+      _dateExplicitlySet = false;
+    });
+    _ctrl.clearDateFilter();
   }
+
+  // ── BUILD ───────────────────────────────────────────────────────────────────
 
   @override
   Widget build(BuildContext context) {
-    if (_showQRScanner) {
-      return Stack(
-        children: [
-          QRView(
-            key: qrKey,
-            onQRViewCreated: (QRViewController controller) {
-              this.controller = controller;
-              controller.scannedDataStream.listen((scanData) {
-                if (scanData.code != null) {
-                  _handleScannedQRCode(scanData.code!);
-                }
-              });
-            },
-            overlay: QrScannerOverlayShape(
-              borderColor: AppColors.primary,
-              borderRadius: 10,
-              borderLength: 30,
-              borderWidth: 10,
-              cutOutSize: 250,
-            ),
-          ),
-          Positioned(
-            top: 16,
-            left: 16,
-            child: IconButton(
-              icon: const Icon(Icons.close, color: Colors.white, size: 28),
-              onPressed: () {
-                setState(() {
-                  _showQRScanner = false;
-                });
-                controller?.dispose();
-              },
-            ),
-          ),
-        ],
-      );
-    }
+    if (_showQRScanner) return _buildQRScanner();
 
     return Column(
       children: [
-        // Header with title and status filter
-        Padding(
-          padding: const EdgeInsets.all(16.0),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              const SizedBox(height: 16),
-              // Status filter
-              Container(
-                padding: const EdgeInsets.all(2),
-                decoration: BoxDecoration(
-                  color: Colors.grey[100],
-                  borderRadius: BorderRadius.circular(12),
-                ),
-                child: Row(
-                  children: ['Tickets', 'Void']
-                      .map(
-                        (status) => Expanded(
-                          child: Obx(
-                            () => GestureDetector(
-                              onTap: () {
-                                _searchController.clear();
-                                _ctrl.setStatus(status);
-                              },
-                              child: Container(
-                                padding: const EdgeInsets.symmetric(
-                                  vertical: 12,
-                                  horizontal: 16,
-                                ),
-                                decoration: BoxDecoration(
-                                  color: _ctrl.selectedStatus.value == status
-                                      ? AppColors.primary
-                                      : Colors.grey[100],
-                                  borderRadius: BorderRadius.circular(12),
-                                ),
-                                alignment: Alignment.center,
-                                child: Text(
-                                  status,
-                                  style: TextStyle(
-                                    fontSize: 14,
-                                    fontWeight: FontWeight.w500,
-                                    color: _ctrl.selectedStatus.value == status
-                                        ? Colors.white
-                                        : Colors.grey[400],
-                                  ),
-                                ),
-                              ),
-                            ),
-                          ),
-                        ),
-                      )
-                      .toList(),
-                ),
-              ),
-            ],
-          ),
-        ),
-        // Compact header: either collapsed (date + icons) or expanded search field
-        Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 16.0, vertical: 8),
-          child: _isSearchActive
-              ? Row(
-                  children: [
-                    Expanded(
-                      child: TextField(
-                        focusNode: _searchFocusNode,
-                        controller: _searchController,
-                        textInputAction: TextInputAction.search,
-                        onSubmitted: (_) {
-                          _searchFocusNode.unfocus();
-                        },
-                        decoration: InputDecoration(
-                          hintText: 'Search ticket number',
-                          prefixIcon: const Icon(Icons.search),
-                          suffixIcon: IconButton(
-                            icon: const Icon(Icons.close),
-                            onPressed: () {
-                              _searchController.clear();
-                              _searchFocusNode.unfocus();
-                              setState(() {
-                                _isSearchActive = false;
-                              });
-                              // refresh list with cleared query
-                              _ctrl.fetchTickets();
-                            },
-                          ),
-                          border: OutlineInputBorder(
-                            borderRadius: BorderRadius.circular(8),
-                            borderSide: BorderSide(color: Colors.grey[300]!),
-                          ),
-                          enabledBorder: OutlineInputBorder(
-                            borderRadius: BorderRadius.circular(8),
-                            borderSide: BorderSide(
-                              color: Colors.grey[300]!,
-                              width: 1,
-                            ),
-                          ),
-                          contentPadding: const EdgeInsets.symmetric(
-                            vertical: 12,
-                            horizontal: 0,
-                          ),
-                        ),
-                      ),
-                    ),
-                  ],
-                )
-              : Row(
-                  children: [
-                    // Date chip
-                    Expanded(
-                      child: Obx(() {
-                        final current = _ctrl.selectedDate.value;
-                        DateTime initial;
-                        try {
-                          initial = DateTime.parse(current);
-                        } catch (_) {
-                          initial = DateTime.now();
-                        }
-                        return InkWell(
-                          onTap: () async {
-                            final picked = await showDatePicker(
-                              context: context,
-                              initialDate: initial,
-                              firstDate: DateTime(2000),
-                              lastDate: DateTime.now().add(
-                                const Duration(days: 365),
-                              ),
-                            );
-                            if (picked != null) {
-                              final yyyyMmDd = picked
-                                  .toLocal()
-                                  .toIso8601String()
-                                  .substring(0, 10);
-                              _ctrl.setDate(yyyyMmDd);
-                            }
-                          },
-                          child: Container(
-                            height: 48,
-                            padding: const EdgeInsets.symmetric(horizontal: 12),
-                            decoration: BoxDecoration(
-                              border: Border.all(color: Colors.grey[300]!),
-                              borderRadius: BorderRadius.circular(8),
-                              color: Colors.white,
-                            ),
-                            alignment: Alignment.centerLeft,
-                            child: Row(
-                              children: [
-                                const Icon(
-                                  Icons.calendar_today,
-                                  size: 18,
-                                  color: Colors.grey,
-                                ),
-                                const SizedBox(width: 8),
-                                Text(
-                                  current,
-                                  style: TextStyle(
-                                    color: Colors.grey[800],
-                                    fontWeight: FontWeight.w600,
-                                  ),
-                                ),
-                              ],
-                            ),
-                          ),
-                        );
-                      }),
-                    ),
-                    const SizedBox(width: 8),
-                    // Search button (activates inline search)
-                    Container(
-                      height: 48,
-                      decoration: BoxDecoration(
-                        border: Border.all(color: Colors.grey[300]!),
-                        borderRadius: BorderRadius.circular(8),
-                        color: Colors.white,
-                      ),
-                      child: IconButton(
-                        icon: const Icon(Icons.search),
-                        onPressed: () {
-                          setState(() {
-                            _isSearchActive = true;
-                          });
-                          // focus after frame
-                          Future.delayed(Duration(milliseconds: 50), () {
-                            if (mounted)
-                              FocusScope.of(
-                                context,
-                              ).requestFocus(_searchFocusNode);
-                          });
-                        },
-                        color: Colors.grey[600],
-                      ),
-                    ),
-                    const SizedBox(width: 8),
-                    // QR scan button
-                    Container(
-                      height: 48,
-                      decoration: BoxDecoration(
-                        border: Border.all(color: Colors.grey[300]!),
-                        borderRadius: BorderRadius.circular(8),
-                        color: Colors.white,
-                      ),
-                      child: IconButton(
-                        icon: const Icon(Icons.qr_code_scanner),
-                        onPressed: _startQRScan,
-                        color: Colors.grey[600],
-                      ),
-                    ),
-                  ],
-                ),
-        ),
-        const SizedBox(height: 8),
-        // Ticket list
-        Expanded(
-          child: Obx(() {
-            if (_ctrl.isLoading.value) {
-              return const Center(child: CircularProgressIndicator());
-            }
-
-            if (_ctrl.hasError.value) {
-              return Center(
-                child: Column(
-                  mainAxisAlignment: MainAxisAlignment.center,
-                  children: [
-                    Icon(
-                      Icons.error_outline,
-                      size: 48,
-                      color: Colors.grey[400],
-                    ),
-                    const SizedBox(height: 16),
-                    Text(
-                      'Failed to load tickets',
-                      style: TextStyle(color: Colors.grey[600]),
-                    ),
-                    const SizedBox(height: 16),
-                    ElevatedButton(
-                      onPressed: () => _ctrl.fetchTickets(),
-                      style: ElevatedButton.styleFrom(
-                        backgroundColor: AppColors.primary,
-                      ),
-                      child: const Text(
-                        'Retry',
-                        style: TextStyle(color: Colors.white),
-                      ),
-                    ),
-                  ],
-                ),
-              );
-            }
-
-            final allTickets = _ctrl.tickets;
-
-            if (allTickets.isEmpty) {
-              return Center(
-                child: Text(
-                  'No tickets found',
-                  style: TextStyle(color: Colors.grey[600]),
-                ),
-              );
-            }
-
-            return ListView.builder(
-              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-              itemCount: allTickets.length,
-              itemBuilder: (context, index) {
-                final ticket = allTickets[index];
-                return _buildTicketCard(ticket);
-              },
-            );
-          }),
-        ),
+        _buildTabBar(),
+        _buildFilterRow(),
+        Expanded(child: _buildList()),
       ],
     );
   }
 
-  Widget _buildTicketCard(Ticket ticket) {
+  // ── Tab bar ────────────────────────────────────────────────────────────────
+
+  Widget _buildTabBar() => Obx(() {
+    final activeCount = _ctrl.activeTabCount.value;
+    final voidCount = _ctrl.voidTabCount.value;
+    final isTickets = _ctrl.selectedStatus.value != 'Void';
+
     return Container(
-      margin: const EdgeInsets.only(bottom: 16),
-      padding: const EdgeInsets.all(16),
+      color: Colors.white,
+      padding: const EdgeInsets.fromLTRB(16, 10, 16, 0),
+      child: Container(
+        height: 44,
+        padding: const EdgeInsets.all(3),
+        decoration: BoxDecoration(
+          color: _hair,
+          borderRadius: BorderRadius.circular(12),
+        ),
+        child: Row(
+          children: [
+            _tab(
+              'Tickets',
+              activeCount,
+              isTickets,
+              () => _ctrl.setStatus('Tickets'),
+            ),
+            _tab('Void', voidCount, !isTickets, () => _ctrl.setStatus('Void')),
+          ],
+        ),
+      ),
+    );
+  });
+
+  Widget _tab(String label, int count, bool active, VoidCallback onTap) =>
+      Expanded(
+        child: GestureDetector(
+          onTap: onTap,
+          child: AnimatedContainer(
+            duration: const Duration(milliseconds: 160),
+            decoration: BoxDecoration(
+              color: active ? _blue : Colors.transparent,
+              borderRadius: BorderRadius.circular(9),
+              boxShadow: active
+                  ? [
+                      BoxShadow(
+                        color: _blue.withValues(alpha: 0.3),
+                        blurRadius: 6,
+                        offset: const Offset(0, 2),
+                      ),
+                    ]
+                  : null,
+            ),
+            alignment: Alignment.center,
+            child: Row(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                Text(
+                  label,
+                  style: TextStyle(
+                    fontSize: 13,
+                    fontWeight: FontWeight.w700,
+                    color: active ? Colors.white : _muted,
+                  ),
+                ),
+                const SizedBox(width: 5),
+                Text(
+                  '($count)',
+                  style: TextStyle(
+                    fontSize: 11,
+                    fontWeight: FontWeight.w800,
+                    color: active
+                        ? Colors.white.withValues(alpha: 0.85)
+                        : _muted2,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      );
+
+  // ── Filter row ─────────────────────────────────────────────────────────────
+
+  Widget _buildFilterRow() => Container(
+    padding: const EdgeInsets.fromLTRB(16, 12, 16, 14),
+    decoration: const BoxDecoration(
+      color: Colors.white,
+      border: Border(bottom: BorderSide(color: _border)),
+    ),
+    child: Stack(
+      clipBehavior: Clip.none,
+      children: [
+        // Main row
+        SizedBox(
+          height: 42,
+          child: Row(
+            children: [
+              // Search
+              Expanded(
+                child: _SearchBox(
+                  controller: _searchController,
+                  focusNode: _searchFocusNode,
+                  focused: _searchFocused,
+                  onClear: () {
+                    _searchController.clear();
+                    _ctrl.fetchTickets('');
+                  },
+                ),
+              ),
+              const SizedBox(width: 8),
+              // Date button
+              Obx(
+                () => _DateButton(
+                  label: _fmtDateLabel(),
+                  active:
+                      _dateExplicitlySet &&
+                      (_ctrl.dateFrom.value.isNotEmpty ||
+                          _ctrl.dateTo.value.isNotEmpty),
+                  onTap: () {
+                    setState(() {
+                      _datePopOpen = !_datePopOpen;
+                      if (_datePopOpen) {
+                        _dateFromInput = _ctrl.dateFrom.value;
+                        _dateToInput = _ctrl.dateTo.value;
+                      }
+                    });
+                  },
+                ),
+              ),
+              const SizedBox(width: 8),
+              // QR scan
+              _IconBtn(icon: Icons.qr_code_scanner, onTap: _startQRScan),
+            ],
+          ),
+        ),
+        // Date popover
+        if (_datePopOpen)
+          Positioned(
+            top: 50,
+            left: 0,
+            right: 0,
+            child: _DatePopover(
+              dateFrom: _dateFromInput,
+              dateTo: _dateToInput,
+              presets: _presets,
+              todayFn: _today,
+              addDaysFn: _addDays,
+              onFromChanged: (v) => setState(() => _dateFromInput = v),
+              onToChanged: (v) => setState(() => _dateToInput = v),
+              onApply: _applyDates,
+              onClear: _clearDates,
+              onPreset: (f, t) {
+                setState(() {
+                  _dateFromInput = f;
+                  _dateToInput = t;
+                });
+              },
+            ),
+          ),
+      ],
+    ),
+  );
+
+  // ── List ───────────────────────────────────────────────────────────────────
+
+  Widget _buildList() => Obx(() {
+    if (_ctrl.isLoading.value) {
+      return const Center(child: CircularProgressIndicator(color: _blue));
+    }
+    if (_ctrl.hasError.value) {
+      return Center(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const Icon(Icons.error_outline, size: 36, color: _muted2),
+            const SizedBox(height: 10),
+            const Text(
+              'Failed to load tickets',
+              style: TextStyle(color: _muted),
+            ),
+            const SizedBox(height: 12),
+            TextButton(
+              onPressed: () => _ctrl.fetchTickets(),
+              child: const Text('Retry'),
+            ),
+          ],
+        ),
+      );
+    }
+    final tickets = _ctrl.tickets;
+    if (tickets.isEmpty) {
+      return Center(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const Icon(Icons.receipt_long_outlined, size: 36, color: _muted2),
+            const SizedBox(height: 10),
+            const Text(
+              'No tickets found',
+              style: TextStyle(color: _muted, fontSize: 13),
+            ),
+            const SizedBox(height: 4),
+            const Text(
+              'Try widening the date range or clearing search.',
+              style: TextStyle(color: _muted2, fontSize: 12),
+              textAlign: TextAlign.center,
+            ),
+          ],
+        ),
+      );
+    }
+    return RefreshIndicator(
+      color: _blue,
+      onRefresh: () => _ctrl.fetchTickets(),
+      child: ListView.builder(
+        padding: const EdgeInsets.fromLTRB(16, 14, 16, 20),
+        itemCount: tickets.length + 1,
+        itemBuilder: (ctx, i) {
+          if (i == 0) {
+            return Padding(
+              padding: const EdgeInsets.only(bottom: 10),
+              child: Text(
+                '${tickets.length} ticket${tickets.length == 1 ? '' : 's'} found',
+                style: const TextStyle(
+                  fontSize: 11.5,
+                  color: _muted2,
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+            );
+          }
+          final t = tickets[i - 1];
+          return _TicketCard(
+            ticket: t,
+            shortId: _shortId(t.id),
+            fmtPrinted: _fmtPrinted(t.createdAt),
+            fmtAmount: _fmtAmount,
+            fmtClock: _fmtClock,
+            voidTimeLeft: _voidTimeLeft(t),
+            canVoid: _canVoid(t),
+            canReprint: _canReprint(t),
+            expanded: _expandedCards.contains(t.id),
+            onToggleExpand: () => setState(() {
+              if (_expandedCards.contains(t.id)) {
+                _expandedCards.remove(t.id);
+              } else {
+                _expandedCards.add(t.id!);
+              }
+            }),
+            onVoid: () => _showVoidSheet(t),
+            onReprint: () => _doReprint(t),
+          );
+        },
+      ),
+    );
+  });
+
+  // ── QR scanner ─────────────────────────────────────────────────────────────
+
+  Widget _buildQRScanner() => Scaffold(
+    backgroundColor: Colors.black,
+    appBar: AppBar(
+      backgroundColor: Colors.black,
+      foregroundColor: Colors.white,
+      title: const Text('Scan Ticket QR'),
+      leading: IconButton(
+        icon: const Icon(Icons.close),
+        onPressed: () => setState(() => _showQRScanner = false),
+      ),
+    ),
+    body: QRView(
+      key: _qrKey,
+      onQRViewCreated: (c) {
+        _qrCtrl = c;
+        c.scannedDataStream.listen((d) {
+          if (d.code != null) _handleScannedQR(d.code!);
+        });
+      },
+    ),
+  );
+}
+
+// ── Ticket card ────────────────────────────────────────────────────────────────
+
+class _TicketCard extends StatelessWidget {
+  final Ticket ticket;
+  final String shortId;
+  final String fmtPrinted;
+  final String Function(double?) fmtAmount;
+  final String Function(Duration) fmtClock;
+  final Duration? voidTimeLeft;
+  final bool canVoid;
+  final bool canReprint;
+  final bool expanded;
+  final VoidCallback onToggleExpand;
+  final VoidCallback onVoid;
+  final VoidCallback onReprint;
+
+  const _TicketCard({
+    required this.ticket,
+    required this.shortId,
+    required this.fmtPrinted,
+    required this.fmtAmount,
+    required this.fmtClock,
+    required this.voidTimeLeft,
+    required this.canVoid,
+    required this.canReprint,
+    required this.expanded,
+    required this.onToggleExpand,
+    required this.onVoid,
+    required this.onReprint,
+  });
+
+  String get _status => (ticket.status ?? '').toLowerCase();
+
+  Widget _statusChip() {
+    late Color bg, fg;
+    late String label;
+    switch (_status) {
+      case 'pending':
+        bg = _blueL;
+        fg = _blueD;
+        label = 'Pending';
+      case 'won':
+        bg = _greenL;
+        fg = _green;
+        label = 'Won';
+      case 'voided':
+        bg = _redL;
+        fg = _red;
+        label = 'Voided';
+      case 'pending_void':
+        bg = const Color(0xFFFFFBEB);
+        fg = const Color(0xFFD97706);
+        label = 'Void Request';
+      default:
+        bg = _hair;
+        fg = _muted;
+        label = _status.toUpperCase();
+    }
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 4),
+      decoration: BoxDecoration(
+        color: bg,
+        borderRadius: BorderRadius.circular(20),
+      ),
+      child: Text(
+        label,
+        style: TextStyle(
+          fontSize: 10,
+          fontWeight: FontWeight.w800,
+          letterSpacing: 0.3,
+          color: fg,
+        ),
+      ),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final bets = ticket.betObjects ?? [];
+
+    return Container(
+      margin: const EdgeInsets.only(bottom: 10),
       decoration: BoxDecoration(
         color: Colors.white,
-        borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: Colors.grey[200]!),
+        border: Border.all(color: _border),
+        borderRadius: BorderRadius.circular(15),
         boxShadow: [
           BoxShadow(
-            color: Colors.grey[100]!,
-            blurRadius: 4,
-            offset: const Offset(0, 2),
+            color: _ink.withValues(alpha: 0.04),
+            blurRadius: 2,
+            offset: const Offset(0, 1),
           ),
         ],
       ),
+      clipBehavior: Clip.antiAlias,
       child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
+        mainAxisSize: MainAxisSize.min,
         children: [
-          // Ticket number with icon
-          Row(
-            children: [
-              Container(
-                width: 40,
-                height: 40,
-                decoration: BoxDecoration(
-                  shape: BoxShape.circle,
-                  border: Border.all(color: Colors.grey[300]!, width: 2),
-                  image: const DecorationImage(
-                    image: AssetImage('assets/images/logos/logo.png'),
-                  ),
-                ),
-              ),
-              const SizedBox(width: 12),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Row(
-                      children: [
-                        Expanded(
-                          child: Text(
-                            ticket.ticketNo ?? 'Unknown Ticket',
-                            maxLines: 1,
-                            overflow: TextOverflow.ellipsis,
-                            style: const TextStyle(
-                              fontSize: 12,
-                              fontWeight: FontWeight.w600,
-                              color: Colors.black87,
-                            ),
-                          ),
-                        ),
-                        if (_canRequestVoid(ticket)) ...[
-                          const SizedBox(width: 8),
-                          Column(
-                            crossAxisAlignment: CrossAxisAlignment.end,
-                            children: [
-                              ElevatedButton.icon(
-                                style: ElevatedButton.styleFrom(
-                                  backgroundColor: AppColors.backgroundDark,
-                                  foregroundColor: Colors.white,
-                                  padding: const EdgeInsets.symmetric(
-                                    horizontal: 10,
-                                    vertical: 6,
-                                  ),
-                                  minimumSize: const Size(0, 34),
-                                  tapTargetSize:
-                                      MaterialTapTargetSize.shrinkWrap,
-                                  visualDensity: VisualDensity.compact,
-                                  textStyle: const TextStyle(
-                                    fontSize: 11,
-                                    fontWeight: FontWeight.w600,
-                                  ),
-                                  shape: RoundedRectangleBorder(
-                                    borderRadius: BorderRadius.circular(16),
-                                  ),
-                                ),
-                                onPressed: () => _showVoidConfirmation(ticket),
-                                icon: const Icon(Icons.close, size: 12),
-                                label: const Text('Void'),
-                              ),
-                              const SizedBox(height: 4),
-                              Builder(
-                                builder: (context) {
-                                  final left = _voidTimeLeft(ticket);
-                                  if (left == null) return const SizedBox();
-                                  if (left.inSeconds <= 0) {
-                                    // expired — won't be shown because _canRequestVoid checks isVoidWindowActive,
-                                    // but guard defensively
-                                    return const Text(
-                                      'Void window expired',
-                                      style: TextStyle(
-                                        fontSize: 11,
-                                        color: Colors.grey,
-                                      ),
-                                    );
-                                  }
-                                  final mm = left.inMinutes
-                                      .remainder(60)
-                                      .toString()
-                                      .padLeft(2, '0');
-                                  final ss = left.inSeconds
-                                      .remainder(60)
-                                      .toString()
-                                      .padLeft(2, '0');
-                                  return Text(
-                                    'Expires in $mm:$ss',
-                                    style: const TextStyle(
-                                      fontSize: 11,
-                                      color: Colors.orange,
-                                    ),
-                                  );
-                                },
-                              ),
-                            ],
-                          ),
-                        ],
-                      ],
-                    ),
-                    const SizedBox(height: 4),
-                    Text(
-                      ticket.cluster?.name ?? 'Unknown',
-                      style: TextStyle(fontSize: 12, color: Colors.grey[600]),
-                    ),
-                  ],
-                ),
-              ),
-            ],
-          ),
-          const SizedBox(height: 12),
-          // Ticket details
-          Row(
-            mainAxisAlignment: MainAxisAlignment.spaceBetween,
-            children: [
-              Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    'Bets:',
-                    style: TextStyle(fontSize: 12, color: Colors.grey[600]),
-                  ),
-                  const SizedBox(height: 4),
-                  Text(
-                    '${ticket.betObjects?.length ?? 0} bet${(ticket.betObjects?.length ?? 0) != 1 ? 's' : ''}',
-                    style: const TextStyle(
-                      fontSize: 14,
-                      fontWeight: FontWeight.w500,
-                      color: Colors.black87,
-                    ),
-                  ),
-                ],
-              ),
-              Column(
-                crossAxisAlignment: CrossAxisAlignment.end,
-                children: [
-                  Text(
-                    'Status:',
-                    style: TextStyle(fontSize: 12, color: Colors.grey[600]),
-                  ),
-                  const SizedBox(height: 4),
-                  Text(
-                    _getStatusLabel(ticket.status ?? 'UNKNOWN'),
-                    style: TextStyle(
-                      fontSize: 14,
-                      fontWeight: FontWeight.w600,
-                      color: _getStatusColor(ticket.status ?? 'unknown'),
-                    ),
-                  ),
-                  if (_getRequestStateLabel(ticket).isNotEmpty) ...[
-                    const SizedBox(height: 8),
-                    Text(
-                      _getRequestStateLabel(ticket),
-                      style: TextStyle(
-                        fontSize: 12,
-                        fontWeight: FontWeight.w700,
-                        color: _getRequestStateColor(ticket),
-                      ),
-                    ),
-                  ],
-                ],
-              ),
-            ],
-          ),
-          const SizedBox(height: 12),
-          // Transaction date
-          Text(
-            'Printed Date:',
-            style: TextStyle(fontSize: 12, color: Colors.grey[600]),
-          ),
-          const SizedBox(height: 4),
-          Text(
-            _formatDate(ticket.createdAt),
-            style: const TextStyle(fontSize: 13, color: Colors.black87),
-          ),
-          if (_getRequestStateLabel(ticket).isNotEmpty) ...[
-            const SizedBox(height: 16),
-            Container(
-              width: double.infinity,
-              padding: const EdgeInsets.all(12),
-              decoration: BoxDecoration(
-                color: _getRequestStateColor(ticket).withOpacity(0.08),
-                borderRadius: BorderRadius.circular(8),
-                border: Border.all(
-                  color: _getRequestStateColor(ticket).withOpacity(0.25),
-                ),
-              ),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    _getRequestStateLabel(ticket),
-                    style: TextStyle(
-                      fontSize: 12,
-                      fontWeight: FontWeight.w700,
-                      color: _getRequestStateColor(ticket),
-                    ),
-                  ),
-                  if ((ticket.requestRemarks ?? '').isNotEmpty) ...[
-                    const SizedBox(height: 8),
-                    Text(
-                      ticket.requestRemarks!,
-                      style: TextStyle(fontSize: 12, color: Colors.grey[700]),
-                    ),
-                  ],
-                ],
-              ),
-            ),
-          ],
-          const SizedBox(height: 16),
-          if (ticket.hasApprovedReprintRequest ||
-              ticket.hasPendingReprintRequest ||
-              _canRequestReprint(ticket))
-            Wrap(
-              spacing: 8,
-              runSpacing: 8,
+          // ── Header ────────────────────────────────────────────
+          Padding(
+            padding: const EdgeInsets.fromLTRB(13, 13, 13, 10),
+            child: Row(
               children: [
-                if (_canRequestReprint(ticket))
-                  OutlinedButton.icon(
-                    onPressed: () => _showReprintConfirmation(ticket),
-                    icon: const Icon(Icons.print_outlined, size: 16),
-                    label: const Text('Request Reprint'),
+                // STL logo circle
+                Container(
+                  width: 34,
+                  height: 34,
+                  decoration: const BoxDecoration(
+                    color: _hair,
+                    shape: BoxShape.circle,
                   ),
-                if (ticket.hasPendingReprintRequest)
-                  Column(
+                  alignment: Alignment.center,
+                  child: const Text(
+                    'STL',
+                    style: TextStyle(
+                      fontSize: 8.5,
+                      fontWeight: FontWeight.w900,
+                      color: _muted2,
+                    ),
+                  ),
+                ),
+                const SizedBox(width: 10),
+                // Ticket ID + location
+                Expanded(
+                  child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      Container(
-                        padding: const EdgeInsets.symmetric(
-                          horizontal: 12,
-                          vertical: 10,
-                        ),
-                        decoration: BoxDecoration(
-                          color: AppColors.warning.withOpacity(0.08),
-                          borderRadius: BorderRadius.circular(8),
-                          border: Border.all(
-                            color: AppColors.warning.withOpacity(0.25),
-                          ),
-                        ),
-                        child: const Text(
-                          'Reprint request sent for approval',
-                          style: TextStyle(
-                            color: AppColors.warning,
-                            fontWeight: FontWeight.w600,
-                          ),
+                      Text(
+                        shortId,
+                        overflow: TextOverflow.ellipsis,
+                        style: const TextStyle(
+                          fontSize: 12.5,
+                          fontWeight: FontWeight.w800,
+                          color: _ink2,
                         ),
                       ),
-                      const SizedBox(height: 6),
-                      if (ticket.reprintRequests != null ||
-                          ticket.printCount != null)
+                      if (ticket.cluster?.name != null)
                         Text(
-                          'Requests: ${ticket.reprintRequests ?? 0}  ·  Prints: ${ticket.printCount ?? 0}',
-                          style: TextStyle(
-                            fontSize: 12,
-                            color: Colors.grey[600],
+                          ticket.cluster!.name!,
+                          style: const TextStyle(
+                            fontSize: 11.5,
+                            color: _muted2,
                           ),
                         ),
                     ],
                   ),
-                if (ticket.hasApprovedReprintRequest)
-                  ElevatedButton.icon(
-                    onPressed: () => _reprintTicketAction(ticket),
-                    style: ElevatedButton.styleFrom(
-                      backgroundColor: AppColors.primary,
+                ),
+                const SizedBox(width: 8),
+                _statusChip(),
+              ],
+            ),
+          ),
+
+          // ── Body ──────────────────────────────────────────────
+          Padding(
+            padding: const EdgeInsets.fromLTRB(13, 0, 13, 12),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                // Bets count + printed
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  children: [
+                    Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        const Text(
+                          'BETS',
+                          style: TextStyle(
+                            fontSize: 9,
+                            fontWeight: FontWeight.w700,
+                            letterSpacing: 0.5,
+                            color: _muted2,
+                          ),
+                        ),
+                        Text(
+                          '${bets.length} bet${bets.length == 1 ? '' : 's'}',
+                          style: const TextStyle(
+                            fontSize: 13.5,
+                            fontWeight: FontWeight.w800,
+                            color: _ink,
+                          ),
+                        ),
+                      ],
                     ),
-                    icon: const Icon(
-                      Icons.print,
-                      size: 16,
-                      color: Colors.white,
+                    Column(
+                      crossAxisAlignment: CrossAxisAlignment.end,
+                      children: [
+                        const Text(
+                          'PRINTED',
+                          style: TextStyle(
+                            fontSize: 9,
+                            fontWeight: FontWeight.w700,
+                            letterSpacing: 0.5,
+                            color: _muted2,
+                          ),
+                        ),
+                        Text(
+                          fmtPrinted,
+                          style: const TextStyle(
+                            fontSize: 13.5,
+                            fontWeight: FontWeight.w800,
+                            color: _ink,
+                          ),
+                        ),
+                      ],
                     ),
-                    label: const Text(
-                      'Reprint',
-                      style: TextStyle(color: Colors.white),
+                  ],
+                ),
+
+                const SizedBox(height: 11),
+
+                // Action buttons
+                Row(
+                  children: [
+                    // Reprint
+                    Expanded(
+                      child: _ReprintButton(
+                        enabled: canReprint,
+                        onTap: canReprint ? onReprint : null,
+                      ),
                     ),
+                    if (_status == 'pending') ...[
+                      const SizedBox(width: 8),
+                      Expanded(
+                        child: _VoidButton(
+                          timeLeft: voidTimeLeft,
+                          canVoid: canVoid,
+                          fmtClock: fmtClock,
+                          onTap: canVoid ? onVoid : null,
+                        ),
+                      ),
+                    ],
+                  ],
+                ),
+
+                // Bets Details toggle
+                if (bets.isNotEmpty) ...[
+                  const SizedBox(height: 11),
+                  GestureDetector(
+                    onTap: onToggleExpand,
+                    child: Row(
+                      children: [
+                        AnimatedRotation(
+                          turns: expanded ? 0.5 : 0,
+                          duration: const Duration(milliseconds: 180),
+                          child: const Icon(
+                            Icons.keyboard_arrow_down,
+                            size: 14,
+                            color: _muted,
+                          ),
+                        ),
+                        const SizedBox(width: 5),
+                        const Text(
+                          'Bets Details',
+                          style: TextStyle(
+                            fontSize: 11.5,
+                            fontWeight: FontWeight.w700,
+                            color: _muted,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
+
+                // Expandable bets table
+                if (bets.isNotEmpty)
+                  AnimatedSize(
+                    duration: const Duration(milliseconds: 220),
+                    curve: Curves.easeOut,
+                    child: expanded
+                        ? _BetsTable(bets: bets, fmtAmount: fmtAmount)
+                        : const SizedBox.shrink(),
                   ),
               ],
             ),
-          const SizedBox(height: 16),
-          // Bet details table
-          if ((ticket.betObjects?.isNotEmpty ?? false) &&
-                  ((ticket.status ?? '').toLowerCase() != 'voided')
-              ? true
-              : showDetails) ...[
-            Text(
-              'Bets Details',
-              style: TextStyle(
-                fontSize: 12,
-                fontWeight: FontWeight.w600,
-                color: Colors.grey[700],
-              ),
-            ),
-            const SizedBox(height: 8),
-            Container(
-              decoration: BoxDecoration(
-                border: Border(
-                  top: BorderSide(color: Colors.grey[300]!, width: 1),
-                  bottom: BorderSide(color: Colors.grey[300]!, width: 1),
-                ),
-              ),
-              child: Column(
-                children: [
-                  // Table header
-                  Padding(
-                    padding: const EdgeInsets.symmetric(vertical: 8),
-                    child: Row(
-                      children: [
-                        Expanded(
-                          flex: 3,
-                          child: Text(
-                            'Bet No',
-                            textAlign: TextAlign.center,
-                            style: TextStyle(
-                              fontSize: 11,
-                              fontWeight: FontWeight.w600,
-                              color: Colors.grey[700],
-                            ),
-                          ),
-                        ),
-                        Expanded(
-                          flex: 3,
-                          child: Text(
-                            'Amount',
-                            textAlign: TextAlign.center,
-                            style: TextStyle(
-                              fontSize: 11,
-                              fontWeight: FontWeight.w600,
-                              color: Colors.grey[700],
-                            ),
-                          ),
-                        ),
-                        Expanded(
-                          flex: 2,
-                          child: Text(
-                            'Type',
-                            textAlign: TextAlign.center,
-                            style: TextStyle(
-                              fontSize: 11,
-                              fontWeight: FontWeight.w600,
-                              color: Colors.grey[700],
-                            ),
-                          ),
-                        ),
-                        Expanded(
-                          flex: 3,
-                          child: Text(
-                            'Status',
-                            textAlign: TextAlign.center,
-                            style: TextStyle(
-                              fontSize: 11,
-                              fontWeight: FontWeight.w600,
-                              color: Colors.grey[700],
-                            ),
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-                  // Table rows
-                  ...?ticket.betObjects?.map((bet) {
-                    String betType = (bet.straightBetAmount ?? 0) > 0
-                        ? 'Target'
-                        : 'Rambol';
-                    return Column(
-                      children: [
-                        Divider(color: Colors.grey[200], height: 1),
-                        Padding(
-                          padding: const EdgeInsets.symmetric(vertical: 8),
-                          child: Row(
-                            children: [
-                              Expanded(
-                                flex: 3,
-                                child: Text(
-                                  (bet.digits?.isNotEmpty ?? false)
-                                      ? bet.digits!.join('-')
-                                      : 'N/A',
-                                  textAlign: TextAlign.center,
-                                  style: const TextStyle(
-                                    fontSize: 12,
-                                    color: Colors.black87,
-                                  ),
-                                ),
-                              ),
-                              Expanded(
-                                flex: 3,
-                                child: Text(
-                                  '₱${(bet.totalBetAmount ?? 0).toStringAsFixed(2)}',
-                                  textAlign: TextAlign.center,
-                                  style: const TextStyle(
-                                    fontSize: 12,
-                                    fontWeight: FontWeight.w500,
-                                    color: Colors.black87,
-                                  ),
-                                ),
-                              ),
-                              Expanded(
-                                flex: 2,
-                                child: Text(
-                                  betType,
-                                  textAlign: TextAlign.center,
-                                  style: TextStyle(
-                                    fontSize: 11,
-                                    color: Colors.grey[600],
-                                  ),
-                                ),
-                              ),
-                              Expanded(
-                                flex: 3,
-                                child: Center(
-                                  child: Container(
-                                    padding: const EdgeInsets.symmetric(
-                                      horizontal: 4,
-                                      vertical: 2,
-                                    ),
-                                    decoration: BoxDecoration(
-                                      color: _getStatusColor(
-                                        bet.status ?? '',
-                                      ).withOpacity(0.1),
-                                      borderRadius: BorderRadius.circular(4),
-                                    ),
-                                    child: Text(
-                                      _getStatusLabel(bet.status ?? ''),
-                                      textAlign: TextAlign.center,
-                                      style: TextStyle(
-                                        fontSize: 10,
-                                        fontWeight: FontWeight.w600,
-                                        color: _getStatusColor(
-                                          bet.status ?? '',
-                                        ),
-                                      ),
-                                    ),
-                                  ),
-                                ),
-                              ),
-                            ],
-                          ),
-                        ),
-                      ],
-                    );
-                  }),
-                ],
-              ),
-            ),
-          ] else if ((ticket.betObjects?.isEmpty ?? true) &&
-              (ticket.status ?? '').toLowerCase() != 'voided') ...[
-            Padding(
-              padding: const EdgeInsets.symmetric(vertical: 8),
-              child: Text(
-                'No bets in this ticket',
-                style: TextStyle(fontSize: 12, color: Colors.grey[600]),
-              ),
-            ),
-          ],
-          const SizedBox(height: 16),
-
-          // Bet Details Summary
-          if ((ticket.betObjects?.isNotEmpty ?? false)) ...[
-            Container(
-              padding: const EdgeInsets.all(12),
-              decoration: BoxDecoration(
-                color: Colors.grey[50],
-                borderRadius: BorderRadius.circular(8),
-                border: Border.all(color: Colors.grey[200]!),
-              ),
-              child: Column(
-                children: [
-                  // Bet Amount
-                  Row(
-                    children: [
-                      Icon(
-                        Icons.card_giftcard,
-                        color: AppColors.primary,
-                        size: 20,
-                      ),
-                      const SizedBox(width: 12),
-                      Expanded(
-                        child: Text(
-                          'Bet Amount',
-                          style: TextStyle(
-                            fontSize: 13,
-                            color: Colors.grey[600],
-                          ),
-                        ),
-                      ),
-                      Text(
-                        '₱ ${(ticket.betObjects?.fold<double>(0, (prev, bet) => prev + (bet.totalBetAmount ?? 0)) ?? 0).toStringAsFixed(2)}',
-                        style: const TextStyle(
-                          fontSize: 13,
-                          fontWeight: FontWeight.w600,
-                          color: AppColors.primary,
-                        ),
-                      ),
-                    ],
-                  ),
-                  const SizedBox(height: 12),
-                  Divider(color: Colors.grey[300], height: 1),
-                  const SizedBox(height: 12),
-                  // Status
-                  Row(
-                    children: [
-                      Icon(
-                        Icons.flag_outlined,
-                        color: AppColors.primary,
-                        size: 20,
-                      ),
-                      const SizedBox(width: 12),
-                      Expanded(
-                        child: Text(
-                          'Status',
-                          style: TextStyle(
-                            fontSize: 13,
-                            color: Colors.grey[600],
-                          ),
-                        ),
-                      ),
-                      Container(
-                        padding: const EdgeInsets.symmetric(
-                          horizontal: 8,
-                          vertical: 4,
-                        ),
-                        decoration: BoxDecoration(
-                          color: _getStatusColor(
-                            ticket.status ?? '',
-                          ).withOpacity(0.15),
-                          borderRadius: BorderRadius.circular(4),
-                        ),
-                        child: Text(
-                          _getStatusLabel(ticket.status ?? ''),
-                          style: TextStyle(
-                            fontSize: 12,
-                            fontWeight: FontWeight.w600,
-                            color: _getStatusColor(ticket.status ?? ''),
-                          ),
-                        ),
-                      ),
-                    ],
-                  ),
-                  const SizedBox(height: 12),
-                  Divider(color: Colors.grey[300], height: 1),
-                  const SizedBox(height: 12),
-                  // Price Payoff
-                  Row(
-                    children: [
-                      Icon(
-                        Icons.trending_up,
-                        color: AppColors.primary,
-                        size: 20,
-                      ),
-                      const SizedBox(width: 12),
-                      Expanded(
-                        child: Text(
-                          'Price Payoff',
-                          style: TextStyle(
-                            fontSize: 13,
-                            color: Colors.grey[600],
-                          ),
-                        ),
-                      ),
-                      Text(
-                        (ticket.winningPayout ?? 0) > 0
-                            ? '₱ ${(ticket.winningPayout ?? 0).toStringAsFixed(2)}'
-                            : '-',
-                        style: const TextStyle(
-                          fontSize: 13,
-                          fontWeight: FontWeight.w600,
-                          color: Colors.black87,
-                        ),
-                      ),
-                    ],
-                  ),
-                ],
-              ),
-            ),
-          ],
-          const SizedBox(height: 12),
-
-          // View bet details button
-          if ((ticket.status ?? '').toLowerCase() == "voided")
-            GestureDetector(
-              onTap: () {
-                setState(() {
-                  showDetails = !showDetails;
-                });
-              },
-              child: Container(
-                width: double.infinity,
-                padding: const EdgeInsets.symmetric(vertical: 12),
-                decoration: BoxDecoration(
-                  color: Colors.blueAccent.withOpacity(0.05),
-                  borderRadius: BorderRadius.circular(8),
-                ),
-                child: const Text(
-                  'View Bet Details',
-                  textAlign: TextAlign.center,
-                  style: TextStyle(
-                    color: AppColors.primary,
-                    fontWeight: FontWeight.w600,
-                    fontSize: 14,
-                  ),
-                ),
-              ),
-            ),
+          ),
         ],
       ),
     );
   }
+}
+
+// ── Void button with integrated countdown ────────────────────────────────────
+
+class _VoidButton extends StatelessWidget {
+  final Duration? timeLeft;
+  final bool canVoid;
+  final String Function(Duration) fmtClock;
+  final VoidCallback? onTap;
+
+  const _VoidButton({
+    required this.timeLeft,
+    required this.canVoid,
+    required this.fmtClock,
+    required this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    // Expired / no window
+    if (timeLeft != null && timeLeft!.inSeconds == 0) {
+      return _btn(
+        enabled: false,
+        warn: false,
+        pct: 1.0,
+        label: 'Void Closed',
+        time: null,
+        onTap: null,
+      );
+    }
+    if (!canVoid) {
+      return _btn(
+        enabled: false,
+        warn: false,
+        pct: 0,
+        label: 'Void',
+        time: null,
+        onTap: null,
+      );
+    }
+    // Active countdown
+    final remaining = timeLeft;
+    double pct = 0;
+    bool warn = false;
+    String? timeStr;
+    if (remaining != null) {
+      const total = 5 * 60; // 5 minutes total window
+      pct = 1.0 - (remaining.inSeconds / total).clamp(0.0, 1.0);
+      warn = remaining.inSeconds < 60;
+      timeStr = fmtClock(remaining);
+    }
+    return _btn(
+      enabled: true,
+      warn: warn,
+      pct: pct,
+      label: 'Void',
+      time: timeStr,
+      onTap: onTap,
+    );
+  }
+
+  Widget _btn({
+    required bool enabled,
+    required bool warn,
+    required double pct,
+    required String label,
+    required String? time,
+    required VoidCallback? onTap,
+  }) {
+    final bg = !enabled
+        ? _hair
+        : warn
+        ? const Color(0xFFB91C1C)
+        : _ink;
+    final fg = !enabled ? _muted2 : Colors.white;
+
+    return GestureDetector(
+      onTap: onTap,
+      child: Container(
+        height: 38,
+        decoration: BoxDecoration(
+          color: bg,
+          borderRadius: BorderRadius.circular(11),
+        ),
+        clipBehavior: Clip.antiAlias,
+        child: Stack(
+          children: [
+            // progress fill (white, fills as time runs out)
+            if (enabled && pct > 0)
+              Positioned.fill(
+                child: Align(
+                  alignment: Alignment.centerLeft,
+                  child: FractionallySizedBox(
+                    widthFactor: pct,
+                    child: Container(
+                      color: Colors.white.withValues(alpha: 0.14),
+                    ),
+                  ),
+                ),
+              ),
+            // content
+            Center(
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Icon(Icons.close, size: 13, color: fg),
+                  const SizedBox(width: 5),
+                  Text(
+                    label,
+                    style: TextStyle(
+                      fontSize: 12.5,
+                      fontWeight: FontWeight.w700,
+                      color: fg,
+                    ),
+                  ),
+                  if (time != null) ...[
+                    Container(
+                      width: 1,
+                      height: 14,
+                      margin: const EdgeInsets.symmetric(horizontal: 7),
+                      color: Colors.white.withValues(alpha: 0.28),
+                    ),
+                    Text(
+                      time,
+                      style: TextStyle(
+                        fontSize: 12.5,
+                        fontWeight: FontWeight.w800,
+                        color: fg,
+                        letterSpacing: 0.2,
+                      ),
+                    ),
+                  ],
+                ],
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+// ── Reprint button ────────────────────────────────────────────────────────────
+
+class _ReprintButton extends StatelessWidget {
+  final bool enabled;
+  final VoidCallback? onTap;
+  const _ReprintButton({required this.enabled, this.onTap});
+
+  @override
+  Widget build(BuildContext context) => GestureDetector(
+    onTap: onTap,
+    child: Container(
+      height: 38,
+      decoration: BoxDecoration(
+        color: Colors.white,
+        border: Border.all(color: enabled ? _blue : _border, width: 1.5),
+        borderRadius: BorderRadius.circular(11),
+      ),
+      child: Row(
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          Icon(
+            Icons.print_outlined,
+            size: 14,
+            color: enabled ? _blue : _muted2,
+          ),
+          const SizedBox(width: 6),
+          Text(
+            'Request Reprint',
+            style: TextStyle(
+              fontSize: 12.5,
+              fontWeight: FontWeight.w700,
+              color: enabled ? _blue : _muted2,
+            ),
+          ),
+        ],
+      ),
+    ),
+  );
+}
+
+// ── Bets table ────────────────────────────────────────────────────────────────
+
+class _BetsTable extends StatelessWidget {
+  final List<BetData> bets;
+  final String Function(double?) fmtAmount;
+  const _BetsTable({required this.bets, required this.fmtAmount});
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      margin: const EdgeInsets.only(top: 10),
+      child: Table(
+        columnWidths: const {
+          0: FlexColumnWidth(2),
+          1: FlexColumnWidth(1.5),
+          2: FlexColumnWidth(1.5),
+          3: FlexColumnWidth(2),
+        },
+        children: [
+          // Header
+          const TableRow(
+            children: [
+              _TH('BET NO'),
+              _TH('AMOUNT'),
+              _TH('TYPE'),
+              _TH('STATUS'),
+            ],
+          ),
+          // Rows
+          ...bets.map((b) {
+            final digits = b.digits?.join('-') ?? b.number ?? '—';
+            final straight = b.straightBetAmount ?? 0;
+            final ramble = b.rambleBetAmount ?? 0;
+            final betType = straight > 0 && ramble > 0
+                ? 'Both'
+                : ramble > 0
+                ? 'Rambol'
+                : 'Target';
+            final amt = (b.straightBetAmount ?? 0) + (b.rambleBetAmount ?? 0);
+            return TableRow(
+              decoration: const BoxDecoration(
+                border: Border(top: BorderSide(color: _hair)),
+              ),
+              children: [
+                _TD(digits),
+                _TD(fmtAmount(amt)),
+                _TD(betType),
+                _TDStatus(b.status ?? '—'),
+              ],
+            );
+          }),
+        ],
+      ),
+    );
+  }
+}
+
+class _TH extends StatelessWidget {
+  final String text;
+  const _TH(this.text);
+
+  @override
+  Widget build(BuildContext context) => Padding(
+    padding: const EdgeInsets.only(bottom: 6),
+    child: Text(
+      text,
+      style: const TextStyle(
+        fontSize: 9,
+        fontWeight: FontWeight.w800,
+        letterSpacing: 0.5,
+        color: _muted2,
+      ),
+    ),
+  );
+}
+
+class _TD extends StatelessWidget {
+  final String text;
+  const _TD(this.text);
+
+  @override
+  Widget build(BuildContext context) => Padding(
+    padding: const EdgeInsets.symmetric(vertical: 6),
+    child: Text(text, style: const TextStyle(fontSize: 12.5, color: _ink2)),
+  );
+}
+
+class _TDStatus extends StatelessWidget {
+  final String status;
+  const _TDStatus(this.status);
+
+  @override
+  Widget build(BuildContext context) {
+    final s = status.toLowerCase();
+    final bg = s == 'voided' ? _redL : _blueL;
+    final fg = s == 'voided' ? _red : _blueD;
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 5),
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 2),
+        decoration: BoxDecoration(
+          color: bg,
+          borderRadius: BorderRadius.circular(20),
+        ),
+        child: Text(
+          status.toUpperCase(),
+          style: TextStyle(
+            fontSize: 9.5,
+            fontWeight: FontWeight.w800,
+            color: fg,
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+// ── Void confirm sheet ────────────────────────────────────────────────────────
+
+class _VoidConfirmSheet extends StatelessWidget {
+  final String ticketId;
+  final VoidCallback onKeep;
+  final VoidCallback onVoid;
+  const _VoidConfirmSheet({
+    required this.ticketId,
+    required this.onKeep,
+    required this.onVoid,
+  });
+
+  @override
+  Widget build(BuildContext context) => Padding(
+    padding: EdgeInsets.fromLTRB(
+      18,
+      18,
+      18,
+      18 + MediaQuery.of(context).viewInsets.bottom,
+    ),
+    child: Column(
+      mainAxisSize: MainAxisSize.min,
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        const Text(
+          'Void this ticket?',
+          style: TextStyle(
+            fontSize: 16,
+            fontWeight: FontWeight.w800,
+            color: _ink,
+          ),
+        ),
+        const SizedBox(height: 6),
+        Text(
+          '$ticketId will be marked void and removed from active bets. '
+          'This can\'t be undone.',
+          style: const TextStyle(fontSize: 13, color: _muted, height: 1.5),
+        ),
+        const SizedBox(height: 16),
+        Row(
+          children: [
+            Expanded(
+              child: GestureDetector(
+                onTap: onKeep,
+                child: Container(
+                  padding: const EdgeInsets.symmetric(vertical: 12),
+                  decoration: BoxDecoration(
+                    color: _hair,
+                    borderRadius: BorderRadius.circular(11),
+                  ),
+                  alignment: Alignment.center,
+                  child: const Text(
+                    'Keep ticket',
+                    style: TextStyle(
+                      fontSize: 14,
+                      fontWeight: FontWeight.w700,
+                      color: _ink2,
+                    ),
+                  ),
+                ),
+              ),
+            ),
+            const SizedBox(width: 10),
+            Expanded(
+              child: GestureDetector(
+                onTap: onVoid,
+                child: Container(
+                  padding: const EdgeInsets.symmetric(vertical: 12),
+                  decoration: BoxDecoration(
+                    color: _red,
+                    borderRadius: BorderRadius.circular(11),
+                  ),
+                  alignment: Alignment.center,
+                  child: const Text(
+                    'Void it',
+                    style: TextStyle(
+                      fontSize: 14,
+                      fontWeight: FontWeight.w700,
+                      color: Colors.white,
+                    ),
+                  ),
+                ),
+              ),
+            ),
+          ],
+        ),
+      ],
+    ),
+  );
+}
+
+// ── Search box ────────────────────────────────────────────────────────────────
+
+class _SearchBox extends StatelessWidget {
+  final TextEditingController controller;
+  final FocusNode focusNode;
+  final bool focused;
+  final VoidCallback onClear;
+  const _SearchBox({
+    required this.controller,
+    required this.focusNode,
+    required this.focused,
+    required this.onClear,
+  });
+
+  @override
+  Widget build(BuildContext context) => AnimatedContainer(
+    duration: const Duration(milliseconds: 150),
+    height: double.infinity,
+    decoration: BoxDecoration(
+      color: Colors.white,
+      border: Border.all(
+        color: focused ? _blue : _border,
+        width: focused ? 1.5 : 1,
+      ),
+      borderRadius: BorderRadius.circular(11),
+      boxShadow: focused
+          ? [
+              BoxShadow(
+                color: _blue.withValues(alpha: 0.10),
+                blurRadius: 0,
+                spreadRadius: 3,
+              ),
+            ]
+          : null,
+    ),
+    child: Row(
+      children: [
+        const SizedBox(width: 12),
+        Icon(Icons.search, size: 16, color: focused ? _blue : _muted2),
+        const SizedBox(width: 6),
+        Expanded(
+          child: TextField(
+            controller: controller,
+            focusNode: focusNode,
+            style: const TextStyle(fontSize: 13, color: _ink),
+            decoration: const InputDecoration(
+              border: InputBorder.none,
+              focusedBorder: InputBorder.none,
+              enabledBorder: InputBorder.none,
+              hintText: 'Search ticket number…',
+              hintStyle: TextStyle(color: _muted2, fontWeight: FontWeight.w500),
+              contentPadding: EdgeInsets.zero,
+              isDense: true,
+            ),
+          ),
+        ),
+        ValueListenableBuilder(
+          valueListenable: controller,
+          builder: (_, v, __) => v.text.isNotEmpty
+              ? GestureDetector(
+                  onTap: onClear,
+                  child: const Padding(
+                    padding: EdgeInsets.symmetric(horizontal: 8),
+                    child: Icon(Icons.close, size: 14, color: _faint),
+                  ),
+                )
+              : const SizedBox(width: 12),
+        ),
+      ],
+    ),
+  );
+}
+
+// ── Date button ───────────────────────────────────────────────────────────────
+
+class _DateButton extends StatelessWidget {
+  final String label;
+  final bool active;
+  final VoidCallback onTap;
+  const _DateButton({
+    required this.label,
+    required this.active,
+    required this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) => GestureDetector(
+    onTap: onTap,
+    child: AnimatedContainer(
+      duration: const Duration(milliseconds: 150),
+      height: double.infinity,
+      padding: const EdgeInsets.symmetric(horizontal: 12),
+      constraints: const BoxConstraints(minWidth: 80, maxWidth: 140),
+      decoration: BoxDecoration(
+        color: active ? _blueL : _hair,
+        border: active ? Border.all(color: _blue) : null,
+        borderRadius: BorderRadius.circular(11),
+        boxShadow: active
+            ? [
+                BoxShadow(
+                  color: _blue.withValues(alpha: 0.10),
+                  blurRadius: 0,
+                  spreadRadius: 3,
+                ),
+              ]
+            : null,
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(
+            Icons.calendar_today_outlined,
+            size: 14,
+            color: active ? _blue : _muted2,
+          ),
+          const SizedBox(width: 7),
+          Flexible(
+            child: Text(
+              label,
+              overflow: TextOverflow.ellipsis,
+              style: TextStyle(
+                fontSize: 12.5,
+                fontWeight: FontWeight.w700,
+                color: active ? _blueD : _ink2,
+              ),
+            ),
+          ),
+        ],
+      ),
+    ),
+  );
+}
+
+// ── Icon button ───────────────────────────────────────────────────────────────
+
+class _IconBtn extends StatelessWidget {
+  final IconData icon;
+  final VoidCallback onTap;
+  const _IconBtn({required this.icon, required this.onTap});
+
+  @override
+  Widget build(BuildContext context) => GestureDetector(
+    onTap: onTap,
+    child: Container(
+      width: 42,
+      height: double.infinity,
+      decoration: BoxDecoration(
+        color: Colors.white,
+        border: Border.all(color: _border),
+        borderRadius: BorderRadius.circular(11),
+      ),
+      alignment: Alignment.center,
+      child: Icon(icon, size: 18, color: _muted),
+    ),
+  );
+}
+
+// ── Date popover ──────────────────────────────────────────────────────────────
+
+class _DatePopover extends StatelessWidget {
+  final String dateFrom;
+  final String dateTo;
+  final List<(String, int, int)> presets;
+  final String Function() todayFn;
+  final String Function(int) addDaysFn;
+  final ValueChanged<String> onFromChanged;
+  final ValueChanged<String> onToChanged;
+  final VoidCallback onApply;
+  final VoidCallback onClear;
+  final void Function(String, String) onPreset;
+
+  const _DatePopover({
+    required this.dateFrom,
+    required this.dateTo,
+    required this.presets,
+    required this.todayFn,
+    required this.addDaysFn,
+    required this.onFromChanged,
+    required this.onToChanged,
+    required this.onApply,
+    required this.onClear,
+    required this.onPreset,
+  });
+
+  @override
+  Widget build(BuildContext context) => Material(
+    elevation: 8,
+    borderRadius: BorderRadius.circular(14),
+    shadowColor: const Color(0xFF0F172A).withValues(alpha: 0.25),
+    child: Container(
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        border: Border.all(color: _border),
+        borderRadius: BorderRadius.circular(14),
+      ),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          // Presets
+          Wrap(
+            spacing: 6,
+            runSpacing: 6,
+            children: presets.map((p) {
+              final f = p.$2 == 0 ? todayFn() : addDaysFn(p.$2);
+              final t = p.$3 == 0 ? todayFn() : addDaysFn(p.$3);
+              final on = dateFrom == f && dateTo == t;
+              return GestureDetector(
+                onTap: () => onPreset(f, t),
+                child: Container(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 10,
+                    vertical: 6,
+                  ),
+                  decoration: BoxDecoration(
+                    color: on ? _blue : Colors.white,
+                    border: Border.all(color: on ? _blue : _border),
+                    borderRadius: BorderRadius.circular(8),
+                  ),
+                  child: Text(
+                    p.$1,
+                    style: TextStyle(
+                      fontSize: 11.5,
+                      fontWeight: FontWeight.w700,
+                      color: on ? Colors.white : _muted,
+                    ),
+                  ),
+                ),
+              );
+            }).toList(),
+          ),
+          const SizedBox(height: 10),
+          // From / To
+          Row(
+            children: [
+              Expanded(
+                child: _DateField(
+                  label: 'From',
+                  value: dateFrom,
+                  onChange: onFromChanged,
+                ),
+              ),
+              const SizedBox(width: 8),
+              Expanded(
+                child: _DateField(
+                  label: 'To',
+                  value: dateTo,
+                  onChange: onToChanged,
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 12),
+          // Actions
+          Row(
+            children: [
+              Expanded(
+                child: GestureDetector(
+                  onTap: onClear,
+                  child: Container(
+                    padding: const EdgeInsets.symmetric(vertical: 9),
+                    decoration: BoxDecoration(
+                      color: _hair,
+                      borderRadius: BorderRadius.circular(9),
+                    ),
+                    alignment: Alignment.center,
+                    child: const Text(
+                      'Clear',
+                      style: TextStyle(
+                        fontSize: 13,
+                        fontWeight: FontWeight.w700,
+                        color: _ink2,
+                      ),
+                    ),
+                  ),
+                ),
+              ),
+              const SizedBox(width: 8),
+              Expanded(
+                child: GestureDetector(
+                  onTap: onApply,
+                  child: Container(
+                    padding: const EdgeInsets.symmetric(vertical: 9),
+                    decoration: BoxDecoration(
+                      color: _blue,
+                      borderRadius: BorderRadius.circular(9),
+                    ),
+                    alignment: Alignment.center,
+                    child: const Text(
+                      'Apply',
+                      style: TextStyle(
+                        fontSize: 13,
+                        fontWeight: FontWeight.w700,
+                        color: Colors.white,
+                      ),
+                    ),
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ],
+      ),
+    ),
+  );
+}
+
+class _DateField extends StatelessWidget {
+  final String label;
+  final String value;
+  final ValueChanged<String> onChange;
+  const _DateField({
+    required this.label,
+    required this.value,
+    required this.onChange,
+  });
+
+  @override
+  Widget build(BuildContext context) => Column(
+    crossAxisAlignment: CrossAxisAlignment.start,
+    children: [
+      Text(
+        label.toUpperCase(),
+        style: const TextStyle(
+          fontSize: 9.5,
+          fontWeight: FontWeight.w800,
+          letterSpacing: 0.5,
+          color: _muted2,
+        ),
+      ),
+      const SizedBox(height: 5),
+      GestureDetector(
+        onTap: () async {
+          final picked = await showDatePicker(
+            context: context,
+            initialDate: value.isNotEmpty
+                ? DateTime.tryParse(value) ?? DateTime.now()
+                : DateTime.now(),
+            firstDate: DateTime(2020),
+            lastDate: DateTime(2030),
+          );
+          if (picked != null) {
+            onChange(picked.toIso8601String().substring(0, 10));
+          }
+        },
+        child: Container(
+          padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 8),
+          decoration: BoxDecoration(
+            border: Border.all(color: _border),
+            borderRadius: BorderRadius.circular(9),
+          ),
+          child: Text(
+            value.isNotEmpty ? value : 'Pick date',
+            style: TextStyle(
+              fontSize: 13,
+              color: value.isNotEmpty ? _ink : _muted2,
+            ),
+          ),
+        ),
+      ),
+    ],
+  );
 }
