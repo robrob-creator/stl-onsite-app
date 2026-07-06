@@ -194,7 +194,9 @@ class _LivePageState extends State<LivePage> {
     for (int dayOffset = 0; dayOffset < 2; dayOffset++) {
       for (var i = 0; i < _schedule.length; i++) {
         final timeMap = _schedule[i].extractTime();
-        final target = DateTime(
+        // Use DateTime.utc so target and manilaNow are both UTC — avoids phone
+        // timezone offset corrupting the difference calculation.
+        final target = DateTime.utc(
           manilaNow.year,
           manilaNow.month,
           manilaNow.day + dayOffset,

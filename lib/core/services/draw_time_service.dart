@@ -100,20 +100,15 @@ class DrawTimeData {
     );
   }
 
-  /// Extract hour and minute from ISO format time string
-  /// e.g., "0000-01-01T10:30:00Z" -> {'hour': 10, 'minute': 30}
+  /// Extract hour and minute — handles both "HH:MM:SS" and "0000-01-01THH:MM:SSZ"
   Map<String, int> extractTime() {
     try {
-      final parts = drawTime.split('T');
-      if (parts.length < 2) {
-        return {'hour': 0, 'minute': 0};
+      String timeStr = drawTime;
+      if (drawTime.contains('T')) {
+        timeStr = drawTime.split('T')[1].replaceAll('Z', '');
       }
-
-      final timeParts = parts[1].replaceAll('Z', '').split(':');
-      if (timeParts.length < 2) {
-        return {'hour': 0, 'minute': 0};
-      }
-
+      final timeParts = timeStr.split(':');
+      if (timeParts.length < 2) return {'hour': 0, 'minute': 0};
       return {
         'hour': int.tryParse(timeParts[0]) ?? 0,
         'minute': int.tryParse(timeParts[1]) ?? 0,

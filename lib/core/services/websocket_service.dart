@@ -59,6 +59,7 @@ class WebSocketService extends GetxController {
     await _socket?.close();
     _socket = null;
     isConnected.value = false;
+    _listeners.clear();
     print('✓ WebSocket disconnected');
   }
 

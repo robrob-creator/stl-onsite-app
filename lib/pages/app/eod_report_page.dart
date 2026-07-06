@@ -45,13 +45,20 @@ class _EodReportPageState extends State<EodReportPage> {
       _wsUnsubscribers.add(ws.on('bet.bulk_placed', (_) => _refreshReport()));
       _wsUnsubscribers.add(ws.on('claim.paid', (_) => _refreshReport()));
       _wsUnsubscribers.add(ws.on('bet.submitted', (_) => _refreshReport()));
-      _wsUnsubscribers.add(ws.on('ticket.voided', (_) => _refreshReport()));
 
-      // Wildcard listener: inspect the augmented payload's `_eventType` and
-      // refresh when it looks like a transaction/bet/claim event.
+      // Wildcard listener: backend always emits api.mutation for POST/PUT/DELETE.
+      // Check both _eventType and the endpoint path so approved-void events
+      // (endpoint: /api/request/approve/void-ticket) also trigger a refresh.
       _wsUnsubscribers.add(ws.on('*', (payload) {
         final type = payload['_eventType'] as String? ?? '';
-        if (type.contains('bet') || type.contains('claim') || type.contains('transaction') || type.contains('ticket')) {
+        final endpoint = (payload['endpoint'] as String?) ?? '';
+        if (type.contains('bet') ||
+            type.contains('claim') ||
+            type.contains('transaction') ||
+            type.contains('ticket') ||
+            endpoint.contains('void') ||
+            endpoint.contains('request/approve') ||
+            endpoint.contains('request/disapprove')) {
           _refreshReport();
         }
       }));

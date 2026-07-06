@@ -6,6 +6,7 @@ import 'package:connectivity_plus/connectivity_plus.dart';
 import 'package:flutter/services.dart';
 import 'dart:async';
 import 'dart:convert';
+import 'dart:developer' show log;
 import 'dart:io';
 import 'dart:developer' as developer;
 import 'auth_controller.dart';
@@ -21,6 +22,8 @@ import '../core/services/websocket_service.dart';
 import '../core/services/sold_out_service.dart';
 import '../core/services/draw_results_service.dart';
 import '../core/services/ticket_service.dart';
+import '../core/services/no_game_date_service.dart';
+import '../core/services/location_service.dart';
 
 class BetEntry {
   final int betNumber;
@@ -107,13 +110,87 @@ class LotteryController extends GetxController {
   // Permutation availability from server (preview endpoint)
   final Rx<PermutationAvailability?> permAvailability =
       Rx<PermutationAvailability?>(null);
+  final RxBool isCheckingPermutations = false.obs;
+
+  // No-game date restriction
+  final RxBool isNoGameDay = false.obs;
+  final RxString noGameDayDescription = ''.obs;
+
+  // Blackout time restriction (computed from selected game)
+  final RxBool isBlackoutTime = false.obs;
+  Timer? _blackoutTimer;
+
+  // The date bets will be placed for (today or tomorrow when after last draw)
+  final Rx<DateTime> betDate = DateTime.now().obs;
+  bool get isBettingForTomorrow {
+    final now = DateTime.now();
+    final d = betDate.value;
+    return d.year != now.year || d.month != now.month || d.day != now.day;
+  }
 
   @override
   void onInit() {
     super.onInit();
+    _checkNoGameDay();
     loadGames();
     loadProfile();
     _subscribeToWebSocketEvents();
+    _startBlackoutTimer();
+    // Update user's location in background on app open
+    LocationService.updateUserLocation();
+  }
+
+  @override
+  void onClose() {
+    _blackoutTimer?.cancel();
+    super.onClose();
+  }
+
+  void _startBlackoutTimer() {
+    _blackoutTimer?.cancel();
+    // Check every 30 seconds so UI reacts promptly when blackout/date changes
+    _blackoutTimer = Timer.periodic(const Duration(seconds: 30), (_) {
+      _updateBlackoutState();
+      _updateBetDate();
+    });
+  }
+
+  void _updateBlackoutState() {
+    final game = currentGame;
+    isBlackoutTime.value = game?.isInBlackout ?? false;
+  }
+
+  /// Called from UI when user switches game tab.
+  void updateBetDateForGame(game) {
+    final today = DateTime.now();
+    final hasAvailableToday =
+        (game.drawTimes as List).any((dt) => dt.isAvailable());
+    if (!hasAvailableToday) {
+      final tomorrow = today.add(const Duration(days: 1));
+      betDate.value = DateTime(tomorrow.year, tomorrow.month, tomorrow.day);
+    } else {
+      betDate.value = DateTime(today.year, today.month, today.day);
+    }
+  }
+
+  /// If all draw times for today are past, switch betDate to tomorrow.
+  void _updateBetDate() {
+    final game = currentGame;
+    if (game == null) return;
+    final today = DateTime.now();
+    final hasAvailableToday = game.drawTimes.any((dt) => dt.isAvailable());
+    if (!hasAvailableToday) {
+      final tomorrow = today.add(const Duration(days: 1));
+      betDate.value = DateTime(tomorrow.year, tomorrow.month, tomorrow.day);
+    } else {
+      betDate.value = DateTime(today.year, today.month, today.day);
+    }
+  }
+
+  Future<void> _checkNoGameDay() async {
+    final result = await NoGameDateService.checkToday();
+    isNoGameDay.value = result.isNoGameDay;
+    noGameDayDescription.value = result.description ?? '';
   }
 
   void _subscribeToWebSocketEvents() {
@@ -139,7 +216,11 @@ class LotteryController extends GetxController {
         selectedGameId.value = games[0].id;
         selectedTime.value = getFirstAvailableDrawTimeId(games[0]);
       }
+      _updateBlackoutState();
+      _updateBetDate();
       update();
+      // Load any saved drafts now that games are available for lookup
+      await loadDraftBets();
     } catch (e) {
       Get.snackbar('Error', 'Failed to load games: $e');
     } finally {
@@ -147,16 +228,95 @@ class LotteryController extends GetxController {
     }
   }
 
+  /// Load existing draft bets from server into [draftBets].
+  /// Only runs when [draftBets] is empty to avoid overwriting in-session additions.
+  Future<void> loadDraftBets() async {
+    if (draftBets.isNotEmpty) return;
+    try {
+      final token = Get.find<AuthController>().token.value;
+      final response = await http.get(
+        Uri.parse('${AppConstants.apiBaseUrl}/bets/list'),
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': 'Bearer $token',
+        },
+      ).timeout(const Duration(seconds: 30));
+
+      if (response.statusCode != 200) return;
+
+      final data = jsonDecode(response.body) as Map<String, dynamic>;
+      final betsJson = (data['data'] as List?) ?? [];
+
+      final drafts = <DraftBet>[];
+      for (final betJson in betsJson) {
+        if (betJson['status'] != 'draft') continue;
+
+        final gameId = betJson['game_id'] as String? ?? '';
+        final game = availableGames.firstWhereOrNull((g) => g.id == gameId);
+
+        List<String> digits = [];
+        final rawDigits = betJson['digits'];
+        if (rawDigits is List) {
+          digits = List<String>.from(rawDigits.map((e) => e.toString()));
+        } else if (rawDigits is String) {
+          digits = rawDigits
+              .replaceAll('{', '')
+              .replaceAll('}', '')
+              .split(',')
+              .map((d) => d.trim())
+              .where((d) => d.isNotEmpty)
+              .toList();
+        }
+
+        final combinations = digits.isNotEmpty ? calculateCombinations(digits) : 1;
+        final drawId = betJson['draw_id'] as String? ?? '';
+        String drawTimeLabel = '';
+        if (game != null) {
+          final dt = currentDrawTimes.cast<DrawTime?>().firstWhere(
+            (dt) => dt?.id == drawId,
+            orElse: () => null,
+          );
+          drawTimeLabel = dt?.getFormattedTime() ?? '';
+        }
+
+        drafts.add(DraftBet(
+          id: betJson['id'] as String? ?? '',
+          gameName: game?.name ?? (betJson['game_name'] as String? ?? 'Unknown'),
+          gameId: gameId,
+          digits: digits,
+          straightBetAmount: (betJson['straight_bet_amount'] as num? ?? 0).toDouble(),
+          rambleBetAmount: (betJson['ramble_bet_amount'] as num? ?? 0).toDouble(),
+          totalBetAmount: (betJson['total_bet_amount'] as num? ?? 0).toDouble(),
+          estPayout: (betJson['est_payout'] as num? ?? 0).toDouble(),
+          combinations: combinations,
+          drawTimeLabel: drawTimeLabel,
+          drawTimeId: drawId,
+        ));
+      }
+
+      if (drafts.isNotEmpty) {
+        draftBets.value = drafts;
+      }
+    } catch (_) {
+      // Fail open — drafts will just be empty
+    }
+  }
+
   /// Fetch user profile and update balance
   Future<void> loadProfile() async {
-    try {
-      final user = await ProfileService.fetchProfile();
-      balance.value = user.balance;
-      Get.find<AuthController>().syncCurrentUser(user);
-      update();
-    } catch (e) {
-      // Silently fail - keep existing balance if profile fetch fails
-      debugPrint('Failed to load profile: $e');
+    for (int attempt = 1; attempt <= 3; attempt++) {
+      try {
+        final user = await ProfileService.fetchProfile();
+        balance.value = user.balance;
+        Get.find<AuthController>().syncCurrentUser(user);
+        update();
+        return;
+      } catch (e) {
+        debugPrint('Failed to load profile (attempt $attempt): $e');
+        if (attempt < 3) {
+          await Future.delayed(Duration(seconds: attempt));
+        }
+      }
     }
   }
 
@@ -181,7 +341,12 @@ class LotteryController extends GetxController {
   String getFirstAvailableDrawTimeId(Game game) {
     final drawTimes = List<DrawTime>.from(game.drawTimes)
       ..sort(DrawTime.compareChronologically);
-    return drawTimes.where((dt) => dt.isAvailable()).firstOrNull?.id ?? '';
+    final date = betDate.value;
+    return drawTimes
+            .where((dt) => dt.isAvailableForDate(date))
+            .firstOrNull
+            ?.id ??
+        '';
   }
 
   /// Calculate the number of unique permutations for the given digits
@@ -224,17 +389,8 @@ class LotteryController extends GetxController {
     if (selectedNumbers.contains(number)) {
       selectedNumbers.remove(number);
     } else {
-      // Get the limit from the current game
       final game = currentGame;
-      int limit = 2; // Default for 2D
-      if (game != null) {
-        // Calculate number of digits needed based on max number
-        if (game.maxNumber >= 1000) {
-          limit = 3; // 3D
-        } else if (game.maxNumber >= 100) {
-          limit = 2; // 2D
-        }
-      }
+      final int limit = game?.numberOfCombinations ?? 2;
 
       if (selectedNumbers.length < limit) {
         selectedNumbers.add(number);
@@ -248,14 +404,50 @@ class LotteryController extends GetxController {
     update();
   }
 
-  void clearDraftBets() {
+  Future<void> clearDraftBets() async {
+    final toDelete = List<DraftBet>.from(draftBets);
     draftBets.clear();
     update();
+
+    final token = Get.find<AuthController>().token.value;
+    await Future.wait(
+      toDelete
+          .where((d) => d.id.isNotEmpty)
+          .map((d) => http
+              .delete(
+                Uri.parse('${AppConstants.apiBaseUrl}/bets/delete?id=${d.id}'),
+                headers: {
+                  'Content-Type': 'application/json',
+                  'Authorization': 'Bearer $token',
+                },
+              )
+              .timeout(const Duration(seconds: 30))
+              .catchError((_) => http.Response('', 500))),
+    );
   }
 
   /// Sends the current bet inputs to `POST /bets/draft-bulk` and appends
   /// the returned draft to [draftBets]. Returns `true` on success.
   Future<bool> addBet() async {
+    if (isNoGameDay.value) {
+      Get.snackbar(
+        'Betting Unavailable',
+        noGameDayDescription.value.isNotEmpty
+            ? noGameDayDescription.value
+            : 'No games are scheduled for today.',
+        snackPosition: SnackPosition.BOTTOM,
+      );
+      return false;
+    }
+    if (isBlackoutTime.value) {
+      Get.snackbar(
+        'Blackout Period',
+        'Betting is temporarily unavailable during the configured blackout period.',
+        snackPosition: SnackPosition.BOTTOM,
+      );
+      return false;
+    }
+
     // Verify internet connectivity before attempting to add a bet
     if (!await _hasInternetConnection()) {
       // Run a quick diagnostic to capture connectivity and server reachability
@@ -320,10 +512,15 @@ class LotteryController extends GetxController {
       // them as independent draft records (one per type).
       final List<Map<String, dynamic>> betItems = [];
 
+      final betDateStr =
+          '${betDate.value.year}-${betDate.value.month.toString().padLeft(2, '0')}-${betDate.value.day.toString().padLeft(2, '0')}';
+
       if (straightAmount > 0) {
         final estPayout = straightAmount * game.straightMultiplier;
         betItems.add({
           'draw_id': drawId,
+          'draw_time_id': drawId,
+          'draw_date': betDateStr,
           'game_id': game.id,
           'total_bet_amount': straightAmount,
           'digits': digits,
@@ -339,6 +536,8 @@ class LotteryController extends GetxController {
             (rambleAmount / combinations) * (game.rambleMultiplier ?? 0);
         betItems.add({
           'draw_id': drawId,
+          'draw_time_id': drawId,
+          'draw_date': betDateStr,
           'game_id': game.id,
           'total_bet_amount': rambleAmount,
           'digits': digits,
@@ -540,6 +739,7 @@ class LotteryController extends GetxController {
     if (game == null) return;
     final drawTimeId = selectedTime.value;
     final drawDate = ManilaTime.dateString();
+    isCheckingPermutations.value = true;
     try {
       final result = await SoldOutService.checkPermutations(
         gameId: game.id,
@@ -552,6 +752,8 @@ class LotteryController extends GetxController {
       permAvailability.value = result;
     } catch (_) {
       permAvailability.value = null;
+    } finally {
+      isCheckingPermutations.value = false;
     }
   }
 
@@ -596,7 +798,7 @@ class LotteryController extends GetxController {
         cartBets: cartBets,
       );
       permAvailability.value = result;
-      return buildBetAvailabilityResult(
+      final avail = buildBetAvailabilityResult(
         gameId: game.id,
         digits: digits,
         drawTimeId: drawTimeId,
@@ -605,7 +807,13 @@ class LotteryController extends GetxController {
         rambolAmount: rambolAmount,
         perm: result,
       );
-    } catch (_) {
+      log('[AVAIL] state=${result.state} targetAvail=${result.target.availableAmount} '
+          'targetAmt=$targetAmount rambolAmt=$rambolAmount '
+          'result=${avail == null ? "null(OPEN)" : "EXCEEDS exceeds=${avail.exceeds}"}',
+          name: 'AVAIL');
+      return avail;
+    } catch (e, st) {
+      log('[AVAIL] ERROR: $e', name: 'AVAIL', error: e, stackTrace: st);
       return null; // fail open
     }
   }
@@ -692,9 +900,15 @@ class LotteryController extends GetxController {
       }
 
       final status = await Permission.locationWhenInUse.status;
-      if (status.isGranted) return true;
+      if (status.isGranted) {
+        LocationService.updateUserLocation();
+        return true;
+      }
       final req = await Permission.locationWhenInUse.request();
-      if (req.isGranted) return true;
+      if (req.isGranted) {
+        LocationService.updateUserLocation();
+        return true;
+      }
       await _showLocationPrompt();
       return false;
     } catch (_) {
@@ -870,6 +1084,25 @@ class LotteryController extends GetxController {
   }
 
   Future<void> submitBets() async {
+    if (isNoGameDay.value) {
+      Get.snackbar(
+        'Betting Unavailable',
+        noGameDayDescription.value.isNotEmpty
+            ? noGameDayDescription.value
+            : 'No games are scheduled for today.',
+        snackPosition: SnackPosition.BOTTOM,
+      );
+      return;
+    }
+    if (isBlackoutTime.value) {
+      Get.snackbar(
+        'Blackout Period',
+        'Betting is temporarily unavailable during the configured blackout period.',
+        snackPosition: SnackPosition.BOTTOM,
+      );
+      return;
+    }
+
     // Verify internet connectivity before submitting bets
     if (!await _hasInternetConnection()) {
       Get.snackbar(
@@ -928,6 +1161,17 @@ class LotteryController extends GetxController {
 
       Map<String, dynamic> lastTeller = {};
       double? lastBalance;
+
+      // Collects print data for each submitted group; printed sequentially after
+      // all API submissions succeed to avoid concurrent Bluetooth connections.
+      final printQueue = <({
+        List<BetEntry> betEntries,
+        double totalAmount,
+        String ticketNo,
+        Map<String, dynamic> teller,
+        String gameName,
+        String drawTimeLabel,
+      })>[];
 
       for (final entry in groups.entries) {
         final groupDrawId = entry.key;
@@ -1019,14 +1263,14 @@ class LotteryController extends GetxController {
           return entries;
         }).toList();
 
-        _triggerPrint(
+        printQueue.add((
           betEntries: printEntries,
           totalAmount: groupTotal,
           ticketNo: ticketNo,
-          teller: lastTeller,
+          teller: Map<String, dynamic>.from(lastTeller),
           gameName: groupGameName,
           drawTimeLabel: groupDrawTimeLabel,
-        );
+        ));
       }
 
       if (lastBalance != null) {
@@ -1053,6 +1297,18 @@ class LotteryController extends GetxController {
         duration: const Duration(seconds: 3),
         icon: const Icon(Icons.check_circle, color: Colors.white),
       );
+
+      // Print tickets sequentially — one Bluetooth job at a time.
+      for (final job in printQueue) {
+        await _triggerPrint(
+          betEntries: job.betEntries,
+          totalAmount: job.totalAmount,
+          ticketNo: job.ticketNo,
+          teller: job.teller,
+          gameName: job.gameName,
+          drawTimeLabel: job.drawTimeLabel,
+        );
+      }
     } catch (e) {
       Get.snackbar(
         'Error',
@@ -1123,104 +1379,100 @@ class LotteryController extends GetxController {
       margin: const EdgeInsets.all(16),
     );
 
-    // Print in background — do not await so UI stays responsive.
-    // All error conditions (no printer, disconnected, out of paper) are
-    // surfaced via the typed PrintResult.
-    PrinterService.printTicket(
+    final result = await PrinterService.printTicket(
       betEntries: betEntries,
       totalAmount: totalAmount,
       ticketNo: ticketNo,
       teller: teller,
       gameName: gameName,
       drawTimeLabel: drawTimeLabel,
-    ).then((result) {
-      if (result.success) return;
+    );
 
-      switch (result.error) {
-        case PrintError.noPrinterConfigured:
-          Get.dialog(
-            _printerAlertDialog(
-              icon: Icons.bluetooth_disabled,
-              title: 'No Printer Connected',
-              message: 'Please connect to a printer before submitting bets.',
-              actionLabel: 'Set Up Printer',
-              onAction: () {
-                Get.back();
-                Get.toNamed('/printer-settings');
-              },
-            ),
-          );
-          break;
-        case PrintError.permissionDenied:
-          Get.dialog(
-            _printerAlertDialog(
-              icon: Icons.bluetooth_searching,
-              title: 'Bluetooth Permission Required',
-              message:
-                  'Allow Nearby devices permission so the app can connect to your printer.',
-              actionLabel: 'Open Settings',
-              onAction: () {
-                Get.back();
-                openAppSettings();
-              },
-            ),
-          );
-          break;
-        case PrintError.notConnected:
-          Get.dialog(
-            _printerAlertDialog(
-              icon: Icons.bluetooth_disabled,
-              title: 'Printer Not Connected',
-              message:
-                  'Please connect to a printer. Make sure Bluetooth is on and the printer is paired.',
-              actionLabel: 'Go to Settings',
-              onAction: () {
-                Get.back();
-                Get.toNamed('/printer-settings');
-              },
-            ),
-          );
-          break;
-        case PrintError.outOfPaper:
-          Get.dialog(
-            _printerAlertDialog(
-              icon: Icons.feed_outlined,
-              title: 'Printer Out of Paper',
-              message:
-                  'The printer has no paper. Please load paper and print again.',
-              actionLabel: 'OK',
-              onAction: Get.back,
-            ),
-          );
-          break;
-        case PrintError.nearEndOfPaper:
-          // Ticket printed but paper is running low — show warning snackbar
-          Get.snackbar(
-            'Low Paper',
-            'Ticket printed, but printer paper is running low. Please refill soon.',
-            snackPosition: SnackPosition.BOTTOM,
-            backgroundColor: Colors.orange[700],
-            colorText: Colors.white,
-            duration: const Duration(seconds: 5),
-            icon: const Icon(Icons.warning_amber_rounded, color: Colors.white),
-          );
-          break;
-        default:
-          Get.dialog(
-            _printerAlertDialog(
-              icon: Icons.print_disabled_rounded,
-              title: 'Print Failed',
-              message:
-                  'Could not print the ticket. Please check:\n\n'
-                  '• Printer has paper loaded\n'
-                  '• Printer is powered on\n'
-                  '• Bluetooth is connected',
-              actionLabel: 'OK',
-              onAction: Get.back,
-            ),
-          );
-      }
-    });
+    if (result.success) return;
+
+    switch (result.error) {
+      case PrintError.noPrinterConfigured:
+        Get.dialog(
+          _printerAlertDialog(
+            icon: Icons.bluetooth_disabled,
+            title: 'No Printer Connected',
+            message: 'Please connect to a printer before submitting bets.',
+            actionLabel: 'Set Up Printer',
+            onAction: () {
+              Get.back();
+              Get.toNamed('/printer-settings');
+            },
+          ),
+        );
+        break;
+      case PrintError.permissionDenied:
+        Get.dialog(
+          _printerAlertDialog(
+            icon: Icons.bluetooth_searching,
+            title: 'Bluetooth Permission Required',
+            message:
+                'Allow Nearby devices permission so the app can connect to your printer.',
+            actionLabel: 'Open Settings',
+            onAction: () {
+              Get.back();
+              openAppSettings();
+            },
+          ),
+        );
+        break;
+      case PrintError.notConnected:
+        Get.dialog(
+          _printerAlertDialog(
+            icon: Icons.bluetooth_disabled,
+            title: 'Printer Not Connected',
+            message:
+                'Please connect to a printer. Make sure Bluetooth is on and the printer is paired.',
+            actionLabel: 'Go to Settings',
+            onAction: () {
+              Get.back();
+              Get.toNamed('/printer-settings');
+            },
+          ),
+        );
+        break;
+      case PrintError.outOfPaper:
+        Get.dialog(
+          _printerAlertDialog(
+            icon: Icons.feed_outlined,
+            title: 'Printer Out of Paper',
+            message:
+                'The printer has no paper. Please load paper and print again.',
+            actionLabel: 'OK',
+            onAction: Get.back,
+          ),
+        );
+        break;
+      case PrintError.nearEndOfPaper:
+        Get.snackbar(
+          'Low Paper',
+          'Ticket printed, but printer paper is running low. Please refill soon.',
+          snackPosition: SnackPosition.BOTTOM,
+          backgroundColor: Colors.orange[700],
+          colorText: Colors.white,
+          duration: const Duration(seconds: 5),
+          icon: const Icon(Icons.warning_amber_rounded, color: Colors.white),
+        );
+        break;
+      default:
+        Get.dialog(
+          _printerAlertDialog(
+            icon: Icons.print_disabled_rounded,
+            title: 'Print Failed',
+            message:
+                'Could not print the ticket. Please check:\n\n'
+                '• Printer has paper loaded\n'
+                '• Printer is powered on\n'
+                '• Bluetooth is connected',
+            actionLabel: 'OK',
+            onAction: Get.back,
+          ),
+        );
+    }
   }
 
   /// Builds a reusable alert dialog for printer-related errors.

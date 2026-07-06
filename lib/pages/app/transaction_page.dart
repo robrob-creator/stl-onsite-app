@@ -107,11 +107,24 @@ class _TransactionPageState extends State<TransactionPage> {
       case 'pending':
         return AppColors.primary;
       case 'completed':
-        return const Color(0xFF10B981);
+        return AppColors.success;
       case 'failed':
-        return Colors.red;
+        return AppColors.error;
       default:
-        return Colors.grey[600]!;
+        return AppColors.textSecondary;
+    }
+  }
+
+  Color _getStatusBgColor(String status) {
+    switch (status.toLowerCase()) {
+      case 'pending':
+        return AppColors.primaryLight;
+      case 'completed':
+        return AppColors.successLight;
+      case 'failed':
+        return AppColors.errorLight;
+      default:
+        return const Color(0xFFF3F4F6);
     }
   }
 
@@ -253,6 +266,9 @@ class _TransactionPageState extends State<TransactionPage> {
   }
 
   Widget _buildGroupCard(TicketGroup group) {
+    final statusColor = _getStatusColor(group.overallStatus);
+    final statusBg = _getStatusBgColor(group.overallStatus);
+
     return Material(
       color: Colors.transparent,
       child: InkWell(
@@ -264,17 +280,37 @@ class _TransactionPageState extends State<TransactionPage> {
             ),
           );
         },
-        borderRadius: BorderRadius.circular(12),
+        borderRadius: BorderRadius.circular(14),
         child: Container(
-          margin: const EdgeInsets.only(bottom: 12),
-          padding: const EdgeInsets.all(16),
+          margin: const EdgeInsets.only(bottom: 10),
+          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 14),
           decoration: BoxDecoration(
-            color: Colors.grey[50],
-            borderRadius: BorderRadius.circular(12),
-            border: Border.all(color: Colors.grey[200]!),
+            color: Colors.white,
+            borderRadius: BorderRadius.circular(14),
+            boxShadow: [
+              BoxShadow(
+                color: Colors.black.withValues(alpha: 0.06),
+                blurRadius: 8,
+                offset: const Offset(0, 2),
+              ),
+            ],
           ),
           child: Row(
             children: [
+              Container(
+                width: 46,
+                height: 46,
+                decoration: BoxDecoration(
+                  color: statusBg,
+                  borderRadius: BorderRadius.circular(12),
+                ),
+                child: Icon(
+                  Icons.confirmation_number_outlined,
+                  size: 22,
+                  color: statusColor,
+                ),
+              ),
+              const SizedBox(width: 12),
               Expanded(
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
@@ -283,63 +319,78 @@ class _TransactionPageState extends State<TransactionPage> {
                       _formatDrawTimeLabel(group.drawTime),
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
-                      style: const TextStyle(
-                        fontSize: 14,
-                        fontWeight: FontWeight.w600,
-                        color: Colors.black87,
+                      style: AppTextStyles.titleSmall.copyWith(
+                        color: AppColors.text,
                       ),
                     ),
-                    const SizedBox(height: 4),
+                    const SizedBox(height: 3),
                     Text(
                       group.createdAt.isNotEmpty
                           ? _formatDate(group.createdAt)
                           : _formatSelectedDate(),
-                      style: TextStyle(fontSize: 12, color: Colors.grey[600]),
+                      style: AppTextStyles.bodySmall.copyWith(
+                        color: AppColors.textSecondary,
+                      ),
                     ),
-                    const SizedBox(height: 2),
-                    Text(
-                      '${group.count} transaction${group.count == 1 ? '' : 's'}',
-                      style: TextStyle(fontSize: 11, color: Colors.grey[500]),
+                    const SizedBox(height: 6),
+                    Container(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 7,
+                        vertical: 2,
+                      ),
+                      decoration: BoxDecoration(
+                        color: AppColors.primaryLight,
+                        borderRadius: BorderRadius.circular(5),
+                      ),
+                      child: Text(
+                        '${group.count} ticket${group.count == 1 ? '' : 's'}',
+                        style: AppTextStyles.labelSmall.copyWith(
+                          color: AppColors.primary,
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
                     ),
                   ],
                 ),
               ),
+              const SizedBox(width: 10),
               Column(
                 crossAxisAlignment: CrossAxisAlignment.end,
                 children: [
                   Text(
                     '₱${group.totalAmount.toStringAsFixed(2)}',
-                    style: const TextStyle(
-                      fontSize: 14,
-                      fontWeight: FontWeight.w600,
-                      color: Colors.black87,
+                    style: AppTextStyles.titleSmall.copyWith(
+                      color: AppColors.text,
+                      fontWeight: FontWeight.w700,
                     ),
                   ),
                   const SizedBox(height: 6),
                   Container(
                     padding: const EdgeInsets.symmetric(
-                      horizontal: 8,
-                      vertical: 2,
+                      horizontal: 7,
+                      vertical: 3,
                     ),
                     decoration: BoxDecoration(
-                      color: _getStatusColor(
-                        group.overallStatus,
-                      ).withValues(alpha: 0.15),
-                      borderRadius: BorderRadius.circular(4),
+                      color: statusBg,
+                      borderRadius: BorderRadius.circular(5),
                     ),
                     child: Text(
                       group.overallStatus.toUpperCase(),
-                      style: TextStyle(
-                        fontSize: 10,
-                        fontWeight: FontWeight.w600,
-                        color: _getStatusColor(group.overallStatus),
+                      style: AppTextStyles.caption.copyWith(
+                        color: statusColor,
+                        fontWeight: FontWeight.w700,
+                        letterSpacing: 0.4,
                       ),
                     ),
                   ),
                 ],
               ),
-              const SizedBox(width: 12),
-              const Icon(Icons.arrow_forward_ios, color: Colors.grey, size: 16),
+              const SizedBox(width: 6),
+              Icon(
+                Icons.chevron_right,
+                color: AppColors.textTertiary,
+                size: 20,
+              ),
             ],
           ),
         ),

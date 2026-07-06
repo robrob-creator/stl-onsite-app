@@ -22,6 +22,8 @@ class Game {
   final String status;
   final bool isActive;
   final String createdAt;
+  final String? blackoutStartTime; // HH:MM:SS
+  final String? blackoutEndTime;   // HH:MM:SS
 
   Game({
     required this.id,
@@ -47,7 +49,27 @@ class Game {
     required this.status,
     required this.isActive,
     required this.createdAt,
+    this.blackoutStartTime,
+    this.blackoutEndTime,
   });
+
+  /// Returns true if current local time falls within this game's blackout window.
+  bool get isInBlackout {
+    if (blackoutStartTime == null || blackoutEndTime == null) return false;
+    try {
+      final now = DateTime.now();
+      final startParts = blackoutStartTime!.split(':');
+      final endParts = blackoutEndTime!.split(':');
+      if (startParts.length < 2 || endParts.length < 2) return false;
+      final start = DateTime(now.year, now.month, now.day,
+          int.parse(startParts[0]), int.parse(startParts[1]));
+      final end = DateTime(now.year, now.month, now.day,
+          int.parse(endParts[0]), int.parse(endParts[1]));
+      return now.isAfter(start) && now.isBefore(end);
+    } catch (_) {
+      return false;
+    }
+  }
 
   factory Game.fromJson(Map<String, dynamic> json) {
     return Game(
@@ -82,6 +104,8 @@ class Game {
       status: json['status'] as String? ?? 'active',
       isActive: json['is_active'] as bool? ?? true,
       createdAt: json['created_at'] as String? ?? '',
+      blackoutStartTime: json['blackout_start_time'] as String?,
+      blackoutEndTime: json['blackout_end_time'] as String?,
     );
   }
 
@@ -110,6 +134,8 @@ class Game {
       'status': status,
       'is_active': isActive,
       'created_at': createdAt,
+      'blackout_start_time': blackoutStartTime,
+      'blackout_end_time': blackoutEndTime,
     };
   }
 }
@@ -195,12 +221,12 @@ class DrawTime {
 
   int get minutesSinceMidnight {
     try {
-      final parts = drawTime.split('T');
-      if (parts.length < 2) return 0;
-
-      final timeParts = parts[1].substring(0, 5).split(':');
+      String timeStr = drawTime;
+      if (drawTime.contains('T')) {
+        timeStr = drawTime.split('T')[1].replaceAll('Z', '');
+      }
+      final timeParts = timeStr.substring(0, 5).split(':');
       if (timeParts.length != 2) return 0;
-
       final hour = int.parse(timeParts[0]);
       final minute = int.parse(timeParts[1]);
       return (hour * 60) + minute;
@@ -213,29 +239,25 @@ class DrawTime {
     return a.minutesSinceMidnight.compareTo(b.minutesSinceMidnight);
   }
 
-  /// Extract time string in HH:MM AM/PM format from the draw_time field
+  /// Extract time string in HH:MM AM/PM format — handles "HH:MM:SS" and "0000-01-01THH:MM:SSZ"
   String getFormattedTime() {
     try {
-      // Parse ISO 8601 format: "0000-01-01T10:30:00Z"
-      final parts = drawTime.split('T');
-      if (parts.length > 1) {
-        final timeString = parts[1].substring(0, 5); // HH:MM
-        final timeParts = timeString.split(':');
-
-        if (timeParts.length == 2) {
-          int hour = int.parse(timeParts[0]);
-          final minute = timeParts[1];
-
-          // Convert to 12-hour format
-          final String period = hour >= 12 ? 'PM' : 'AM';
-          if (hour > 12) {
-            hour = hour - 12;
-          } else if (hour == 0) {
-            hour = 12;
-          }
-
-          return '$hour:$minute $period';
+      String timeStr = drawTime;
+      if (drawTime.contains('T')) {
+        timeStr = drawTime.split('T')[1].replaceAll('Z', '');
+      }
+      final timeString = timeStr.substring(0, 5); // HH:MM
+      final timeParts = timeString.split(':');
+      if (timeParts.length == 2) {
+        int hour = int.parse(timeParts[0]);
+        final minute = timeParts[1];
+        final String period = hour >= 12 ? 'PM' : 'AM';
+        if (hour > 12) {
+          hour = hour - 12;
+        } else if (hour == 0) {
+          hour = 12;
         }
+        return '$hour:$minute $period';
       }
     } catch (e) {
       // Fallback
@@ -243,17 +265,27 @@ class DrawTime {
     return drawTime;
   }
 
+  /// Returns true when this draw time is available for betting on [date].
+  /// For any future date (tomorrow+), all draw times are open.
+  /// For today, the cutoff window is enforced.
+  bool isAvailableForDate(DateTime date) {
+    final now = DateTime.now();
+    final today = DateTime(now.year, now.month, now.day);
+    final target = DateTime(date.year, date.month, date.day);
+    if (target.isAfter(today)) return true; // future date — always open
+    return isAvailable(); // today — enforce cutoff
+  }
+
   /// Check if draw time is still available based on current time and cutoff
   bool isAvailable() {
     try {
-      // Parse the ISO 8601 format: "0000-01-01T10:30:00Z"
       final now = DateTime.now();
-      final parts = drawTime.split('T');
+      String timeStr = drawTime;
+      if (drawTime.contains('T')) {
+        timeStr = drawTime.split('T')[1].replaceAll('Z', '');
+      }
 
-      if (parts.length < 2) return false;
-
-      // Extract time parts
-      final timeParts = parts[1].substring(0, 5).split(':');
+      final timeParts = timeStr.substring(0, 5).split(':');
       if (timeParts.length != 2) return false;
 
       final hour = int.parse(timeParts[0]);

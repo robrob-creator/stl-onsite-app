@@ -6,6 +6,7 @@ import 'package:print_bluetooth_thermal/print_bluetooth_thermal.dart';
 import '../../../core/main_layout.dart';
 import '../../../controllers/lottery_controller.dart';
 import '../../../core/services/printer_service.dart';
+import '../../../controllers/live_draw_controller.dart';
 import 'bet_entry_page.dart';
 import 'transaction_page.dart';
 import 'dashboard_page.dart';
@@ -27,6 +28,9 @@ class _HomePageState extends State<HomePage> {
     super.initState();
     if (!Get.isRegistered<LotteryController>()) {
       Get.put(LotteryController());
+    }
+    if (!Get.isRegistered<LiveDrawController>()) {
+      Get.put(LiveDrawController());
     }
     WidgetsBinding.instance.addPostFrameCallback((_) => _checkPrinter());
   }

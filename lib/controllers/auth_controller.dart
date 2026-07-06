@@ -9,6 +9,7 @@ import 'package:device_info_plus/device_info_plus.dart';
 import '../models/login_response.dart';
 import '../core/app_constants.dart';
 import '../core/services/websocket_service.dart';
+import '../core/services/notification_service.dart';
 import '../models/user.dart';
 import 'lottery_controller.dart';
 
@@ -101,6 +102,7 @@ class AuthController extends GetxController {
           await _secureStorage.delete(key: _userKey);
         }
         _connectWebSocket();
+        NotificationService.registerDevice();
       }
     } catch (e) {
       // Silently fail if restoration fails
@@ -236,6 +238,7 @@ class AuthController extends GetxController {
 
           try {
             _connectWebSocket();
+            NotificationService.registerDevice();
           } catch (_) {}
         });
       } else {

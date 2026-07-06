@@ -5,6 +5,7 @@ import 'package:onstite/pages/app/eod_report_page.dart';
 import 'package:onstite/pages/app/summary_report_page.dart';
 import 'package:onstite/pages/app/live_page.dart';
 import '../controllers/auth_controller.dart';
+import '../controllers/live_draw_controller.dart';
 import 'utils/manila_time.dart';
 
 /// Main layout widget with AppBar and BottomNavigationBar
@@ -310,31 +311,85 @@ class _MainLayoutState extends State<MainLayout> {
                       minLeadingWidth: 0,
                     ),
                     // Live Draw
-                    ListTile(
-                      leading: const Icon(
-                        Icons.live_tv_rounded,
-                        color: Color(0xFF222222),
-                      ),
-                      title: const Text(
-                        'Live Draw',
-                        style: TextStyle(
-                          fontWeight: FontWeight.w500,
-                          color: Color(0xFF222222),
+                    Obx(() {
+                      final isLive = Get.isRegistered<LiveDrawController>()
+                          ? Get.find<LiveDrawController>().isLive.value
+                          : false;
+                      return ListTile(
+                        leading: Stack(
+                          clipBehavior: Clip.none,
+                          children: [
+                            Icon(
+                              Icons.live_tv_rounded,
+                              color: isLive
+                                  ? const Color(0xFFDC2626)
+                                  : const Color(0xFF222222),
+                            ),
+                            if (isLive)
+                              Positioned(
+                                top: -3,
+                                right: -4,
+                                child: Container(
+                                  width: 9,
+                                  height: 9,
+                                  decoration: const BoxDecoration(
+                                    color: Color(0xFFDC2626),
+                                    shape: BoxShape.circle,
+                                  ),
+                                ),
+                              ),
+                          ],
                         ),
-                      ),
-                      onTap: () {
-                        Navigator.pop(context);
-                        Navigator.of(context).push(
-                          MaterialPageRoute(builder: (_) => const LivePage()),
-                        );
-                      },
-                      contentPadding: const EdgeInsets.symmetric(
-                        horizontal: 12,
-                        vertical: 0,
-                      ),
-                      dense: true,
-                      minLeadingWidth: 0,
-                    ),
+                        title: Row(
+                          children: [
+                            Text(
+                              'Live Draw',
+                              style: TextStyle(
+                                fontWeight: FontWeight.w500,
+                                color: isLive
+                                    ? const Color(0xFFDC2626)
+                                    : const Color(0xFF222222),
+                              ),
+                            ),
+                            if (isLive) ...[
+                              const SizedBox(width: 8),
+                              Container(
+                                padding: const EdgeInsets.symmetric(
+                                  horizontal: 7,
+                                  vertical: 2,
+                                ),
+                                decoration: BoxDecoration(
+                                  color: const Color(0xFFDC2626),
+                                  borderRadius: BorderRadius.circular(999),
+                                ),
+                                child: const Text(
+                                  'LIVE',
+                                  style: TextStyle(
+                                    fontSize: 10,
+                                    fontWeight: FontWeight.w700,
+                                    color: Colors.white,
+                                    letterSpacing: 0.4,
+                                  ),
+                                ),
+                              ),
+                            ],
+                          ],
+                        ),
+                        onTap: () {
+                          Navigator.pop(context);
+                          Navigator.of(context).push(
+                            MaterialPageRoute(
+                                builder: (_) => const LivePage()),
+                          );
+                        },
+                        contentPadding: const EdgeInsets.symmetric(
+                          horizontal: 12,
+                          vertical: 0,
+                        ),
+                        dense: true,
+                        minLeadingWidth: 0,
+                      );
+                    }),
                     const SizedBox(height: 2),
                   ],
                 ),

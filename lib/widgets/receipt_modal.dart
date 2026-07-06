@@ -276,7 +276,9 @@ class _ReceiptModalState extends State<ReceiptModal> {
                               // Bet rows
                               ...widget.submittedBets.map((bet) {
                                 final digits =
-                                    (bet.digits as List?)?.join('-') ?? '';
+                                    (bet.digits as List?)
+                                        ?.map((d) => int.tryParse(d.toString())?.toString() ?? d.toString())
+                                        .join('-') ?? '';
                                 return TableRow(
                                   children: [
                                     Padding(

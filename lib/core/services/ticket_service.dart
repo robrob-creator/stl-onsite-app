@@ -26,7 +26,8 @@ class TicketService {
     return 'Request failed with status ${response.statusCode}';
   }
 
-  /// Fetch tickets with optional search, status filter, and date range
+  /// Fetch tickets with optional search, status filter, and date range.
+  /// Retries up to 3 times on 5xx errors.
   static Future<List<Ticket>> fetchTickets({
     String? ticketNo,
     String? status,
@@ -34,65 +35,65 @@ class TicketService {
     String? dateFrom,
     String? dateTo,
   }) async {
-    try {
-      final authCtrl = Get.find<AuthController>();
-      final token = authCtrl.token.value;
+    final authCtrl = Get.find<AuthController>();
+    final token = authCtrl.token.value;
 
-      final uri = Uri.parse(baseUrl);
-      final queryParams = <String, String>{};
-
-      if (ticketNo != null && ticketNo.isNotEmpty) {
-        queryParams['ticket_no'] = ticketNo;
-      }
-      if (status != null && status.isNotEmpty) {
-        queryParams['status'] = status;
-      }
-      if (dateFrom != null && dateFrom.isNotEmpty) {
-        queryParams['date_from'] = dateFrom;
-      } else if (drawDate != null && drawDate.isNotEmpty) {
-        queryParams['draw_date'] = drawDate;
-      }
-      if (dateTo != null && dateTo.isNotEmpty) {
-        queryParams['date_to'] = dateTo;
-      }
-
-      final uriWithQuery = queryParams.isNotEmpty
-          ? uri.replace(queryParameters: queryParams)
-          : uri;
-
-      final response = await http
-          .get(
-            uriWithQuery,
-            headers: {
-              'Authorization': 'Bearer $token',
-              'Content-Type': 'application/json',
-            },
-          )
-          .timeout(const Duration(seconds: 30));
-
-      print('[TicketService] Raw response: ${response.body}');
-
-      if (response.statusCode == 200) {
-        final jsonResponse = jsonDecode(response.body);
-        final List<dynamic> data = jsonResponse['data'] as List<dynamic>;
-        final List<Ticket> tickets = [];
-        for (final item in data) {
-          try {
-            tickets.add(Ticket.fromJson(item as Map<String, dynamic>));
-          } catch (err) {
-            print('[TicketService] Error parsing ticket: $err');
-            print('[TicketService] Offending item: $item');
-          }
-        }
-        return tickets;
-      } else {
-        print('[TicketService] HTTP error: ${response.statusCode}');
-        throw Exception('Failed to load tickets: ${response.statusCode}');
-      }
-    } catch (e) {
-      print('[TicketService] Exception: $e');
-      throw Exception('Error fetching tickets: $e');
+    final queryParams = <String, String>{};
+    if (ticketNo != null && ticketNo.isNotEmpty) {
+      queryParams['ticket_no'] = ticketNo;
     }
+    if (status != null && status.isNotEmpty) {
+      queryParams['status'] = status;
+    }
+    if (dateFrom != null && dateFrom.isNotEmpty) {
+      queryParams['date_from'] = dateFrom;
+    } else if (drawDate != null && drawDate.isNotEmpty) {
+      queryParams['draw_date'] = drawDate;
+    }
+    if (dateTo != null && dateTo.isNotEmpty) {
+      queryParams['date_to'] = dateTo;
+    }
+
+    final uri = Uri.parse(baseUrl).replace(
+      queryParameters: queryParams.isNotEmpty ? queryParams : null,
+    );
+    final headers = {
+      'Authorization': 'Bearer $token',
+      'Content-Type': 'application/json',
+    };
+
+    for (int attempt = 1; attempt <= 3; attempt++) {
+      try {
+        final response = await http
+            .get(uri, headers: headers)
+            .timeout(const Duration(seconds: 30));
+
+        if (response.statusCode == 200) {
+          final jsonResponse = jsonDecode(response.body);
+          final List<dynamic> data = jsonResponse['data'] as List<dynamic>;
+          final List<Ticket> tickets = [];
+          for (final item in data) {
+            try {
+              tickets.add(Ticket.fromJson(item as Map<String, dynamic>));
+            } catch (err) {
+              print('[TicketService] Parse error: $err');
+            }
+          }
+          return tickets;
+        }
+
+        print('[TicketService] HTTP ${response.statusCode}: ${response.body}');
+        // 4xx — don't retry
+        if (response.statusCode < 500) {
+          throw Exception('Failed to load tickets: ${response.statusCode}');
+        }
+        if (attempt < 3) await Future.delayed(Duration(seconds: attempt));
+      } catch (e) {
+        if (attempt == 3) rethrow;
+        if (attempt < 3) await Future.delayed(Duration(seconds: attempt));
+      }
+    }
+    throw Exception('Failed to load tickets after retries');
   }
 
   static Future<String> resolveScannedTicketNumber(String scannedValue) async {
@@ -230,6 +231,36 @@ class TicketService {
         throw Exception(message);
       }
       return message;
+    } on Exception {
+      rethrow;
+    } catch (e) {
+      throw Exception('$e');
+    }
+  }
+
+  /// Called after a successful direct BT print to increment print_count on the backend.
+  static Future<void> incrementPrintCount(String ticketId) async {
+    try {
+      final authCtrl = Get.find<AuthController>();
+      final token = authCtrl.token.value;
+      final uri = Uri.parse(
+        '$baseUrl/direct-print',
+      ).replace(queryParameters: {'id': ticketId});
+
+      final response = await http
+          .post(
+            uri,
+            headers: {
+              'Authorization': 'Bearer $token',
+              'Content-Type': 'application/json',
+            },
+          )
+          .timeout(const Duration(seconds: 15));
+
+      if (response.statusCode != 200) {
+        final message = _extractMessage(response);
+        throw Exception(message);
+      }
     } catch (e) {
       throw Exception('$e');
     }

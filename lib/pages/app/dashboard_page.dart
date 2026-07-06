@@ -1,5 +1,7 @@
+import 'dart:math' as math;
 import 'package:flutter/material.dart';
 import 'package:get/get.dart';
+import 'package:get_storage/get_storage.dart';
 import '../../core/design_system.dart';
 import '../../core/services/draw_results_service.dart';
 import '../../controllers/lottery_controller.dart';
@@ -20,12 +22,16 @@ class _DashboardPageState extends State<DashboardPage> {
   bool _hasError = false;
   Worker? _refreshWorker;
 
+  static const _kChartStyleKey = 'dashboard_chart_style';
+  final _storage = GetStorage();
+  String _chartStyle = '1a'; // '1a' | '1b' | '1c'
+
   @override
   void initState() {
     super.initState();
     lotteryController = Get.find<LotteryController>();
+    _chartStyle = _storage.read(_kChartStyleKey) ?? '1a';
 
-    // Refresh draw results whenever bets are submitted elsewhere in the app
     _refreshWorker = ever(lotteryController.drawRefreshTick, (_) {
       if (mounted) _fetchDrawResults();
     });
@@ -197,10 +203,17 @@ class _DashboardPageState extends State<DashboardPage> {
             child: Column(
               children: [
                 const SizedBox(height: 20),
-                // Date picker
+                // Date picker + chart switcher on same row
                 Row(
-                  mainAxisAlignment: MainAxisAlignment.end,
                   children: [
+                    _ChartStyleSwitcher(
+                      selected: _chartStyle,
+                      onChanged: (v) {
+                        setState(() => _chartStyle = v);
+                        _storage.write(_kChartStyleKey, v);
+                      },
+                    ),
+                    const Spacer(),
                     GestureDetector(
                       onTap: () => _selectDate(context),
                       child: Container(
@@ -280,22 +293,16 @@ class _DashboardPageState extends State<DashboardPage> {
 
   List<Widget> _buildDrawCards() {
     if (drawResults == null || drawResults!.drawTimes.isEmpty) return [];
-    final allAmounts = drawResults!.drawTimes
-        .map((dt) => dt.latestResult?.winAmount ?? 0)
-        .toList();
-    return drawResults!.drawTimes.asMap().entries.map((entry) {
-      final i = entry.key;
-      final drawTime = entry.value;
+    return drawResults!.drawTimes.map((drawTime) {
       final formattedTime = _formatDrawTime(drawTime.drawTime ?? '');
       final resultText = _parseResultString(drawTime.latestResult?.result);
       return _buildDrawCard(
         time: formattedTime,
         result: resultText,
         winningAmnt: drawTime.latestResult?.winAmount?.toString(),
-        chartData: allAmounts,
-        highlightIndex: i,
         totalBet: drawTime.betSummary?.totalBet ?? 0,
         totalWon: drawTime.betSummary?.totalWon ?? 0,
+        chartStyle: _chartStyle,
       );
     }).toList();
   }
@@ -304,114 +311,251 @@ class _DashboardPageState extends State<DashboardPage> {
     required String time,
     required String result,
     required String? winningAmnt,
-    required List<int> chartData,
-    required int highlightIndex,
     required int totalBet,
     required int totalWon,
+    required String chartStyle,
   }) {
+    final hasResult = result != '----';
+    final hasActivity = totalBet > 0;
+
     return Container(
-      margin: const EdgeInsets.only(bottom: 12),
-      padding: const EdgeInsets.all(16),
+      margin: const EdgeInsets.only(bottom: 14),
       decoration: BoxDecoration(
         color: Colors.white,
-        borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: Colors.grey[200]!),
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: const Color(0xFFE8EEFB), width: 1),
         boxShadow: [
           BoxShadow(
-            color: Colors.grey[100]!,
+            color: const Color(0xFF2563EB).withValues(alpha: 0.06),
+            blurRadius: 16,
+            offset: const Offset(0, 4),
+          ),
+          BoxShadow(
+            color: Colors.black.withValues(alpha: 0.03),
             blurRadius: 4,
-            offset: const Offset(0, 2),
+            offset: const Offset(0, 1),
           ),
         ],
       ),
       child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Row(
-            mainAxisAlignment: MainAxisAlignment.spaceBetween,
-            children: [
-              Text(
-                time,
-                style: const TextStyle(
-                  fontSize: 14,
-                  fontWeight: FontWeight.w600,
-                  color: Colors.black87,
-                ),
+          // ── Header strip ────────────────────────────────────────
+          Container(
+            padding: const EdgeInsets.fromLTRB(16, 12, 12, 12),
+            decoration: const BoxDecoration(
+              color: Color(0xFFF8FAFF),
+              borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
+              border: Border(
+                bottom: BorderSide(color: Color(0xFFEEF2FB), width: 1),
               ),
-              IconButton(
-                icon: const Icon(Icons.more_vert),
-                iconSize: 20,
-                padding: EdgeInsets.zero,
-                constraints: const BoxConstraints(),
-                onPressed: () {},
-              ),
-            ],
-          ),
-          const SizedBox(height: 12),
-          // Result number + mini bar chart
-          Row(
-            crossAxisAlignment: CrossAxisAlignment.center,
-            children: [
-              Text(
-                result,
-                style: TextStyle(
-                  fontSize: 36,
-                  fontWeight: FontWeight.bold,
-                  color: result == "----" ? Colors.grey : Colors.black,
-                  letterSpacing: 2,
-                ),
-              ),
-              const Spacer(),
-              _MiniLineChart(
-                values: chartData,
-                highlightIndex: highlightIndex,
-                isGreen: totalBet > totalWon,
-                isFlat: totalBet == totalWon,
-              ),
-            ],
-          ),
-          const SizedBox(height: 12),
-          // Gross Amount row — always shown from bet summary
-          Row(
-            mainAxisAlignment: MainAxisAlignment.spaceBetween,
-            children: [
-              Text(
-                'Gross Amt:',
-                style: TextStyle(fontSize: 12, color: Colors.grey[600]),
-              ),
-              Text(
-                _formatAmount(totalBet.toString()),
-                style: TextStyle(
-                  fontSize: 13,
-                  fontWeight: FontWeight.w700,
-                  color: totalBet > 0
-                      ? const Color(0xFF2563EB)
-                      : Colors.grey[500],
-                ),
-              ),
-            ],
-          ),
-          // Prize payout — only shown when a draw result has been posted
-          if (winningAmnt != null && winningAmnt != '0') ...[
-            const SizedBox(height: 6),
-            Row(
-              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            ),
+            child: Row(
               children: [
-                Text(
-                  'Prize:',
-                  style: TextStyle(fontSize: 12, color: Colors.grey[600]),
-                ),
-                Text(
-                  _formatAmount(winningAmnt),
-                  style: const TextStyle(
-                    fontSize: 12,
-                    fontWeight: FontWeight.w600,
-                    color: Color(0xFF10B981),
+                Container(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 10,
+                    vertical: 4,
+                  ),
+                  decoration: BoxDecoration(
+                    color: const Color(0xFF2563EB),
+                    borderRadius: BorderRadius.circular(20),
+                  ),
+                  child: Text(
+                    time,
+                    style: const TextStyle(
+                      fontSize: 12,
+                      fontWeight: FontWeight.w700,
+                      color: Colors.white,
+                      letterSpacing: 0.3,
+                    ),
                   ),
                 ),
+                const Spacer(),
+                if (hasResult)
+                  Container(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 8,
+                      vertical: 4,
+                    ),
+                    decoration: BoxDecoration(
+                      color: const Color(0xFFECFDF5),
+                      borderRadius: BorderRadius.circular(20),
+                    ),
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Container(
+                          width: 6,
+                          height: 6,
+                          decoration: const BoxDecoration(
+                            color: Color(0xFF10B981),
+                            shape: BoxShape.circle,
+                          ),
+                        ),
+                        const SizedBox(width: 5),
+                        const Text(
+                          'Result Posted',
+                          style: TextStyle(
+                            fontSize: 11,
+                            fontWeight: FontWeight.w600,
+                            color: Color(0xFF059669),
+                          ),
+                        ),
+                      ],
+                    ),
+                  )
+                else
+                  Container(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 8,
+                      vertical: 4,
+                    ),
+                    decoration: BoxDecoration(
+                      color: const Color(0xFFFEF3C7),
+                      borderRadius: BorderRadius.circular(20),
+                    ),
+                    child: const Text(
+                      'Pending',
+                      style: TextStyle(
+                        fontSize: 11,
+                        fontWeight: FontWeight.w600,
+                        color: Color(0xFFD97706),
+                      ),
+                    ),
+                  ),
               ],
             ),
-          ],
+          ),
+
+          // ── Body ────────────────────────────────────────────────
+          Padding(
+            padding: const EdgeInsets.fromLTRB(16, 16, 16, 16),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                // Gross Amount — HERO element
+                Row(
+                  crossAxisAlignment: CrossAxisAlignment.end,
+                  children: [
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          const Text(
+                            'GROSS SALES',
+                            style: TextStyle(
+                              fontSize: 10,
+                              fontWeight: FontWeight.w800,
+                              color: Color(0xFF94A3B8),
+                              letterSpacing: 1.2,
+                            ),
+                          ),
+                          const SizedBox(height: 4),
+                          Text(
+                            hasActivity
+                                ? _formatAmount(totalBet.toString())
+                                : '₱ —',
+                            style: TextStyle(
+                              fontSize: 30,
+                              fontWeight: FontWeight.w800,
+                              color: hasActivity
+                                  ? const Color(0xFF1E40AF)
+                                  : const Color(0xFFCBD5E1),
+                              letterSpacing: -0.5,
+                              height: 1.1,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                    // Result numbers — secondary, right-aligned
+                    Column(
+                      crossAxisAlignment: CrossAxisAlignment.end,
+                      children: [
+                        const Text(
+                          'RESULT',
+                          style: TextStyle(
+                            fontSize: 10,
+                            fontWeight: FontWeight.w800,
+                            color: Color(0xFF94A3B8),
+                            letterSpacing: 1.2,
+                          ),
+                        ),
+                        const SizedBox(height: 4),
+                        Text(
+                          result,
+                          style: TextStyle(
+                            fontSize: 26,
+                            fontWeight: FontWeight.w900,
+                            color: hasResult
+                                ? const Color(0xFF0F172A)
+                                : const Color(0xFFCBD5E1),
+                            letterSpacing: 3,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ],
+                ),
+
+                const SizedBox(height: 16),
+
+                // ── Gross vs Hits chart ────────────────────────────
+                if (chartStyle == '1b')
+                  _GrossHitsBar(totalBet: totalBet, totalWon: totalWon)
+                else if (chartStyle == '1c')
+                  _GrossHitsChips(totalBet: totalBet, totalWon: totalWon)
+                else
+                  _GrossHitsRing(totalBet: totalBet, totalWon: totalWon),
+
+                // ── Prize payout ───────────────────────────────────
+                if (winningAmnt != null && winningAmnt != '0') ...[
+                  const SizedBox(height: 12),
+                  Container(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 12,
+                      vertical: 8,
+                    ),
+                    decoration: BoxDecoration(
+                      color: const Color(0xFFF0FDF4),
+                      borderRadius: BorderRadius.circular(10),
+                      border: Border.all(
+                        color: const Color(0xFFBBF7D0),
+                        width: 1,
+                      ),
+                    ),
+                    child: Row(
+                      children: [
+                        const Icon(
+                          Icons.emoji_events_rounded,
+                          size: 14,
+                          color: Color(0xFF059669),
+                        ),
+                        const SizedBox(width: 6),
+                        const Text(
+                          'Prize per Win',
+                          style: TextStyle(
+                            fontSize: 12,
+                            fontWeight: FontWeight.w600,
+                            color: Color(0xFF047857),
+                          ),
+                        ),
+                        const Spacer(),
+                        Text(
+                          _formatAmount(winningAmnt),
+                          style: const TextStyle(
+                            fontSize: 14,
+                            fontWeight: FontWeight.w800,
+                            color: Color(0xFF059669),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
+              ],
+            ),
+          ),
         ],
       ),
     );
@@ -511,108 +655,452 @@ class _DashboardPageState extends State<DashboardPage> {
   }
 }
 
-class _MiniLineChart extends StatelessWidget {
-  final List<int> values;
-  final int highlightIndex;
-  final bool isGreen;
-  final bool isFlat;
+class _GrossHitsRing extends StatelessWidget {
+  final int totalBet;
+  final int totalWon;
 
-  const _MiniLineChart({
-    required this.values,
-    required this.highlightIndex,
-    required this.isGreen,
-    this.isFlat = false,
+  const _GrossHitsRing({required this.totalBet, required this.totalWon});
+
+  String _fmt(int v) {
+    if (v == 0) return '₱ 0';
+    final s = v.toString();
+    final buf = StringBuffer();
+    for (int i = 0; i < s.length; i++) {
+      if (i > 0 && (s.length - i) % 3 == 0) buf.write(',');
+      buf.write(s[i]);
+    }
+    return '₱ ${buf.toString()}';
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final payoutRatio = totalBet > 0 ? totalWon / totalBet : 0.0;
+    final payoutPct = (payoutRatio * 100).round();
+    final netAmount = totalBet - totalWon;
+    final isProfit = netAmount >= 0;
+    final ringRatio = payoutRatio.clamp(0.0, 1.0);
+
+    return Row(
+      crossAxisAlignment: CrossAxisAlignment.center,
+      children: [
+        // Ring chart
+        SizedBox(
+          width: 84,
+          height: 84,
+          child: Stack(
+            alignment: Alignment.center,
+            children: [
+              CustomPaint(
+                size: const Size(84, 84),
+                painter: _RingPainter(ratio: ringRatio, isOverPayout: payoutRatio > 1),
+              ),
+              Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Text(
+                    '$payoutPct%',
+                    style: TextStyle(
+                      fontSize: 16,
+                      fontWeight: FontWeight.w800,
+                      color: isProfit ? const Color(0xFF1D3A8A) : const Color(0xFF9A2C24),
+                      height: 1.1,
+                    ),
+                  ),
+                  const Text(
+                    'payout',
+                    style: TextStyle(
+                      fontSize: 8,
+                      fontWeight: FontWeight.w700,
+                      color: Color(0xFF9AA3B2),
+                      letterSpacing: 0.3,
+                    ),
+                  ),
+                ],
+              ),
+            ],
+          ),
+        ),
+        const SizedBox(width: 16),
+        // Stats column
+        Expanded(
+          child: Column(
+            children: [
+              // Hits row
+              Row(
+                children: [
+                  Container(
+                    width: 7,
+                    height: 7,
+                    decoration: const BoxDecoration(
+                      color: Color(0xFFDC2626),
+                      shape: BoxShape.circle,
+                    ),
+                  ),
+                  const SizedBox(width: 6),
+                  const Text(
+                    'Hits',
+                    style: TextStyle(fontSize: 12, fontWeight: FontWeight.w700, color: Color(0xFFB4453F)),
+                  ),
+                  const Spacer(),
+                  Text(
+                    _fmt(totalWon),
+                    style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w800, color: Color(0xFF9A2C24)),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 8),
+              const Divider(height: 1, color: Color(0xFFEEF1F6)),
+              const SizedBox(height: 8),
+              // Net Result row
+              Row(
+                children: [
+                  Text(
+                    'Net Result',
+                    style: TextStyle(
+                      fontSize: 12,
+                      fontWeight: FontWeight.w700,
+                      color: isProfit ? const Color(0xFF1D3A8A) : const Color(0xFFB91C1C),
+                    ),
+                  ),
+                  const Spacer(),
+                  Text(
+                    isProfit ? '+${_fmt(netAmount)}' : '-${_fmt(netAmount.abs())}',
+                    style: TextStyle(
+                      fontSize: 13,
+                      fontWeight: FontWeight.w800,
+                      color: isProfit ? const Color(0xFF1D3A8A) : const Color(0xFFB91C1C),
+                    ),
+                  ),
+                ],
+              ),
+            ],
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+class _RingPainter extends CustomPainter {
+  final double ratio;
+  final bool isOverPayout;
+
+  _RingPainter({required this.ratio, required this.isOverPayout});
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final center = Offset(size.width / 2, size.height / 2);
+    final radius = (size.width / 2) - 6;
+    const strokeWidth = 10.0;
+
+    // Background track
+    final trackPaint = Paint()
+      ..color = const Color(0xFFEEF1F6)
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = strokeWidth
+      ..strokeCap = StrokeCap.round;
+
+    canvas.drawCircle(center, radius, trackPaint);
+
+    // Arc fill (starts from top = -π/2)
+    if (ratio > 0) {
+      final arcPaint = Paint()
+        ..color = isOverPayout ? const Color(0xFFDC2626) : const Color(0xFF2563EB)
+        ..style = PaintingStyle.stroke
+        ..strokeWidth = strokeWidth
+        ..strokeCap = StrokeCap.round;
+
+      final sweepAngle = 2 * math.pi * ratio;
+      canvas.drawArc(
+        Rect.fromCircle(center: center, radius: radius),
+        -math.pi / 2,
+        sweepAngle,
+        false,
+        arcPaint,
+      );
+    }
+  }
+
+  @override
+  bool shouldRepaint(_RingPainter old) => old.ratio != ratio || old.isOverPayout != isOverPayout;
+}
+
+// ── 1b: Single Hits bar relative to Gross + Net Result callout ──────────────
+class _GrossHitsBar extends StatelessWidget {
+  final int totalBet;
+  final int totalWon;
+  const _GrossHitsBar({required this.totalBet, required this.totalWon});
+
+  String _fmt(int v) {
+    if (v == 0) return '₱ 0';
+    final s = v.toString();
+    final buf = StringBuffer();
+    for (int i = 0; i < s.length; i++) {
+      if (i > 0 && (s.length - i) % 3 == 0) buf.write(',');
+      buf.write(s[i]);
+    }
+    return '₱ ${buf.toString()}';
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final hitsRatio = totalBet > 0 ? (totalWon / totalBet).clamp(0.0, 1.0) : 0.0;
+    final netAmount = totalBet - totalWon;
+    final isProfit = netAmount >= 0;
+    final isOverPayout = totalWon > totalBet;
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Row(
+          crossAxisAlignment: CrossAxisAlignment.end,
+          children: [
+            // Gross bar (full height reference)
+            _Bar(
+              value: _fmt(totalBet),
+              heightFactor: 1.0,
+              color: const Color(0xFF2563EB),
+              gradientTop: const Color(0xFF3B7BF0),
+              label: 'Gross',
+              labelColor: const Color(0xFF3B5DAA),
+              valueColor: const Color(0xFF1D3A8A),
+            ),
+            const SizedBox(width: 18),
+            // Hits bar (proportional)
+            _Bar(
+              value: _fmt(totalWon),
+              heightFactor: hitsRatio,
+              color: isOverPayout ? const Color(0xFFDC2626) : const Color(0xFF10B981),
+              gradientTop: isOverPayout ? const Color(0xFFEC5A50) : const Color(0xFF34D399),
+              label: 'Hits',
+              labelColor: isOverPayout ? const Color(0xFFB4453F) : const Color(0xFF047857),
+              valueColor: isOverPayout ? const Color(0xFF9A2C24) : const Color(0xFF065F46),
+            ),
+          ],
+        ),
+        const SizedBox(height: 10),
+        Container(
+          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 9),
+          decoration: BoxDecoration(
+            color: isProfit ? const Color(0xFFEFF4FE) : const Color(0xFFFDEBEC),
+            borderRadius: BorderRadius.circular(10),
+          ),
+          child: Row(
+            children: [
+              Icon(
+                isProfit ? Icons.trending_up_rounded : Icons.trending_down_rounded,
+                size: 15,
+                color: isProfit ? const Color(0xFF2563EB) : const Color(0xFFB91C1C),
+              ),
+              const SizedBox(width: 6),
+              Text(
+                'Net Result',
+                style: TextStyle(
+                  fontSize: 12,
+                  fontWeight: FontWeight.w700,
+                  color: isProfit ? const Color(0xFF1D3A8A) : const Color(0xFFB91C1C),
+                ),
+              ),
+              const Spacer(),
+              Text(
+                isProfit ? '+${_fmt(netAmount)}' : '-${_fmt(netAmount.abs())}',
+                style: TextStyle(
+                  fontSize: 13,
+                  fontWeight: FontWeight.w800,
+                  color: isProfit ? const Color(0xFF1D3A8A) : const Color(0xFFB91C1C),
+                ),
+              ),
+            ],
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+class _Bar extends StatelessWidget {
+  final String value;
+  final double heightFactor;
+  final Color color;
+  final Color gradientTop;
+  final String label;
+  final Color labelColor;
+  final Color valueColor;
+
+  const _Bar({
+    required this.value,
+    required this.heightFactor,
+    required this.color,
+    required this.gradientTop,
+    required this.label,
+    required this.labelColor,
+    required this.valueColor,
   });
 
   @override
   Widget build(BuildContext context) {
-    final color = isFlat
-        ? const Color(0xFFB0B0B0)
-        : isGreen
-        ? const Color(0xFF22C55E)
-        : const Color(0xFFEF4444);
+    const maxH = 72.0;
+    final barH = (maxH * heightFactor).clamp(4.0, maxH);
 
-    return SizedBox(
-      width: 100,
-      height: 60,
-      child: CustomPaint(
-        painter: _LineChartPainter(values: values, color: color),
+    return Expanded(
+      child: Column(
+        children: [
+          Text(
+            value,
+            style: TextStyle(fontSize: 12, fontWeight: FontWeight.w800, color: valueColor),
+          ),
+          const SizedBox(height: 6),
+          Align(
+            alignment: Alignment.bottomCenter,
+            child: Container(
+              height: barH,
+              decoration: BoxDecoration(
+                gradient: LinearGradient(
+                  begin: Alignment.topCenter,
+                  end: Alignment.bottomCenter,
+                  colors: [gradientTop, color],
+                ),
+                borderRadius: const BorderRadius.vertical(top: Radius.circular(8), bottom: Radius.circular(4)),
+              ),
+            ),
+          ),
+          const SizedBox(height: 6),
+          Text(label, style: TextStyle(fontSize: 11, fontWeight: FontWeight.w700, color: labelColor)),
+        ],
       ),
     );
   }
 }
 
-class _LineChartPainter extends CustomPainter {
-  final List<int> values;
-  final Color color;
+// ── 1c: Net Result hero + Hits chip only (Gross already shown above) ─────────
+class _GrossHitsChips extends StatelessWidget {
+  final int totalBet;
+  final int totalWon;
+  const _GrossHitsChips({required this.totalBet, required this.totalWon});
 
-  _LineChartPainter({required this.values, required this.color});
-
-  @override
-  void paint(Canvas canvas, Size size) {
-    if (values.length < 2) return;
-
-    final maxVal = values.reduce((a, b) => a > b ? a : b).toDouble();
-    final minVal = values.reduce((a, b) => a < b ? a : b).toDouble();
-    final range = (maxVal - minVal).clamp(1.0, double.infinity);
-
-    // Map values to canvas points
-    final points = List.generate(values.length, (i) {
-      final x = i / (values.length - 1) * size.width;
-      final y =
-          size.height -
-          ((values[i] - minVal) / range) * (size.height * 0.7) -
-          size.height * 0.1;
-      return Offset(x, y);
-    });
-
-    // Build smooth bezier path
-    final linePath = Path();
-    linePath.moveTo(points[0].dx, points[0].dy);
-    for (int i = 0; i < points.length - 1; i++) {
-      final cp1 = Offset(
-        points[i].dx + (points[i + 1].dx - points[i].dx) / 2,
-        points[i].dy,
-      );
-      final cp2 = Offset(
-        points[i].dx + (points[i + 1].dx - points[i].dx) / 2,
-        points[i + 1].dy,
-      );
-      linePath.cubicTo(
-        cp1.dx,
-        cp1.dy,
-        cp2.dx,
-        cp2.dy,
-        points[i + 1].dx,
-        points[i + 1].dy,
-      );
+  String _fmt(int v) {
+    if (v == 0) return '₱ 0';
+    final s = v.toString();
+    final buf = StringBuffer();
+    for (int i = 0; i < s.length; i++) {
+      if (i > 0 && (s.length - i) % 3 == 0) buf.write(',');
+      buf.write(s[i]);
     }
-
-    // Filled area path
-    final fillPath = Path.from(linePath)
-      ..lineTo(size.width, size.height)
-      ..lineTo(0, size.height)
-      ..close();
-
-    canvas.drawPath(
-      fillPath,
-      Paint()
-        ..color = color.withOpacity(0.12)
-        ..style = PaintingStyle.fill,
-    );
-
-    canvas.drawPath(
-      linePath,
-      Paint()
-        ..color = color
-        ..style = PaintingStyle.stroke
-        ..strokeWidth = 2.2
-        ..strokeCap = StrokeCap.round
-        ..strokeJoin = StrokeJoin.round,
-    );
+    return '₱ ${buf.toString()}';
   }
 
   @override
-  bool shouldRepaint(_LineChartPainter old) =>
-      old.values != values || old.color != color;
+  Widget build(BuildContext context) {
+    final netAmount = totalBet - totalWon;
+    final isProfit = netAmount >= 0;
+
+    return Row(
+      children: [
+        // Net Result
+        Expanded(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              const Text(
+                'NET RESULT',
+                style: TextStyle(
+                  fontSize: 10,
+                  fontWeight: FontWeight.w800,
+                  color: Color(0xFF94A3B8),
+                  letterSpacing: 1.0,
+                ),
+              ),
+              const SizedBox(height: 3),
+              Text(
+                isProfit ? '+${_fmt(netAmount)}' : '-${_fmt(netAmount.abs())}',
+                style: TextStyle(
+                  fontSize: 22,
+                  fontWeight: FontWeight.w800,
+                  color: isProfit ? const Color(0xFF1D3A8A) : const Color(0xFFB91C1C),
+                  letterSpacing: -0.3,
+                  height: 1.1,
+                ),
+              ),
+            ],
+          ),
+        ),
+        const SizedBox(width: 10),
+        // Hits chip
+        Container(
+          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+          decoration: BoxDecoration(
+            color: const Color(0xFFFDEEEE),
+            borderRadius: BorderRadius.circular(9999),
+          ),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Container(
+                width: 7,
+                height: 7,
+                decoration: const BoxDecoration(color: Color(0xFFDC2626), shape: BoxShape.circle),
+              ),
+              const SizedBox(width: 5),
+              const Text('Hits', style: TextStyle(fontSize: 12, fontWeight: FontWeight.w700, color: Color(0xFFB4453F))),
+              const SizedBox(width: 6),
+              Text(
+                _fmt(totalWon),
+                style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w800, color: Color(0xFF9A2C24)),
+              ),
+            ],
+          ),
+        ),
+      ],
+    );
+  }
 }
+
+// ── Chart style switcher ─────────────────────────────────────────────────────
+class _ChartStyleSwitcher extends StatelessWidget {
+  final String selected;
+  final ValueChanged<String> onChanged;
+
+  const _ChartStyleSwitcher({required this.selected, required this.onChanged});
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      decoration: BoxDecoration(
+        color: Colors.grey[100],
+        borderRadius: BorderRadius.circular(8),
+      ),
+      padding: const EdgeInsets.all(3),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [('1a', 'Ring'), ('1b', 'Bars'), ('1c', 'Net')].map((opt) {
+          final id = opt.$1;
+          final label = opt.$2;
+          final isSelected = selected == id;
+          return GestureDetector(
+            onTap: () => onChanged(id),
+            child: AnimatedContainer(
+              duration: const Duration(milliseconds: 150),
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 5),
+              decoration: BoxDecoration(
+                color: isSelected ? Colors.white : Colors.transparent,
+                borderRadius: BorderRadius.circular(6),
+                boxShadow: isSelected
+                    ? [BoxShadow(color: Colors.black.withValues(alpha: 0.08), blurRadius: 4, offset: const Offset(0, 1))]
+                    : null,
+              ),
+              child: Text(
+                label,
+                style: TextStyle(
+                  fontSize: 12,
+                  fontWeight: FontWeight.w600,
+                  color: isSelected ? AppColors.primary : const Color(0xFF9CA3AF),
+                ),
+              ),
+            ),
+          );
+        }).toList(),
+      ),
+    );
+  }
+}
+

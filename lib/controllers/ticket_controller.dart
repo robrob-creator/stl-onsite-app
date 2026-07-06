@@ -52,35 +52,43 @@ class TicketController extends GetxController {
     isLoading.value = true;
     hasError.value = false;
     try {
-      // When searching by ticket number (e.g., scanning QR), avoid restricting
-      // by status to ensure tickets with non-standard statuses (printed,
-      // completed, etc.) are returned. Otherwise searches may erroneously
-      // report "No ticket found".
       final isSearch = searchQuery.value.isNotEmpty;
-      final statusFilter = isSearch
-          ? null
-          : (selectedStatus.value == 'Void' ? 'pending_void,voided' : 'won,pending,lost');
+      final from = isSearch ? null : (dateFrom.value.isNotEmpty ? dateFrom.value : null);
+      final to   = isSearch ? null : (dateTo.value.isNotEmpty   ? dateTo.value   : null);
 
-      final result = await TicketService.fetchTickets(
-        ticketNo: searchQuery.value.isNotEmpty ? searchQuery.value : null,
-        status: statusFilter,
-        dateFrom: isSearch ? null : (dateFrom.value.isNotEmpty ? dateFrom.value : null),
-        dateTo:   isSearch ? null : (dateTo.value.isNotEmpty   ? dateTo.value   : null),
-      );
-      // Sort: pending_void first
-      result.sort((a, b) {
+      // Always fetch both tabs in parallel so counts stay current.
+      // On search, skip status filter so all statuses are searched.
+      final futures = await Future.wait([
+        TicketService.fetchTickets(
+          ticketNo: isSearch ? searchQuery.value : null,
+          status: isSearch ? null : 'won,pending,lost',
+          dateFrom: from,
+          dateTo: to,
+        ),
+        TicketService.fetchTickets(
+          ticketNo: isSearch ? searchQuery.value : null,
+          status: isSearch ? null : 'pending_void,voided',
+          dateFrom: from,
+          dateTo: to,
+        ),
+      ]);
+
+      final activeTickets = futures[0];
+      final voidTickets   = futures[1];
+
+      activeTabCount.value = activeTickets.length;
+
+      // Sort void: pending_void first
+      voidTickets.sort((a, b) {
         final aVoid = a.status?.toLowerCase() == 'pending_void';
         final bVoid = b.status?.toLowerCase() == 'pending_void';
         if (aVoid && !bVoid) return -1;
         if (!aVoid && bVoid) return 1;
         return 0;
       });
-      tickets.value = result;
-      if (selectedStatus.value == 'Void') {
-        voidTabCount.value = result.length;
-      } else {
-        activeTabCount.value = result.length;
-      }
+      voidTabCount.value = voidTickets.length;
+
+      tickets.value = selectedStatus.value == 'Void' ? voidTickets : activeTickets;
     } catch (_) {
       hasError.value = true;
     } finally {

@@ -7,6 +7,7 @@ import 'package:permission_handler/permission_handler.dart';
 import '../../core/services/ticket_service.dart';
 import '../../core/services/void_setup_service.dart';
 import '../../core/services/reprint_setup_service.dart';
+import '../../core/services/printer_service.dart';
 import '../../models/ticket.dart';
 import '../../controllers/ticket_controller.dart';
 
@@ -47,16 +48,9 @@ class _TicketPageState extends State<TicketPage> {
   final GlobalKey _qrKey = GlobalKey(debugLabel: 'QR');
   bool _showQRScanner = false;
 
-  // Date range popover
-  bool _datePopOpen = false;
+  // Single date filter
   bool _dateExplicitlySet = false;
-  String _dateFromInput = '';
-  String _dateToInput = '';
-  static const _presets = [
-    ('Today', 0, 0),
-    ('Yesterday', -1, -1),
-    ('This week', -6, 0),
-  ];
+  String _dateInput = '';
 
   // Expanded cards (ticket id → bool)
   final Set<String> _expandedCards = {};
@@ -87,9 +81,8 @@ class _TicketPageState extends State<TicketPage> {
         })
         .catchError((_) {});
 
-    // init date inputs to match controller
-    _dateFromInput = _ctrl.dateFrom.value;
-    _dateToInput = _ctrl.dateTo.value;
+    // init date input to match controller
+    _dateInput = _ctrl.dateFrom.value;
   }
 
   @override
@@ -144,11 +137,9 @@ class _TicketPageState extends State<TicketPage> {
   }
 
   String _fmtDateLabel() {
-    final f = _ctrl.dateFrom.value;
-    final t = _ctrl.dateTo.value;
-    if (f.isEmpty && t.isEmpty) return 'All dates';
-    if (f == t) return _fmtShort(f);
-    return '${_fmtShort(f)} – ${_fmtShort(t)}';
+    final d = _ctrl.dateFrom.value;
+    if (d.isEmpty) return 'All dates';
+    return _fmtShort(d);
   }
 
   String _fmtShort(String iso) {
@@ -265,7 +256,17 @@ class _TicketPageState extends State<TicketPage> {
         created.add(Duration(minutes: _activeVoidSetup!.minutes)),
       );
     }
-    return true;
+    return false;
+  }
+
+  /// True when the ticket still has direct-print allowance (printCount < maxPrints).
+  /// Placing a bet counts as print #1, so printCount defaults to 1.
+  bool _isDirectPrint(Ticket ticket) {
+    if (_activeReprintSetup == null || !_activeReprintSetup!.isActive) return false;
+    final maxP = _activeReprintSetup!.maxPrints;
+    if (maxP <= 0) return false;
+    final cur = ticket.printCount ?? 1;
+    return cur < maxP;
   }
 
   bool _canReprint(Ticket ticket) {
@@ -276,12 +277,31 @@ class _TicketPageState extends State<TicketPage> {
       return false;
     }
     if (ticket.betObjects?.isEmpty ?? true) return false;
+    // Direct print still available → button enabled
+    if (_isDirectPrint(ticket)) return true;
+    // Request reprint path
     if (_activeReprintSetup != null && _activeReprintSetup!.isActive) {
       final cur = ticket.reprintRequests ?? 0;
       final maxR = _activeReprintSetup!.maxReprintRequests;
       if (maxR > 0 && cur >= maxR) return false;
     }
-    return true;
+    return _activeReprintSetup != null && _activeReprintSetup!.isActive;
+  }
+
+  /// Whether to render the void button at all (requires admin config or ticket-level window).
+  bool _showVoidButton(Ticket ticket) {
+    if ((ticket.status ?? '').toLowerCase() != 'pending') return false;
+    if (ticket.hasActiveRequest) return false;
+    return _activeVoidSetup != null ||
+        ticket.voidWindowMinutes != null ||
+        ticket.voidExpiresAt != null;
+  }
+
+  /// Whether to render the reprint button at all (requires active admin config).
+  bool _showReprintButton(Ticket ticket) {
+    final status = (ticket.status ?? '').toLowerCase();
+    if (status == 'voided') return false;
+    return _activeReprintSetup != null && _activeReprintSetup!.isActive;
   }
 
   // ── QR ─────────────────────────────────────────────────────────────────────
@@ -313,6 +333,7 @@ class _TicketPageState extends State<TicketPage> {
   void _showVoidSheet(Ticket ticket) {
     showModalBottomSheet(
       context: context,
+      isScrollControlled: true,
       backgroundColor: Colors.white,
       shape: const RoundedRectangleBorder(
         borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
@@ -320,17 +341,17 @@ class _TicketPageState extends State<TicketPage> {
       builder: (_) => _VoidConfirmSheet(
         ticketId: _shortId(ticket.id),
         onKeep: () => Navigator.pop(context),
-        onVoid: () {
+        onVoid: (reason) {
           Navigator.pop(context);
-          _doVoid(ticket);
+          _doVoid(ticket, reason);
         },
       ),
     );
   }
 
-  Future<void> _doVoid(Ticket ticket) async {
+  Future<void> _doVoid(Ticket ticket, String reason) async {
     try {
-      final msg = await _ctrl.voidTicket(ticket.id ?? '', '');
+      final msg = await _ctrl.voidTicket(ticket.id ?? '', reason);
       Get.snackbar(
         'Success',
         msg,
@@ -360,6 +381,13 @@ class _TicketPageState extends State<TicketPage> {
         colorText: Colors.white,
       );
     } catch (e) {
+      final errMsg = e.toString();
+      if (errMsg.contains('still be reprinted') &&
+          errMsg.contains('without approval')) {
+        // Backend says direct print still available — proceed without approval.
+        await _doPrint(ticket);
+        return;
+      }
       Get.snackbar(
         'Error',
         'Failed to request reprint: $e',
@@ -370,36 +398,72 @@ class _TicketPageState extends State<TicketPage> {
     }
   }
 
-  // ── date popover actions ───────────────────────────────────────────────────
-
-  void _applyDates() {
-    var f = _dateFromInput;
-    var t = _dateToInput;
-    if (f.isNotEmpty && t.isNotEmpty && f.compareTo(t) > 0) {
-      final tmp = f;
-      f = t;
-      t = tmp;
+  /// Direct BT print — used when printCount < maxPrints.
+  /// Prints via Bluetooth then increments print_count on the backend.
+  Future<void> _doPrint(Ticket ticket) async {
+    final result = await PrinterService.reprintTicket(ticket: ticket);
+    if (!result.success) {
+      final msg = switch (result.error) {
+        PrintError.noPrinterConfigured => 'No printer configured.',
+        PrintError.permissionDenied => 'Bluetooth permission denied.',
+        PrintError.notConnected => 'Printer not connected. Check Bluetooth.',
+        PrintError.outOfPaper => 'Printer out of paper.',
+        _ => 'Print failed. Check printer and try again.',
+      };
+      Get.snackbar(
+        'Print Failed',
+        msg,
+        snackPosition: SnackPosition.BOTTOM,
+        backgroundColor: _red,
+        colorText: Colors.white,
+      );
+      return;
     }
-    if (f.isEmpty && t.isEmpty) {
-      setState(() {
-        _datePopOpen = false;
-        _dateExplicitlySet = false;
-      });
-      _ctrl.clearDateFilter();
-    } else {
-      setState(() {
-        _datePopOpen = false;
-        _dateExplicitlySet = true;
-      });
-      _ctrl.setDateRange(f.isNotEmpty ? f : t, t.isNotEmpty ? t : f);
+    try {
+      await TicketService.incrementPrintCount(ticket.id ?? '');
+    } catch (_) {
+      // Print succeeded — backend count update failure is non-fatal
     }
+    _ctrl.fetchTickets();
+    Get.snackbar(
+      'Printed',
+      'Ticket printed successfully.',
+      snackPosition: SnackPosition.BOTTOM,
+      backgroundColor: _green,
+      colorText: Colors.white,
+    );
   }
 
-  void _clearDates() {
+  // ── date picker actions ────────────────────────────────────────────────────
+
+  Future<void> _pickDate(BuildContext context) async {
+    final initial = _dateInput.isNotEmpty
+        ? DateTime.tryParse(_dateInput) ?? DateTime.now()
+        : DateTime.now();
+    final picked = await showDatePicker(
+      context: context,
+      initialDate: initial,
+      firstDate: DateTime(2020),
+      lastDate: DateTime(2030),
+      builder: (ctx, child) => Theme(
+        data: Theme.of(ctx).copyWith(
+          colorScheme: const ColorScheme.light(primary: _blue),
+        ),
+        child: child!,
+      ),
+    );
+    if (picked == null || !mounted) return;
+    final iso = picked.toIso8601String().substring(0, 10);
     setState(() {
-      _dateFromInput = '';
-      _dateToInput = '';
-      _datePopOpen = false;
+      _dateInput = iso;
+      _dateExplicitlySet = true;
+    });
+    _ctrl.setDate(iso);
+  }
+
+  void _clearDate() {
+    setState(() {
+      _dateInput = '';
       _dateExplicitlySet = false;
     });
     _ctrl.clearDateFilter();
@@ -508,77 +572,80 @@ class _TicketPageState extends State<TicketPage> {
       color: Colors.white,
       border: Border(bottom: BorderSide(color: _border)),
     ),
-    child: Stack(
-      clipBehavior: Clip.none,
-      children: [
-        // Main row
-        SizedBox(
-          height: 42,
-          child: Row(
-            children: [
-              // Search
-              Expanded(
-                child: _SearchBox(
-                  controller: _searchController,
-                  focusNode: _searchFocusNode,
-                  focused: _searchFocused,
-                  onClear: () {
-                    _searchController.clear();
-                    _ctrl.fetchTickets('');
-                  },
-                ),
-              ),
-              const SizedBox(width: 8),
-              // Date button
-              Obx(
-                () => _DateButton(
-                  label: _fmtDateLabel(),
-                  active:
-                      _dateExplicitlySet &&
-                      (_ctrl.dateFrom.value.isNotEmpty ||
-                          _ctrl.dateTo.value.isNotEmpty),
-                  onTap: () {
-                    setState(() {
-                      _datePopOpen = !_datePopOpen;
-                      if (_datePopOpen) {
-                        _dateFromInput = _ctrl.dateFrom.value;
-                        _dateToInput = _ctrl.dateTo.value;
-                      }
-                    });
-                  },
-                ),
-              ),
-              const SizedBox(width: 8),
-              // QR scan
-              _IconBtn(icon: Icons.qr_code_scanner, onTap: _startQRScan),
-            ],
-          ),
-        ),
-        // Date popover
-        if (_datePopOpen)
-          Positioned(
-            top: 50,
-            left: 0,
-            right: 0,
-            child: _DatePopover(
-              dateFrom: _dateFromInput,
-              dateTo: _dateToInput,
-              presets: _presets,
-              todayFn: _today,
-              addDaysFn: _addDays,
-              onFromChanged: (v) => setState(() => _dateFromInput = v),
-              onToChanged: (v) => setState(() => _dateToInput = v),
-              onApply: _applyDates,
-              onClear: _clearDates,
-              onPreset: (f, t) {
-                setState(() {
-                  _dateFromInput = f;
-                  _dateToInput = t;
-                });
+    child: SizedBox(
+      height: 42,
+      child: Row(
+        children: [
+          // Search
+          Expanded(
+            child: _SearchBox(
+              controller: _searchController,
+              focusNode: _searchFocusNode,
+              focused: _searchFocused,
+              onClear: () {
+                _searchController.clear();
+                _ctrl.fetchTickets('');
               },
             ),
           ),
-      ],
+          const SizedBox(width: 8),
+          // Single date picker button
+          Obx(() {
+            final active = _dateExplicitlySet &&
+                _ctrl.dateFrom.value.isNotEmpty;
+            return GestureDetector(
+              onTap: () => _pickDate(context),
+              child: Container(
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 10,
+                  vertical: 0,
+                ),
+                height: 42,
+                decoration: BoxDecoration(
+                  color: active ? _blue : Colors.white,
+                  border: Border.all(
+                    color: active ? _blue : _border,
+                  ),
+                  borderRadius: BorderRadius.circular(10),
+                ),
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Icon(
+                      Icons.calendar_today_rounded,
+                      size: 14,
+                      color: active ? Colors.white : _muted,
+                    ),
+                    const SizedBox(width: 5),
+                    Text(
+                      _fmtDateLabel(),
+                      style: TextStyle(
+                        fontSize: 12,
+                        fontWeight: FontWeight.w600,
+                        color: active ? Colors.white : _muted,
+                      ),
+                    ),
+                    if (active) ...[
+                      const SizedBox(width: 6),
+                      GestureDetector(
+                        onTap: _clearDate,
+                        child: const Icon(
+                          Icons.close_rounded,
+                          size: 14,
+                          color: Colors.white,
+                        ),
+                      ),
+                    ],
+                  ],
+                ),
+              ),
+            );
+          }),
+          const SizedBox(width: 8),
+          // QR scan
+          _IconBtn(icon: Icons.qr_code_scanner, onTap: _startQRScan),
+        ],
+      ),
     ),
   );
 
@@ -660,6 +727,9 @@ class _TicketPageState extends State<TicketPage> {
             voidTimeLeft: _voidTimeLeft(t),
             canVoid: _canVoid(t),
             canReprint: _canReprint(t),
+            isDirectPrint: _isDirectPrint(t),
+            showVoid: _showVoidButton(t),
+            showReprint: _showReprintButton(t),
             expanded: _expandedCards.contains(t.id),
             onToggleExpand: () => setState(() {
               if (_expandedCards.contains(t.id)) {
@@ -669,7 +739,7 @@ class _TicketPageState extends State<TicketPage> {
               }
             }),
             onVoid: () => _showVoidSheet(t),
-            onReprint: () => _doReprint(t),
+            onReprint: _isDirectPrint(t) ? () => _doPrint(t) : () => _doReprint(t),
           );
         },
       ),
@@ -712,6 +782,9 @@ class _TicketCard extends StatelessWidget {
   final Duration? voidTimeLeft;
   final bool canVoid;
   final bool canReprint;
+  final bool isDirectPrint;
+  final bool showVoid;
+  final bool showReprint;
   final bool expanded;
   final VoidCallback onToggleExpand;
   final VoidCallback onVoid;
@@ -726,6 +799,9 @@ class _TicketCard extends StatelessWidget {
     required this.voidTimeLeft,
     required this.canVoid,
     required this.canReprint,
+    required this.isDirectPrint,
+    required this.showVoid,
+    required this.showReprint,
     required this.expanded,
     required this.onToggleExpand,
     required this.onVoid,
@@ -911,31 +987,32 @@ class _TicketCard extends StatelessWidget {
                   ],
                 ),
 
-                const SizedBox(height: 11),
-
-                // Action buttons
-                Row(
-                  children: [
-                    // Reprint
-                    Expanded(
-                      child: _ReprintButton(
-                        enabled: canReprint,
-                        onTap: canReprint ? onReprint : null,
-                      ),
-                    ),
-                    if (_status == 'pending') ...[
-                      const SizedBox(width: 8),
-                      Expanded(
-                        child: _VoidButton(
-                          timeLeft: voidTimeLeft,
-                          canVoid: canVoid,
-                          fmtClock: fmtClock,
-                          onTap: canVoid ? onVoid : null,
+                // Action buttons — only rendered when admin config allows
+                if (showReprint || showVoid) ...[
+                  const SizedBox(height: 11),
+                  Row(
+                    children: [
+                      if (showReprint)
+                        Expanded(
+                          child: _ReprintButton(
+                            enabled: canReprint,
+                            label: isDirectPrint ? 'Print' : 'Request Reprint',
+                            onTap: canReprint ? onReprint : null,
+                          ),
                         ),
-                      ),
+                      if (showReprint && showVoid) const SizedBox(width: 8),
+                      if (showVoid)
+                        Expanded(
+                          child: _VoidButton(
+                            timeLeft: voidTimeLeft,
+                            canVoid: canVoid,
+                            fmtClock: fmtClock,
+                            onTap: canVoid ? onVoid : null,
+                          ),
+                        ),
                     ],
-                  ],
-                ),
+                  ),
+                ],
 
                 // Bets Details toggle
                 if (bets.isNotEmpty) ...[
@@ -1129,8 +1206,9 @@ class _VoidButton extends StatelessWidget {
 
 class _ReprintButton extends StatelessWidget {
   final bool enabled;
+  final String label;
   final VoidCallback? onTap;
-  const _ReprintButton({required this.enabled, this.onTap});
+  const _ReprintButton({required this.enabled, required this.label, this.onTap});
 
   @override
   Widget build(BuildContext context) => GestureDetector(
@@ -1152,7 +1230,7 @@ class _ReprintButton extends StatelessWidget {
           ),
           const SizedBox(width: 6),
           Text(
-            'Request Reprint',
+            label,
             style: TextStyle(
               fontSize: 12.5,
               fontWeight: FontWeight.w700,
@@ -1284,15 +1362,29 @@ class _TDStatus extends StatelessWidget {
 
 // ── Void confirm sheet ────────────────────────────────────────────────────────
 
-class _VoidConfirmSheet extends StatelessWidget {
+class _VoidConfirmSheet extends StatefulWidget {
   final String ticketId;
   final VoidCallback onKeep;
-  final VoidCallback onVoid;
+  final void Function(String reason) onVoid;
   const _VoidConfirmSheet({
     required this.ticketId,
     required this.onKeep,
     required this.onVoid,
   });
+
+  @override
+  State<_VoidConfirmSheet> createState() => _VoidConfirmSheetState();
+}
+
+class _VoidConfirmSheetState extends State<_VoidConfirmSheet> {
+  final _reasonCtrl = TextEditingController();
+  bool _hasReason = false;
+
+  @override
+  void dispose() {
+    _reasonCtrl.dispose();
+    super.dispose();
+  }
 
   @override
   Widget build(BuildContext context) => Padding(
@@ -1316,16 +1408,41 @@ class _VoidConfirmSheet extends StatelessWidget {
         ),
         const SizedBox(height: 6),
         Text(
-          '$ticketId will be marked void and removed from active bets. '
+          '${widget.ticketId} will be marked void and removed from active bets. '
           'This can\'t be undone.',
           style: const TextStyle(fontSize: 13, color: _muted, height: 1.5),
         ),
-        const SizedBox(height: 16),
+        const SizedBox(height: 14),
+        TextField(
+          controller: _reasonCtrl,
+          autofocus: true,
+          maxLines: 2,
+          textCapitalization: TextCapitalization.sentences,
+          onChanged: (v) => setState(() => _hasReason = v.trim().isNotEmpty),
+          decoration: InputDecoration(
+            hintText: 'Reason for void (required)',
+            hintStyle: const TextStyle(fontSize: 13, color: _muted2),
+            contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+            border: OutlineInputBorder(
+              borderRadius: BorderRadius.circular(10),
+              borderSide: const BorderSide(color: _border),
+            ),
+            enabledBorder: OutlineInputBorder(
+              borderRadius: BorderRadius.circular(10),
+              borderSide: const BorderSide(color: _border),
+            ),
+            focusedBorder: OutlineInputBorder(
+              borderRadius: BorderRadius.circular(10),
+              borderSide: const BorderSide(color: _blue, width: 1.5),
+            ),
+          ),
+        ),
+        const SizedBox(height: 14),
         Row(
           children: [
             Expanded(
               child: GestureDetector(
-                onTap: onKeep,
+                onTap: widget.onKeep,
                 child: Container(
                   padding: const EdgeInsets.symmetric(vertical: 12),
                   decoration: BoxDecoration(
@@ -1347,20 +1464,20 @@ class _VoidConfirmSheet extends StatelessWidget {
             const SizedBox(width: 10),
             Expanded(
               child: GestureDetector(
-                onTap: onVoid,
+                onTap: _hasReason ? () => widget.onVoid(_reasonCtrl.text.trim()) : null,
                 child: Container(
                   padding: const EdgeInsets.symmetric(vertical: 12),
                   decoration: BoxDecoration(
-                    color: _red,
+                    color: _hasReason ? _red : _faint,
                     borderRadius: BorderRadius.circular(11),
                   ),
                   alignment: Alignment.center,
-                  child: const Text(
+                  child: Text(
                     'Void it',
                     style: TextStyle(
                       fontSize: 14,
                       fontWeight: FontWeight.w700,
-                      color: Colors.white,
+                      color: _hasReason ? Colors.white : _muted2,
                     ),
                   ),
                 ),

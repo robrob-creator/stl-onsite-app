@@ -1,4 +1,5 @@
 import 'dart:convert';
+import 'dart:developer' show log;
 import 'package:get/get.dart';
 import 'package:http/http.dart' as http;
 import 'package:onstite/controllers/auth_controller.dart';
@@ -69,6 +70,15 @@ class SoldOutService {
     List<Map<String, dynamic>> cartBets = const [],
   }) async {
     final token = Get.find<AuthController>().token.value;
+    final body = jsonEncode({
+      'game_id': gameId,
+      'draw_id': drawId,
+      'draw_time_id': drawTimeId,
+      'draw_date': drawDate,
+      'tokens': tokens,
+      'cart_bets': cartBets,
+    });
+    log('[PERM_REQ] $body', name: 'AVAIL');
     final response = await http
         .post(
           Uri.parse('${AppConstants.apiBaseUrl}/bet/token/permutations'),
@@ -76,17 +86,11 @@ class SoldOutService {
             'Content-Type': 'application/json',
             'Authorization': 'Bearer $token',
           },
-          body: jsonEncode({
-            'game_id': gameId,
-            'draw_id': drawId,
-            'draw_time_id': drawTimeId,
-            'draw_date': drawDate,
-            'tokens': tokens,
-            'cart_bets': cartBets,
-          }),
+          body: body,
         )
         .timeout(const Duration(seconds: 10));
 
+    log('[PERM_RESP] status=${response.statusCode} body=${response.body}', name: 'AVAIL');
     if (response.statusCode == 200) {
       final data = jsonDecode(response.body) as Map<String, dynamic>;
       return PermutationAvailability.fromJson(data);

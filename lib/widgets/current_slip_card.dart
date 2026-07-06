@@ -97,7 +97,10 @@ class _CurrentSlipCardState extends State<CurrentSlipCard>
     final result = <String>{};
     final arr = List<String>.from(digits);
     void go(int s) {
-      if (s == arr.length) { result.add(arr.join('-')); return; }
+      if (s == arr.length) {
+        result.add(arr.map((d) => int.tryParse(d)?.toString() ?? d).join('-'));
+        return;
+      }
       final seen = <String>{};
       for (int i = s; i < arr.length; i++) {
         if (seen.contains(arr[i])) continue;
@@ -170,7 +173,8 @@ class _CurrentSlipCardState extends State<CurrentSlipCard>
                         Wrap(
                           spacing: 5,
                           children: widget.digits.map((d) => _DigitTile(
-                            digit: d, bg: _digitBg, fg: _digitFg,
+                            digit: (int.tryParse(d)?.toString() ?? d),
+                            bg: _digitBg, fg: _digitFg,
                           )).toList(),
                         ),
                         const SizedBox(height: 9),

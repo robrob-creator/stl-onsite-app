@@ -460,6 +460,198 @@ class _BetEntryPageState extends State<BetEntryPage> {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
+              // No-game date banner
+              Obx(() {
+                final ctrl = Get.find<LotteryController>();
+                if (!ctrl.isNoGameDay.value) return const SizedBox.shrink();
+                final desc = ctrl.noGameDayDescription.value;
+                return Container(
+                  margin: const EdgeInsets.only(bottom: 16),
+                  decoration: BoxDecoration(
+                    color: const Color(0xFFFFF5F5),
+                    borderRadius: BorderRadius.circular(12),
+                    border: Border.all(color: const Color(0xFFFECACA)),
+                  ),
+                  child: Row(
+                    children: [
+                      Container(
+                        width: 4,
+                        height: 68,
+                        decoration: const BoxDecoration(
+                          color: Color(0xFFDC2626),
+                          borderRadius: BorderRadius.only(
+                            topLeft: Radius.circular(12),
+                            bottomLeft: Radius.circular(12),
+                          ),
+                        ),
+                      ),
+                      const SizedBox(width: 12),
+                      const Icon(
+                        Icons.event_busy_rounded,
+                        color: Color(0xFFDC2626),
+                        size: 20,
+                      ),
+                      const SizedBox(width: 10),
+                      Expanded(
+                        child: Padding(
+                          padding: const EdgeInsets.symmetric(vertical: 14),
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              const Text(
+                                'No Games Today',
+                                style: TextStyle(
+                                  fontSize: 13,
+                                  fontWeight: FontWeight.w700,
+                                  color: Color(0xFFDC2626),
+                                ),
+                              ),
+                              Text(
+                                desc.isNotEmpty
+                                    ? desc
+                                    : 'Betting is disabled for today.',
+                                style: const TextStyle(
+                                  fontSize: 11,
+                                  color: Color(0xFF991B1B),
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ),
+                      const SizedBox(width: 12),
+                    ],
+                  ),
+                );
+              }),
+
+              // Blackout time banner
+              Obx(() {
+                final ctrl = Get.find<LotteryController>();
+                if (!ctrl.isBlackoutTime.value) return const SizedBox.shrink();
+                return Container(
+                  margin: const EdgeInsets.only(bottom: 16),
+                  decoration: BoxDecoration(
+                    color: const Color(0xFFFFF8F0),
+                    borderRadius: BorderRadius.circular(12),
+                    border: Border.all(color: const Color(0xFFFDBA74)),
+                  ),
+                  child: Row(
+                    children: [
+                      Container(
+                        width: 4,
+                        height: 68,
+                        decoration: const BoxDecoration(
+                          color: Color(0xFFF97316),
+                          borderRadius: BorderRadius.only(
+                            topLeft: Radius.circular(12),
+                            bottomLeft: Radius.circular(12),
+                          ),
+                        ),
+                      ),
+                      const SizedBox(width: 12),
+                      const Icon(
+                        Icons.timer_off_rounded,
+                        color: Color(0xFFF97316),
+                        size: 20,
+                      ),
+                      const SizedBox(width: 10),
+                      const Expanded(
+                        child: Padding(
+                          padding: EdgeInsets.symmetric(vertical: 14),
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              Text(
+                                'Blackout Period Active',
+                                style: TextStyle(
+                                  fontSize: 13,
+                                  fontWeight: FontWeight.w700,
+                                  color: Color(0xFFEA580C),
+                                ),
+                              ),
+                              Text(
+                                'Betting is temporarily unavailable. Please try again later.',
+                                style: TextStyle(
+                                  fontSize: 11,
+                                  color: Color(0xFF9A3412),
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ),
+                      const SizedBox(width: 12),
+                    ],
+                  ),
+                );
+              }),
+
+              // Tomorrow betting banner
+              Obx(() {
+                final ctrl = Get.find<LotteryController>();
+                if (!ctrl.isBettingForTomorrow) return const SizedBox.shrink();
+                return Container(
+                  margin: const EdgeInsets.only(bottom: 16),
+                  decoration: BoxDecoration(
+                    color: const Color(0xFFF0F9FF),
+                    borderRadius: BorderRadius.circular(12),
+                    border: Border.all(color: const Color(0xFF7DD3FC)),
+                  ),
+                  child: Row(
+                    children: [
+                      Container(
+                        width: 4,
+                        height: 56,
+                        decoration: const BoxDecoration(
+                          color: Color(0xFF0EA5E9),
+                          borderRadius: BorderRadius.only(
+                            topLeft: Radius.circular(12),
+                            bottomLeft: Radius.circular(12),
+                          ),
+                        ),
+                      ),
+                      const SizedBox(width: 12),
+                      const Icon(
+                        Icons.calendar_today_rounded,
+                        color: Color(0xFF0284C7),
+                        size: 18,
+                      ),
+                      const SizedBox(width: 10),
+                      const Expanded(
+                        child: Padding(
+                          padding: EdgeInsets.symmetric(vertical: 12),
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              Text(
+                                'Betting for Tomorrow',
+                                style: TextStyle(
+                                  fontSize: 13,
+                                  fontWeight: FontWeight.w700,
+                                  color: Color(0xFF0284C7),
+                                ),
+                              ),
+                              Text(
+                                "Today's draws have closed. Bets will be placed for tomorrow.",
+                                style: TextStyle(
+                                  fontSize: 11,
+                                  color: Color(0xFF0369A1),
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ),
+                      const SizedBox(width: 12),
+                    ],
+                  ),
+                );
+              }),
+
               // Game Selector
               GetBuilder<LotteryController>(
                 builder: (ctrl) => Container(
@@ -480,6 +672,9 @@ class _BetEntryPageState extends State<BetEntryPage> {
                                 ctrl.selectedGameId.value = game.id;
                                 ctrl.selectedTime.value = ctrl
                                     .getFirstAvailableDrawTimeId(game);
+                                ctrl.isBlackoutTime.value =
+                                    game.isInBlackout;
+                                ctrl.updateBetDateForGame(game);
                                 ctrl.update();
                               },
                               child: Container(
@@ -576,63 +771,6 @@ class _BetEntryPageState extends State<BetEntryPage> {
                         ).requestFocus(_targetAmountFocusNode);
                       },
                     ),
-                    // Availability badge — shown once digits are complete
-                    Obx(() {
-                      final perm = ctrl.permAvailability.value;
-                      if (perm == null) return const SizedBox.shrink();
-                      final Color bg;
-                      final Color fg;
-                      final IconData icon;
-                      final String label;
-                      switch (perm.state) {
-                        case 'SOLD_OUT':
-                          bg = const Color(0xFFFEE2E2);
-                          fg = const Color(0xFFDC2626);
-                          icon = Icons.block_rounded;
-                          label = 'Sold Out';
-                        case 'PARTIALLY_SOLD':
-                          bg = const Color(0xFFFFF3E0);
-                          fg = const Color(0xFFF59E0B);
-                          icon = Icons.warning_amber_rounded;
-                          label = 'Partially Sold';
-                        default:
-                          bg = const Color(0xFFD1FAE5);
-                          fg = const Color(0xFF059669);
-                          icon = Icons.check_circle_outline_rounded;
-                          label = 'Available';
-                      }
-                      return Padding(
-                        padding: const EdgeInsets.only(top: 8),
-                        child: Align(
-                          alignment: Alignment.centerLeft,
-                          child: Container(
-                            padding: const EdgeInsets.symmetric(
-                              horizontal: 12,
-                              vertical: 6,
-                            ),
-                            decoration: BoxDecoration(
-                              color: bg,
-                              borderRadius: BorderRadius.circular(20),
-                            ),
-                            child: Row(
-                              mainAxisSize: MainAxisSize.min,
-                              children: [
-                                Icon(icon, size: 14, color: fg),
-                                const SizedBox(width: 4),
-                                Text(
-                                  label,
-                                  style: TextStyle(
-                                    fontSize: 12,
-                                    fontWeight: FontWeight.w600,
-                                    color: fg,
-                                  ),
-                                ),
-                              ],
-                            ),
-                          ),
-                        ),
-                      );
-                    }),
                   ],
                 ),
               ),
@@ -642,7 +780,7 @@ class _BetEntryPageState extends State<BetEntryPage> {
               GetBuilder<LotteryController>(
                 builder: (ctrl) {
                   final drawTimes = ctrl.currentDrawTimes
-                      .where((dt) => dt.isAvailable())
+                      .where((dt) => dt.isAvailableForDate(ctrl.betDate.value))
                       .toList();
 
                   // If the previously selected draw time is no longer available,
@@ -892,6 +1030,18 @@ class _BetEntryPageState extends State<BetEntryPage> {
                                           ),
                                         ),
                                       ),
+                                    if (targetBlocked)
+                                      Padding(
+                                        padding: const EdgeInsets.only(bottom: 6),
+                                        child: Text(
+                                          'Target sold out for this number',
+                                          style: TextStyle(
+                                            fontSize: 11,
+                                            color: Colors.red[400],
+                                            fontWeight: FontWeight.w500,
+                                          ),
+                                        ),
+                                      ),
                                     TextField(
                                       controller: _targetAmountController,
                                       focusNode: _targetAmountFocusNode,
@@ -978,6 +1128,18 @@ class _BetEntryPageState extends State<BetEntryPage> {
                                           ),
                                         ),
                                       ),
+                                    if (rambolBlocked)
+                                      Padding(
+                                        padding: const EdgeInsets.only(bottom: 6),
+                                        child: Text(
+                                          'Rambol sold out — a permutation is blocked',
+                                          style: TextStyle(
+                                            fontSize: 11,
+                                            color: Colors.red[400],
+                                            fontWeight: FontWeight.w500,
+                                          ),
+                                        ),
+                                      ),
                                     TextField(
                                       controller: _rambolAmountController,
                                       focusNode: _rambolAmountFocusNode,
@@ -986,9 +1148,7 @@ class _BetEntryPageState extends State<BetEntryPage> {
                                         ctrl.rambolAmount.value =
                                             int.tryParse(value) ?? 0;
                                         final n = int.tryParse(value) ?? 0;
-                                        final dpc = game.maxNumber
-                                            .toString()
-                                            .length;
+                                        final dpc = game.maxNumber.toString().length;
                                         final digs = <String>[];
                                         for (
                                           int i = 0;
@@ -1031,6 +1191,15 @@ class _BetEntryPageState extends State<BetEntryPage> {
                                         hintStyle: TextStyle(
                                           color: Colors.grey[400],
                                         ),
+                                        helperText: !rambolBlocked &&
+                                                perm != null &&
+                                                perm.summary.available > 0
+                                            ? '${perm.summary.available} perm${perm.summary.available == 1 ? '' : 's'} available  •  Min ₱${perm.summary.available}'
+                                            : null,
+                                        helperStyle: TextStyle(
+                                          fontSize: 11,
+                                          color: Colors.grey[500],
+                                        ),
                                         errorText: _rambolError,
                                         errorStyle: const TextStyle(
                                           fontSize: 11,
@@ -1069,16 +1238,153 @@ class _BetEntryPageState extends State<BetEntryPage> {
                   );
                 },
               ),
-              const SizedBox(height: 24),
+              // Availability status bar — shown above Add Bet button
+              Obx(() {
+                final ctrl = Get.find<LotteryController>();
+                if (ctrl.isCheckingPermutations.value) {
+                  return Container(
+                    margin: const EdgeInsets.only(top: 16),
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 16,
+                      vertical: 12,
+                    ),
+                    decoration: BoxDecoration(
+                      color: Colors.grey[50],
+                      borderRadius: BorderRadius.circular(12),
+                      border: Border.all(color: Colors.grey[200]!),
+                    ),
+                    child: Row(
+                      children: [
+                        SizedBox(
+                          width: 14,
+                          height: 14,
+                          child: CircularProgressIndicator(
+                            strokeWidth: 1.5,
+                            valueColor: AlwaysStoppedAnimation<Color>(
+                              Colors.grey[400]!,
+                            ),
+                          ),
+                        ),
+                        const SizedBox(width: 10),
+                        Text(
+                          'Checking availability...',
+                          style: TextStyle(
+                            fontSize: 13,
+                            color: Colors.grey[500],
+                            fontWeight: FontWeight.w500,
+                          ),
+                        ),
+                      ],
+                    ),
+                  );
+                }
+                final perm = ctrl.permAvailability.value;
+                if (perm == null) return const SizedBox.shrink();
+                final Color bg;
+                final Color fg;
+                final Color border;
+                final Color accent;
+                final IconData icon;
+                final String label;
+                final String sublabel;
+                switch (perm.state) {
+                  case 'SOLD_OUT':
+                    bg = const Color(0xFFFFF5F5);
+                    fg = const Color(0xFFDC2626);
+                    border = const Color(0xFFFECACA);
+                    accent = const Color(0xFFDC2626);
+                    icon = Icons.block_rounded;
+                    label = 'Sold Out';
+                    sublabel = 'This combination is no longer available';
+                  case 'PARTIALLY_SOLD':
+                    bg = const Color(0xFFFFFBEB);
+                    fg = const Color(0xFFD97706);
+                    border = const Color(0xFFFDE68A);
+                    accent = const Color(0xFFF59E0B);
+                    icon = Icons.warning_amber_rounded;
+                    label = 'Partially Sold';
+                    sublabel = 'Some bet types may be limited';
+                  default:
+                    bg = const Color(0xFFF0FDF4);
+                    fg = const Color(0xFF059669);
+                    border = const Color(0xFFBBF7D0);
+                    accent = const Color(0xFF10B981);
+                    icon = Icons.check_circle_outline_rounded;
+                    label = 'Available';
+                    sublabel = 'This combination is open for betting';
+                }
+                return Container(
+                  margin: const EdgeInsets.only(top: 16),
+                  decoration: BoxDecoration(
+                    color: bg,
+                    borderRadius: BorderRadius.circular(12),
+                    border: Border.all(color: border),
+                  ),
+                  child: Row(
+                    children: [
+                      Container(
+                        width: 4,
+                        height: 52,
+                        decoration: BoxDecoration(
+                          color: accent,
+                          borderRadius: const BorderRadius.only(
+                            topLeft: Radius.circular(12),
+                            bottomLeft: Radius.circular(12),
+                          ),
+                        ),
+                      ),
+                      const SizedBox(width: 12),
+                      Icon(icon, size: 18, color: fg),
+                      const SizedBox(width: 10),
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Text(
+                              label,
+                              style: TextStyle(
+                                fontSize: 13,
+                                fontWeight: FontWeight.w700,
+                                color: fg,
+                              ),
+                            ),
+                            Text(
+                              sublabel,
+                              style: TextStyle(
+                                fontSize: 11,
+                                color: fg.withValues(alpha: 0.7),
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                      const SizedBox(width: 12),
+                    ],
+                  ),
+                );
+              }),
+
+              const SizedBox(height: 16),
 
               // Add Bet Button
               GetBuilder<LotteryController>(
                 builder: (ctrl) {
                   final hasDrawTimes = ctrl.currentDrawTimes
-                      .where((dt) => dt.isAvailable())
+                      .where((dt) => dt.isAvailableForDate(ctrl.betDate.value))
                       .isNotEmpty;
-                  final canAdd =
-                      hasDrawTimes && !ctrl.isLoading.value && !_isAddingBet;
+                  return Obx(() {
+                  final perm = ctrl.permAvailability.value;
+                  final checking = ctrl.isCheckingPermutations.value;
+                  final fullySoldOut = perm != null &&
+                      perm.state == 'SOLD_OUT' &&
+                      !perm.target.allowed &&
+                      (perm.rambolDisabled || !perm.rambol.allowed);
+                  final canAdd = hasDrawTimes &&
+                      !ctrl.isLoading.value &&
+                      !_isAddingBet &&
+                      !fullySoldOut &&
+                      !checking;
                   return SizedBox(
                     width: double.infinity,
                     height: 56,
@@ -1105,10 +1411,7 @@ class _BetEntryPageState extends State<BetEntryPage> {
                                   return;
                                 }
 
-                                // Calculate digits per cell based on max number
-                                int digitsPerCell = game.maxNumber
-                                    .toString()
-                                    .length;
+                                int digitsPerCell = game.maxNumber.toString().length;
                                 int expectedTotalDigits =
                                     game.numberOfCombinations * digitsPerCell;
 
@@ -1179,10 +1482,10 @@ class _BetEntryPageState extends State<BetEntryPage> {
                                     );
                                     return false;
                                   }
-                                  // Min amount: use server permCount or local fallback
-                                  final availPerms =
-                                      perm?.rambol.permutationCount ??
-                                      controller.calculateCombinations(digits);
+                                  // Min/divisor: use available (non-sold-out) perm count per swerte888 rules
+                                  final availPerms = (perm != null && perm.summary.available > 0)
+                                      ? perm.summary.available
+                                      : (perm?.rambol.permutationCount ?? controller.calculateCombinations(digits));
                                   if (rambolAmount < availPerms) {
                                     Get.snackbar(
                                       'Invalid Amount',
@@ -1354,11 +1657,16 @@ class _BetEntryPageState extends State<BetEntryPage> {
                                   } else {
                                     final available =
                                         availResult.availableAmount;
+                                    final perm =
+                                        controller.permAvailability.value;
                                     Get.dialog(
                                       ConflictNoticeModal(
                                         result: availResult,
                                         requestedAmount:
                                             availResult.requestedAmount,
+                                        permutations: perm?.permutations,
+                                        availablePermCount:
+                                            perm?.summary.available ?? 0,
                                         onUpdateAmount:
                                             available != null && available > 0
                                             ? () {
@@ -1370,11 +1678,19 @@ class _BetEntryPageState extends State<BetEntryPage> {
                                                         .targetAmount
                                                         .value = available
                                                         .toInt();
+                                                    _targetAmountController
+                                                        .text = available
+                                                        .toInt()
+                                                        .toString();
                                                   } else {
                                                     controller
                                                         .rambolAmount
                                                         .value = available
                                                         .toInt();
+                                                    _rambolAmountController
+                                                        .text = available
+                                                        .toInt()
+                                                        .toString();
                                                   }
                                                 });
                                               }
@@ -1464,6 +1780,7 @@ class _BetEntryPageState extends State<BetEntryPage> {
                             ),
                     ),
                   );
+                  }); // close Obx
                 },
               ),
 
@@ -1754,7 +2071,7 @@ class _EditDraftDialogState extends State<EditDraftDialog> {
   Widget build(BuildContext context) {
     final controller = widget.controller;
     final draft = widget.draft;
-    final digitsPerCell = _game?.maxNumber.toString().length ?? 2;
+    final digitsPerCell = _game != null ? _game!.maxNumber.toString().length : 2;
     final expectedTotalDigits =
         (_game?.numberOfCombinations ?? draft.combinations) * digitsPerCell;
 
@@ -1988,15 +2305,31 @@ class _EditDraftDialogState extends State<EditDraftDialog> {
                                   return;
                                 } else {
                                   final available = availResult.availableAmount;
+                                  final perm = widget.controller.permAvailability.value;
                                   await Get.dialog(
                                     ConflictNoticeModal(
                                       result: availResult,
                                       requestedAmount:
                                           availResult.requestedAmount,
+                                      permutations: perm?.permutations,
+                                      availablePermCount:
+                                          perm?.summary.available ?? 0,
                                       onUpdateAmount:
                                           (available != null && available > 0)
                                           ? () {
                                               Get.back();
+                                              Future.microtask(() {
+                                                if (availResult.betType ==
+                                                    BetType.target) {
+                                                  _targetCtrl.text = available
+                                                      .toInt()
+                                                      .toString();
+                                                } else {
+                                                  _rambolCtrl.text = available
+                                                      .toInt()
+                                                      .toString();
+                                                }
+                                              });
                                             }
                                           : null,
                                       onAdjustManually: () => Get.back(),
