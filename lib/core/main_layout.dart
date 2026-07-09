@@ -53,13 +53,36 @@ class _MainLayoutState extends State<MainLayout> {
         surfaceTintColor: Colors.white,
         backgroundColor: Colors.white,
         elevation: 1,
-        leading: IconButton(
-          icon: const Icon(Icons.menu, color: Colors.black),
-          onPressed: () {
-            _scaffoldKey.currentState?.openDrawer();
-            widget.onMenuPressed?.call();
-          },
-        ),
+        leading: Obx(() {
+          final isLive = Get.isRegistered<LiveDrawController>()
+              ? Get.find<LiveDrawController>().isLive.value
+              : false;
+          return IconButton(
+            icon: Stack(
+              clipBehavior: Clip.none,
+              children: [
+                const Icon(Icons.menu, color: Colors.black),
+                if (isLive)
+                  Positioned(
+                    top: -3,
+                    right: -4,
+                    child: Container(
+                      width: 9,
+                      height: 9,
+                      decoration: const BoxDecoration(
+                        color: Color(0xFFDC2626),
+                        shape: BoxShape.circle,
+                      ),
+                    ),
+                  ),
+              ],
+            ),
+            onPressed: () {
+              _scaffoldKey.currentState?.openDrawer();
+              widget.onMenuPressed?.call();
+            },
+          );
+        }),
         title: widget.title != null
             ? Text(
                 widget.title!,

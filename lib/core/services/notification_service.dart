@@ -7,7 +7,7 @@ import '../../controllers/auth_controller.dart';
 import '../app_constants.dart';
 
 class NotificationService {
-  static const String _oneSignalAppId = '1dac9f08-f605-43b7-b3f1-cf753c4446f7';
+  static const String _oneSignalAppId = '759bf2e5-1e54-4ec1-9cec-885ff2f3a953';
 
   /// Call once at app startup, before login.
   static Future<void> initialize() async {

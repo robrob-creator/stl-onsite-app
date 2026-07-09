@@ -199,6 +199,26 @@ class LotteryController extends GetxController {
       ws.on('bet.placed', (_) => loadProfile());
       ws.on('bet.bulk_placed', (_) => loadProfile());
       ws.on('claim.paid', (_) => loadProfile());
+      // Trigger dashboard re-fetch when draw results are published
+      ws.on('draw_result.posted', (_) {
+        drawRefreshTick.value = drawRefreshTick.value + 1;
+      });
+      // Sync agent app when admin changes game/schedule/no-game config
+      ws.on('api.mutation', (payload) {
+        final endpoints =
+            (payload['endpoints_to_update'] as List<dynamic>? ?? [])
+                .map((e) => e.toString())
+                .toList();
+        // Game settings or draw times changed (blackout, limits, etc.)
+        if (endpoints.any((e) =>
+            e.contains('/api/games') || e.contains('/api/draw-times'))) {
+          loadGames();
+        }
+        // No-game date added/removed
+        if (endpoints.any((e) => e.contains('/api/no-game-date'))) {
+          _checkNoGameDay();
+        }
+      });
     } catch (_) {
       // WebSocketService not yet available — will connect after auth
     }

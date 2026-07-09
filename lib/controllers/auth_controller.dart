@@ -357,10 +357,15 @@ class AuthController extends GetxController {
     });
 
     wsService.on('draw_result.posted', (payload) {
-      final game = payload['gameName'] ?? payload['game'] ?? 'Game';
+      final result = payload['result'];
+      final resultStr = result is List ? result.join('-') : (result?.toString() ?? '');
+      final drawDate = payload['drawDate'] as String? ?? '';
+      final message = resultStr.isNotEmpty
+          ? 'Result: $resultStr${drawDate.isNotEmpty ? ' · $drawDate' : ''}'
+          : 'Draw result is now available.';
       Get.snackbar(
-        'Draw Result',
-        '$game draw result is now available.',
+        'Draw Result Posted',
+        message,
         snackPosition: SnackPosition.BOTTOM,
         backgroundColor: const Color(0xFF2563EB),
         colorText: Colors.white,

@@ -8,6 +8,7 @@ import '../../core/services/ticket_service.dart';
 import '../../core/services/void_setup_service.dart';
 import '../../core/services/reprint_setup_service.dart';
 import '../../core/services/printer_service.dart';
+import '../../core/services/websocket_service.dart';
 import '../../models/ticket.dart';
 import '../../controllers/ticket_controller.dart';
 
@@ -42,6 +43,7 @@ class _TicketPageState extends State<TicketPage> {
   Timer? _clockTimer;
   VoidSetupItem? _activeVoidSetup;
   ReprintSetupItem? _activeReprintSetup;
+  Function? _wsUnsub;
 
   // QR
   QRViewController? _qrCtrl;
@@ -63,6 +65,8 @@ class _TicketPageState extends State<TicketPage> {
   void initState() {
     super.initState();
     _ctrl = Get.put(TicketController());
+    // Always refresh on page show — handles cached controller with stale void count
+    _ctrl.fetchTickets();
     _searchController.addListener(_onSearchChanged);
     _searchFocusNode.addListener(() {
       if (mounted) setState(() => _searchFocused = _searchFocusNode.hasFocus);
@@ -70,23 +74,44 @@ class _TicketPageState extends State<TicketPage> {
     _clockTimer = Timer.periodic(const Duration(seconds: 1), (_) {
       if (mounted) setState(() {});
     });
-    VoidSetupService.fetchActiveVoidSetup()
-        .then((v) {
-          if (mounted && v != null) setState(() => _activeVoidSetup = v);
-        })
-        .catchError((_) {});
-    ReprintSetupService.fetchActiveReprintSetup()
-        .then((v) {
-          if (mounted && v != null) setState(() => _activeReprintSetup = v);
-        })
-        .catchError((_) {});
+    _fetchSetups();
+
+    // Re-fetch setups when admin changes void/reprint configuration
+    try {
+      final ws = Get.find<WebSocketService>();
+      _wsUnsub = ws.on('api.mutation', (payload) {
+        final endpoints =
+            (payload['endpoints_to_update'] as List<dynamic>? ?? [])
+                .map((e) => e.toString())
+                .toList();
+        if (endpoints.any((e) =>
+            e.contains('/api/void-setup') ||
+            e.contains('/api/reprint-setup'))) {
+          _fetchSetups();
+        }
+      });
+    } catch (_) {}
 
     // init date input to match controller
     _dateInput = _ctrl.dateFrom.value;
   }
 
+  void _fetchSetups() {
+    VoidSetupService.fetchActiveVoidSetup()
+        .then((v) {
+          if (mounted) setState(() => _activeVoidSetup = v);
+        })
+        .catchError((_) {});
+    ReprintSetupService.fetchActiveReprintSetup()
+        .then((v) {
+          if (mounted) setState(() => _activeReprintSetup = v);
+        })
+        .catchError((_) {});
+  }
+
   @override
   void dispose() {
+    _wsUnsub?.call();
     _clockTimer?.cancel();
     _debounceTimer?.cancel();
     _searchController.dispose();
@@ -720,7 +745,7 @@ class _TicketPageState extends State<TicketPage> {
           final t = tickets[i - 1];
           return _TicketCard(
             ticket: t,
-            shortId: _shortId(t.id),
+            shortId: t.ticketNo ?? _shortId(t.id),
             fmtPrinted: _fmtPrinted(t.createdAt),
             fmtAmount: _fmtAmount,
             fmtClock: _fmtClock,
@@ -880,21 +905,30 @@ class _TicketCard extends StatelessWidget {
             padding: const EdgeInsets.fromLTRB(13, 13, 13, 10),
             child: Row(
               children: [
-                // STL logo circle
-                Container(
-                  width: 34,
-                  height: 34,
-                  decoration: const BoxDecoration(
-                    color: _hair,
-                    shape: BoxShape.circle,
-                  ),
-                  alignment: Alignment.center,
-                  child: const Text(
-                    'STL',
-                    style: TextStyle(
-                      fontSize: 8.5,
-                      fontWeight: FontWeight.w900,
-                      color: _muted2,
+                // STL logo
+                ClipRRect(
+                  borderRadius: BorderRadius.circular(6),
+                  child: Image.asset(
+                    'assets/images/logos/logo.png',
+                    width: 34,
+                    height: 34,
+                    fit: BoxFit.contain,
+                    errorBuilder: (_, __, ___) => Container(
+                      width: 34,
+                      height: 34,
+                      decoration: const BoxDecoration(
+                        color: _hair,
+                        shape: BoxShape.circle,
+                      ),
+                      alignment: Alignment.center,
+                      child: const Text(
+                        'STL',
+                        style: TextStyle(
+                          fontSize: 8.5,
+                          fontWeight: FontWeight.w900,
+                          color: _muted2,
+                        ),
+                      ),
                     ),
                   ),
                 ),
@@ -1031,9 +1065,9 @@ class _TicketCard extends StatelessWidget {
                           ),
                         ),
                         const SizedBox(width: 5),
-                        const Text(
-                          'Bets Details',
-                          style: TextStyle(
+                        Text(
+                          expanded ? 'Hide Details' : 'View Details',
+                          style: const TextStyle(
                             fontSize: 11.5,
                             fontWeight: FontWeight.w700,
                             color: _muted,
@@ -1257,14 +1291,16 @@ class _BetsTable extends StatelessWidget {
       child: Table(
         columnWidths: const {
           0: FlexColumnWidth(2),
-          1: FlexColumnWidth(1.5),
+          1: FlexColumnWidth(2),
           2: FlexColumnWidth(1.5),
-          3: FlexColumnWidth(2),
+          3: FlexColumnWidth(1.5),
+          4: FlexColumnWidth(2),
         },
         children: [
           // Header
           const TableRow(
             children: [
+              _TH('GAME'),
               _TH('BET NO'),
               _TH('AMOUNT'),
               _TH('TYPE'),
@@ -1287,6 +1323,7 @@ class _BetsTable extends StatelessWidget {
                 border: Border(top: BorderSide(color: _hair)),
               ),
               children: [
+                _TD(b.gameName ?? '—'),
                 _TD(digits),
                 _TD(fmtAmount(amt)),
                 _TD(betType),
@@ -1515,15 +1552,6 @@ class _SearchBox extends StatelessWidget {
         width: focused ? 1.5 : 1,
       ),
       borderRadius: BorderRadius.circular(11),
-      boxShadow: focused
-          ? [
-              BoxShadow(
-                color: _blue.withValues(alpha: 0.10),
-                blurRadius: 0,
-                spreadRadius: 3,
-              ),
-            ]
-          : null,
     ),
     child: Row(
       children: [
@@ -1539,6 +1567,7 @@ class _SearchBox extends StatelessWidget {
               border: InputBorder.none,
               focusedBorder: InputBorder.none,
               enabledBorder: InputBorder.none,
+              filled: false,
               hintText: 'Search ticket number…',
               hintStyle: TextStyle(color: _muted2, fontWeight: FontWeight.w500),
               contentPadding: EdgeInsets.zero,
