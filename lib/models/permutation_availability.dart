@@ -18,11 +18,13 @@ class PermRambolAvailability {
   final bool allowed;
   final int permutationCount;
   final double minAmount;
+  final double? availableAmount;
 
   const PermRambolAvailability({
     required this.allowed,
     required this.permutationCount,
     required this.minAmount,
+    this.availableAmount,
   });
 
   factory PermRambolAvailability.fromJson(Map<String, dynamic> j) =>
@@ -30,6 +32,7 @@ class PermRambolAvailability {
         allowed: j['allowed'] as bool? ?? true,
         permutationCount: j['permutationCount'] as int? ?? 1,
         minAmount: (j['minAmount'] as num?)?.toDouble() ?? 1,
+        availableAmount: (j['availableAmount'] as num?)?.toDouble(),
       );
 }
 

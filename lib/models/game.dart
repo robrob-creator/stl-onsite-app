@@ -56,15 +56,22 @@ class Game {
   /// Returns true if current local time falls within this game's blackout window.
   bool get isInBlackout {
     if (blackoutStartTime == null || blackoutEndTime == null) return false;
+    if (blackoutStartTime!.isEmpty || blackoutEndTime!.isEmpty) return false;
     try {
       final now = DateTime.now();
-      final startParts = blackoutStartTime!.split(':');
-      final endParts = blackoutEndTime!.split(':');
-      if (startParts.length < 2 || endParts.length < 2) return false;
+      // API returns ISO format "0000-01-01T23:40:00Z" — extract H:M from that
+      int _h(String s) {
+        if (s.contains('T')) return DateTime.parse(s).toLocal().hour;
+        return int.parse(s.split(':')[0]);
+      }
+      int _m(String s) {
+        if (s.contains('T')) return DateTime.parse(s).toLocal().minute;
+        return int.parse(s.split(':')[1]);
+      }
       final start = DateTime(now.year, now.month, now.day,
-          int.parse(startParts[0]), int.parse(startParts[1]));
+          _h(blackoutStartTime!), _m(blackoutStartTime!));
       final end = DateTime(now.year, now.month, now.day,
-          int.parse(endParts[0]), int.parse(endParts[1]));
+          _h(blackoutEndTime!), _m(blackoutEndTime!));
       return now.isAfter(start) && now.isBefore(end);
     } catch (_) {
       return false;

@@ -233,8 +233,9 @@ class _HomePageState extends State<HomePage> {
     return MainLayout(
       onMenuPressed: () {},
       title: _currentIndex == 0 ? 'Dashboard' : null,
-      appBarTrailing: GetBuilder<LotteryController>(
-        builder: (ctrl) => Container(
+      appBarTrailing: Obx(() {
+        final balance = Get.find<LotteryController>().balance.value;
+        return Container(
           padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
           decoration: BoxDecoration(
             color: AppColors.primary.withOpacity(0.1),
@@ -251,7 +252,7 @@ class _HomePageState extends State<HomePage> {
               ),
               const SizedBox(width: 8),
               Text(
-                _formatAmount(ctrl.balance.value),
+                _formatAmount(balance),
                 style: TextStyle(
                   color: AppColors.primary.withOpacity(0.9),
                   fontWeight: FontWeight.bold,
@@ -260,8 +261,8 @@ class _HomePageState extends State<HomePage> {
               ),
             ],
           ),
-        ),
-      ),
+        );
+      }),
       body: _buildBody(),
       onBottomNavTap: (index) {
         setState(() {

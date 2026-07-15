@@ -210,6 +210,7 @@ class BetData {
   final String? gameName;
   final String? drawTime;
   final String? drawTimeId;
+  final String? drawDate;
 
   BetData({
     this.id,
@@ -226,6 +227,7 @@ class BetData {
     this.gameName,
     this.drawTime,
     this.drawTimeId,
+    this.drawDate,
   });
 
   factory BetData.fromJson(Map<String, dynamic> json) {
@@ -263,6 +265,7 @@ class BetData {
       gameName: json['game_name'] as String?,
       drawTime: json['draw_time'] as String?,
       drawTimeId: json['draw_time_id'] as String?,
+      drawDate: json['draw_date'] as String?,
     );
   }
 

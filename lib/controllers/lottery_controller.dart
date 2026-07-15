@@ -199,9 +199,12 @@ class LotteryController extends GetxController {
       ws.on('bet.placed', (_) => loadProfile());
       ws.on('bet.bulk_placed', (_) => loadProfile());
       ws.on('claim.paid', (_) => loadProfile());
-      // Trigger dashboard re-fetch when draw results are published
+      // Trigger dashboard re-fetch when draw results are published and
+      // refresh the agent's balance since winning payouts are deducted from
+      // the maker's balance on approval.
       ws.on('draw_result.posted', (_) {
         drawRefreshTick.value = drawRefreshTick.value + 1;
+        loadProfile();
       });
       // Sync agent app when admin changes game/schedule/no-game config
       ws.on('api.mutation', (payload) {
@@ -217,6 +220,22 @@ class LotteryController extends GetxController {
         // No-game date added/removed
         if (endpoints.any((e) => e.contains('/api/no-game-date'))) {
           _checkNoGameDay();
+        }
+        // Sold-out config changed — re-check permutations if user has digits entered
+        if (endpoints.any((e) =>
+            e.contains('/api/soldouts') || e.contains('/api/sold-out'))) {
+          if (selectedNumbers.isNotEmpty) {
+            final cartBets = <Map<String, dynamic>>[];
+            for (final d in draftBets) {
+              if (d.straightBetAmount > 0) {
+                cartBets.add({'digits': d.digits, 'amount': d.straightBetAmount.toInt(), 'bet_type': 'straight'});
+              }
+              if (d.rambleBetAmount > 0) {
+                cartBets.add({'digits': d.digits, 'amount': d.rambleBetAmount.toInt(), 'bet_type': 'rambol'});
+              }
+            }
+            fetchPermutations(List<String>.from(selectedNumbers), cartBets: cartBets);
+          }
         }
       });
     } catch (_) {
@@ -425,25 +444,20 @@ class LotteryController extends GetxController {
   }
 
   Future<void> clearDraftBets() async {
-    final toDelete = List<DraftBet>.from(draftBets);
+    final token = Get.find<AuthController>().token.value;
+    try {
+      await http
+          .delete(
+            Uri.parse('${AppConstants.apiBaseUrl}/bets/drafts/clear'),
+            headers: {
+              'Content-Type': 'application/json',
+              'Authorization': 'Bearer $token',
+            },
+          )
+          .timeout(const Duration(seconds: 30));
+    } catch (_) {}
     draftBets.clear();
     update();
-
-    final token = Get.find<AuthController>().token.value;
-    await Future.wait(
-      toDelete
-          .where((d) => d.id.isNotEmpty)
-          .map((d) => http
-              .delete(
-                Uri.parse('${AppConstants.apiBaseUrl}/bets/delete?id=${d.id}'),
-                headers: {
-                  'Content-Type': 'application/json',
-                  'Authorization': 'Bearer $token',
-                },
-              )
-              .timeout(const Duration(seconds: 30))
-              .catchError((_) => http.Response('', 500))),
-    );
   }
 
   /// Sends the current bet inputs to `POST /bets/draft-bulk` and appends
@@ -467,6 +481,7 @@ class LotteryController extends GetxController {
       );
       return false;
     }
+
 
     // Verify internet connectivity before attempting to add a bet
     if (!await _hasInternetConnection()) {
@@ -758,7 +773,7 @@ class LotteryController extends GetxController {
     final game = currentGame;
     if (game == null) return;
     final drawTimeId = selectedTime.value;
-    final drawDate = ManilaTime.dateString();
+    final drawDate = ManilaTime.dateString(betDate.value);
     isCheckingPermutations.value = true;
     try {
       final result = await SoldOutService.checkPermutations(
@@ -768,6 +783,8 @@ class LotteryController extends GetxController {
         drawDate: drawDate,
         tokens: digits,
         cartBets: cartBets,
+        targetAmount: targetAmount.value.toDouble(),
+        rambolAmount: rambolAmount.value.toDouble(),
       );
       permAvailability.value = result;
     } catch (_) {
@@ -779,19 +796,24 @@ class LotteryController extends GetxController {
 
   /// Checks availability via POST /bet/token/permutations (with cart_bets).
   /// Returns null when open. Returns BetAvailabilityResult when a conflict exists.
+  /// When [excludeDraftIndex] is non-null, that draft is skipped when building
+  /// cart_bets so an edited bet does not double-count its own prior amount.
   Future<BetAvailabilityResult?> checkBetAvailability({
     required List<String> digits,
     required double targetAmount,
     required double rambolAmount,
+    int? excludeDraftIndex,
   }) async {
     final game = currentGame;
     if (game == null) return null;
 
     final drawTimeId = selectedTime.value;
-    final drawDate = ManilaTime.dateString();
+    final drawDate = ManilaTime.dateString(betDate.value);
 
     final cartBets = <Map<String, dynamic>>[];
-    for (final d in draftBets) {
+    for (int i = 0; i < draftBets.length; i++) {
+      if (excludeDraftIndex != null && i == excludeDraftIndex) continue;
+      final d = draftBets[i];
       if (d.straightBetAmount > 0) {
         cartBets.add({
           'digits': d.digits,
@@ -816,6 +838,8 @@ class LotteryController extends GetxController {
         drawDate: drawDate,
         tokens: digits,
         cartBets: cartBets,
+        targetAmount: targetAmount,
+        rambolAmount: rambolAmount,
       );
       permAvailability.value = result;
       final avail = buildBetAvailabilityResult(
@@ -1182,6 +1206,10 @@ class LotteryController extends GetxController {
       Map<String, dynamic> lastTeller = {};
       double? lastBalance;
 
+      // Capture betDate now before it may change after submission
+      final betDateStr =
+          '${betDate.value.year}-${betDate.value.month.toString().padLeft(2, '0')}-${betDate.value.day.toString().padLeft(2, '0')}';
+
       // Collects print data for each submitted group; printed sequentially after
       // all API submissions succeed to avoid concurrent Bluetooth connections.
       final printQueue = <({
@@ -1191,6 +1219,7 @@ class LotteryController extends GetxController {
         Map<String, dynamic> teller,
         String gameName,
         String drawTimeLabel,
+        String drawDate,
       })>[];
 
       for (final entry in groups.entries) {
@@ -1290,6 +1319,7 @@ class LotteryController extends GetxController {
           teller: Map<String, dynamic>.from(lastTeller),
           gameName: groupGameName,
           drawTimeLabel: groupDrawTimeLabel,
+          drawDate: betDateStr,
         ));
       }
 
@@ -1327,6 +1357,7 @@ class LotteryController extends GetxController {
           teller: job.teller,
           gameName: job.gameName,
           drawTimeLabel: job.drawTimeLabel,
+          drawDate: job.drawDate,
         );
       }
     } catch (e) {
@@ -1350,6 +1381,7 @@ class LotteryController extends GetxController {
     required Map<String, dynamic> teller,
     required String gameName,
     required String drawTimeLabel,
+    String drawDate = '',
   }) async {
     // Verify saved printer reachability before attempting to print
     final reach = await PrinterService.getSavedPrinterReachability();
@@ -1406,6 +1438,7 @@ class LotteryController extends GetxController {
       teller: teller,
       gameName: gameName,
       drawTimeLabel: drawTimeLabel,
+      drawDate: drawDate,
     );
 
     if (result.success) return;
@@ -1588,11 +1621,11 @@ class LotteryController extends GetxController {
         );
       }
     } catch (e) {
-      Get.snackbar(
-        'Error',
-        'Bet submission failed with status code ${response.statusCode}',
-        snackPosition: SnackPosition.BOTTOM,
-      );
+      final code = response.statusCode;
+      final msg = code == 502 || code == 503 || code == 504
+          ? 'Server is temporarily unavailable. Please try again.'
+          : 'Bet submission failed (code $code). Please try again.';
+      Get.snackbar('Error', msg, snackPosition: SnackPosition.BOTTOM);
     }
   }
 

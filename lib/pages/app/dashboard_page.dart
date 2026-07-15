@@ -293,6 +293,9 @@ class _DashboardPageState extends State<DashboardPage> {
 
   List<Widget> _buildDrawCards() {
     if (drawResults == null || drawResults!.drawTimes.isEmpty) return [];
+    final maxBet = drawResults!.drawTimes
+        .map((d) => d.betSummary?.totalBet ?? 0)
+        .fold(0, (a, b) => a > b ? a : b);
     return drawResults!.drawTimes.map((drawTime) {
       final formattedTime = _formatDrawTime(drawTime.drawTime ?? '');
       final resultText = _parseResultString(drawTime.latestResult?.result);
@@ -302,6 +305,7 @@ class _DashboardPageState extends State<DashboardPage> {
         winningAmnt: drawTime.latestResult?.winAmount?.toString(),
         totalBet: drawTime.betSummary?.totalBet ?? 0,
         totalWon: drawTime.betSummary?.totalWon ?? 0,
+        maxTotalBet: maxBet,
         chartStyle: _chartStyle,
       );
     }).toList();
@@ -313,6 +317,7 @@ class _DashboardPageState extends State<DashboardPage> {
     required String? winningAmnt,
     required int totalBet,
     required int totalWon,
+    required int maxTotalBet,
     required String chartStyle,
   }) {
     final hasResult = result != '----';
@@ -502,7 +507,7 @@ class _DashboardPageState extends State<DashboardPage> {
 
                 // ── Gross vs Hits chart ────────────────────────────
                 if (chartStyle == '1b')
-                  _GrossHitsBar(totalBet: totalBet, totalWon: totalWon)
+                  _GrossHitsBar(totalBet: totalBet, totalWon: totalWon, maxTotalBet: maxTotalBet)
                 else if (chartStyle == '1c')
                   _GrossHitsChips(totalBet: totalBet, totalWon: totalWon)
                 else
@@ -675,7 +680,6 @@ class _GrossHitsRing extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final payoutRatio = totalBet > 0 ? totalWon / totalBet : 0.0;
-    final payoutPct = (payoutRatio * 100).round();
     final netAmount = totalBet - totalWon;
     final isProfit = netAmount >= 0;
     final ringRatio = payoutRatio.clamp(0.0, 1.0);
@@ -698,22 +702,31 @@ class _GrossHitsRing extends StatelessWidget {
                 mainAxisSize: MainAxisSize.min,
                 children: [
                   Text(
-                    '$payoutPct%',
+                    _fmt(totalBet),
                     style: TextStyle(
-                      fontSize: 16,
+                      fontSize: 10,
                       fontWeight: FontWeight.w800,
                       color: isProfit ? const Color(0xFF1D3A8A) : const Color(0xFF9A2C24),
-                      height: 1.1,
+                      height: 1.2,
                     ),
                   ),
                   const Text(
-                    'payout',
-                    style: TextStyle(
-                      fontSize: 8,
-                      fontWeight: FontWeight.w700,
-                      color: Color(0xFF9AA3B2),
-                      letterSpacing: 0.3,
+                    'Sales',
+                    style: TextStyle(fontSize: 7, fontWeight: FontWeight.w600, color: Color(0xFF9AA3B2)),
+                  ),
+                  Container(height: 1, width: 20, color: Color(0xFFE2E8F0), margin: EdgeInsets.symmetric(vertical: 2)),
+                  Text(
+                    _fmt(totalWon),
+                    style: const TextStyle(
+                      fontSize: 10,
+                      fontWeight: FontWeight.w800,
+                      color: Color(0xFF9A2C24),
+                      height: 1.2,
                     ),
+                  ),
+                  const Text(
+                    'Hits',
+                    style: TextStyle(fontSize: 7, fontWeight: FontWeight.w600, color: Color(0xFF9AA3B2)),
                   ),
                 ],
               ),
@@ -829,7 +842,8 @@ class _RingPainter extends CustomPainter {
 class _GrossHitsBar extends StatelessWidget {
   final int totalBet;
   final int totalWon;
-  const _GrossHitsBar({required this.totalBet, required this.totalWon});
+  final int maxTotalBet;
+  const _GrossHitsBar({required this.totalBet, required this.totalWon, required this.maxTotalBet});
 
   String _fmt(int v) {
     if (v == 0) return '₱ 0';
@@ -844,7 +858,8 @@ class _GrossHitsBar extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final hitsRatio = totalBet > 0 ? (totalWon / totalBet).clamp(0.0, 1.0) : 0.0;
+    final grossFactor = maxTotalBet > 0 ? (totalBet / maxTotalBet).clamp(0.0, 1.0) : 0.0;
+    final hitsAbsoluteFactor = maxTotalBet > 0 ? (totalWon / maxTotalBet).clamp(0.0, 1.0) : 0.0;
     final netAmount = totalBet - totalWon;
     final isProfit = netAmount >= 0;
     final isOverPayout = totalWon > totalBet;
@@ -855,10 +870,10 @@ class _GrossHitsBar extends StatelessWidget {
         Row(
           crossAxisAlignment: CrossAxisAlignment.end,
           children: [
-            // Gross bar (full height reference)
+            // Gross bar (proportional to max across all draw times)
             _Bar(
               value: _fmt(totalBet),
-              heightFactor: 1.0,
+              heightFactor: grossFactor,
               color: const Color(0xFF2563EB),
               gradientTop: const Color(0xFF3B7BF0),
               label: 'Gross',
@@ -866,10 +881,10 @@ class _GrossHitsBar extends StatelessWidget {
               valueColor: const Color(0xFF1D3A8A),
             ),
             const SizedBox(width: 18),
-            // Hits bar (proportional)
+            // Hits bar (proportional to max gross)
             _Bar(
               value: _fmt(totalWon),
-              heightFactor: hitsRatio,
+              heightFactor: hitsAbsoluteFactor,
               color: isOverPayout ? const Color(0xFFDC2626) : const Color(0xFF10B981),
               gradientTop: isOverPayout ? const Color(0xFFEC5A50) : const Color(0xFF34D399),
               label: 'Hits',

@@ -10,6 +10,8 @@ class User {
   final bool isBlocked;
   final double winningsAmount;
   final double shareAmount;
+  final String areaName;
+  final String clusterName;
 
   User({
     required this.id,
@@ -23,6 +25,8 @@ class User {
     required this.isBlocked,
     required this.winningsAmount,
     required this.shareAmount,
+    this.areaName = '',
+    this.clusterName = '',
   });
 
   factory User.fromJson(Map<String, dynamic> json) {
@@ -40,6 +44,8 @@ class User {
       isBlocked: json['is_blocked'] ?? false,
       winningsAmount: (json['winnings_amount'] ?? 0).toDouble(),
       shareAmount: (json['share_amount'] ?? 0).toDouble(),
+      areaName: json['area_name'] as String? ?? '',
+      clusterName: json['cluster_name'] as String? ?? '',
     );
   }
 
@@ -56,6 +62,8 @@ class User {
       'is_blocked': isBlocked,
       'winnings_amount': winningsAmount,
       'share_amount': shareAmount,
+      'area_name': areaName,
+      'cluster_name': clusterName,
     };
   }
 }

@@ -388,7 +388,7 @@ class _TicketCardState extends State<_TicketCard> {
                                       borderRadius: BorderRadius.circular(6),
                                     ),
                                     child: Text(
-                                      ticket.status.toUpperCase(),
+                                      ticket.status.toLowerCase() == 'lost' ? 'Lose' : ticket.status.toUpperCase(),
                                       style: AppTextStyles.caption.copyWith(
                                         color: statusColor,
                                         fontWeight: FontWeight.w700,

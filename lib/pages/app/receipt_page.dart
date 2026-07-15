@@ -289,10 +289,13 @@ class ReceiptPage extends StatelessWidget {
                           final debit =
                               (ledger['debit'] as num?)?.toStringAsFixed(2) ??
                               '0.00';
-                          final runningBalance =
-                              (ledger['running_balance'] as num?)
-                                  ?.toStringAsFixed(2) ??
-                              '0.00';
+                          final runningBalanceNum =
+                              (ledger['running_balance'] as num?)?.toDouble() ??
+                              0.0;
+                          final isNegativeBalance = runningBalanceNum < 0;
+                          final runningBalanceDisplay = isNegativeBalance
+                              ? '- ₱${runningBalanceNum.abs().toStringAsFixed(2)}'
+                              : '₱${runningBalanceNum.toStringAsFixed(2)}';
 
                           return DataRow(
                             cells: [
@@ -312,8 +315,12 @@ class ReceiptPage extends StatelessWidget {
                               ),
                               DataCell(
                                 Text(
-                                  '₱$runningBalance',
-                                  style: const TextStyle(fontSize: 11),
+                                  runningBalanceDisplay,
+                                  style: TextStyle(
+                                    fontSize: 11,
+                                    color: isNegativeBalance ? Colors.red : null,
+                                    fontWeight: isNegativeBalance ? FontWeight.bold : FontWeight.normal,
+                                  ),
                                 ),
                               ),
                             ],

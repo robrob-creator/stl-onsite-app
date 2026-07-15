@@ -589,10 +589,12 @@ class _BetEntryPageState extends State<BetEntryPage> {
                 );
               }),
 
-              // Tomorrow betting banner
+              // Tomorrow betting banner — only when betting is blocked (no-game day
+              // or blackout); post-cutoff advance betting shows no banner
               Obx(() {
                 final ctrl = Get.find<LotteryController>();
                 if (!ctrl.isBettingForTomorrow) return const SizedBox.shrink();
+                if (!ctrl.isNoGameDay.value && !ctrl.isBlackoutTime.value) return const SizedBox.shrink();
                 return Container(
                   margin: const EdgeInsets.only(bottom: 16),
                   decoration: BoxDecoration(
@@ -651,6 +653,18 @@ class _BetEntryPageState extends State<BetEntryPage> {
                   ),
                 );
               }),
+
+              // Disable all form fields when no-game day or blackout is active
+              Obx(() {
+                final _ctrl = Get.find<LotteryController>();
+                final _blocked = _ctrl.isNoGameDay.value || _ctrl.isBlackoutTime.value;
+                return IgnorePointer(
+                  ignoring: _blocked,
+                  child: Opacity(
+                    opacity: _blocked ? 0.45 : 1.0,
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
 
               // Game Selector
               GetBuilder<LotteryController>(
@@ -751,14 +765,18 @@ class _BetEntryPageState extends State<BetEntryPage> {
                         });
                         final game = ctrl.currentGame;
                         if (game != null) {
-                          final dpc = game.maxNumber.toString().length;
-                          final expected = game.numberOfCombinations * dpc;
-                          if (value.length == expected) {
-                            final digs = <String>[];
-                            for (int i = 0; i < value.length; i += dpc) {
-                              digs.add(value.substring(i, i + dpc));
+                          final digs = value.split(',').where((d) => d.isNotEmpty).toList();
+                          if (digs.length == game.numberOfCombinations && digs.every((d) => d.isNotEmpty)) {
+                            final cartBets = <Map<String, dynamic>>[];
+                            for (final d in ctrl.draftBets) {
+                              if (d.straightBetAmount > 0) {
+                                cartBets.add({'digits': d.digits, 'amount': d.straightBetAmount.toInt(), 'bet_type': 'straight'});
+                              }
+                              if (d.rambleBetAmount > 0) {
+                                cartBets.add({'digits': d.digits, 'amount': d.rambleBetAmount.toInt(), 'bet_type': 'rambol'});
+                              }
                             }
-                            ctrl.fetchPermutations(digs);
+                            ctrl.fetchPermutations(digs, cartBets: cartBets);
                           } else {
                             ctrl.permAvailability.value = null;
                           }
@@ -1148,17 +1166,7 @@ class _BetEntryPageState extends State<BetEntryPage> {
                                         ctrl.rambolAmount.value =
                                             int.tryParse(value) ?? 0;
                                         final n = int.tryParse(value) ?? 0;
-                                        final dpc = game.maxNumber.toString().length;
-                                        final digs = <String>[];
-                                        for (
-                                          int i = 0;
-                                          i + dpc <= _lottoNumbers.length;
-                                          i += dpc
-                                        ) {
-                                          digs.add(
-                                            _lottoNumbers.substring(i, i + dpc),
-                                          );
-                                        }
+                                        final digs = _lottoNumbers.split(',').where((d) => d.isNotEmpty).toList();
                                         final perm =
                                             ctrl.permAvailability.value;
                                         final pc =
@@ -1411,39 +1419,18 @@ class _BetEntryPageState extends State<BetEntryPage> {
                                   return;
                                 }
 
-                                int digitsPerCell = game.maxNumber.toString().length;
-                                int expectedTotalDigits =
-                                    game.numberOfCombinations * digitsPerCell;
+                                final digits = _lottoNumbers
+                                    .split(',')
+                                    .where((d) => d.isNotEmpty)
+                                    .toList();
 
-                                // Validate input length
-                                if (_lottoNumbers.length !=
-                                    expectedTotalDigits) {
-                                  String rangeText =
-                                      '${game.minNumber}-${game.maxNumber}';
-                                  String numberText =
-                                      game.numberOfCombinations == 1
-                                      ? 'number'
-                                      : 'numbers';
+                                // Validate all cells filled
+                                if (digits.length != game.numberOfCombinations) {
                                   Get.snackbar(
                                     'Error',
-                                    'Please enter ${game.numberOfCombinations} $numberText for ${game.name} (range: $rangeText)',
+                                    'Please enter ${game.numberOfCombinations} number${game.numberOfCombinations == 1 ? '' : 's'} for ${game.name} (range: ${game.minNumber}-${game.maxNumber})',
                                   );
                                   return;
-                                }
-
-                                // Build digits list (needed for permCount validation)
-                                final digits = <String>[];
-                                for (
-                                  int i = 0;
-                                  i < _lottoNumbers.length;
-                                  i += digitsPerCell
-                                ) {
-                                  digits.add(
-                                    _lottoNumbers.substring(
-                                      i,
-                                      i + digitsPerCell,
-                                    ),
-                                  );
                                 }
                                 final permCount = controller
                                     .calculateCombinations(digits);
@@ -1609,6 +1596,7 @@ class _BetEntryPageState extends State<BetEntryPage> {
                                       digits: digits,
                                       targetAmount: targetAmount.toDouble(),
                                       rambolAmount: rambolAmount.toDouble(),
+                                      excludeDraftIndex: _editingIndex,
                                     );
 
                                 if (Get.isDialogOpen ?? false) Get.back();
@@ -1983,6 +1971,11 @@ class _BetEntryPageState extends State<BetEntryPage> {
               ),
 
               const SizedBox(height: 24),
+                      ],
+                    ),
+                  ),
+                );
+              }),
             ],
           ),
         ),
@@ -2031,7 +2024,7 @@ class _EditDraftDialogState extends State<EditDraftDialog> {
     super.initState();
     final draft = widget.draft;
     _digitsStr = (draft.digits is List)
-        ? (draft.digits as List).join('')
+        ? (draft.digits as List).map((d) => d.toString()).join(',')
         : (draft.digits.toString());
     _targetCtrl = TextEditingController(
       text: (draft.straightBetAmount ?? 0).toInt().toString(),
@@ -2056,15 +2049,7 @@ class _EditDraftDialogState extends State<EditDraftDialog> {
   }
 
   List<String> _getDigitsList(int digitsPerCell) {
-    final list = <String>[];
-    for (
-      int i = 0;
-      i + digitsPerCell <= _digitsStr.length;
-      i += digitsPerCell
-    ) {
-      list.add(_digitsStr.substring(i, i + digitsPerCell));
-    }
-    return list;
+    return _digitsStr.split(',').where((d) => d.isNotEmpty).toList();
   }
 
   @override
@@ -2277,6 +2262,7 @@ class _EditDraftDialogState extends State<EditDraftDialog> {
                                     digits: digits,
                                     targetAmount: targetAmount.toDouble(),
                                     rambolAmount: rambolAmount.toDouble(),
+                                    excludeDraftIndex: widget.index,
                                   );
 
                               if (availResult != null && availResult.exceeds) {

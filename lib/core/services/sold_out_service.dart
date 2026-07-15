@@ -68,6 +68,8 @@ class SoldOutService {
     required String drawDate,
     required List<String> tokens,
     List<Map<String, dynamic>> cartBets = const [],
+    double targetAmount = 0,
+    double rambolAmount = 0,
   }) async {
     final token = Get.find<AuthController>().token.value;
     final body = jsonEncode({
@@ -77,6 +79,8 @@ class SoldOutService {
       'draw_date': drawDate,
       'tokens': tokens,
       'cart_bets': cartBets,
+      'target_amount': targetAmount,
+      'rambol_amount': rambolAmount,
     });
     log('[PERM_REQ] $body', name: 'AVAIL');
     final response = await http

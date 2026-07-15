@@ -190,6 +190,21 @@ class _TicketPageState extends State<TicketPage> {
     }
   }
 
+  String _fmtDrawTime(String? dt) {
+    if (dt == null || dt.isEmpty) return '—';
+    try {
+      String timeStr = dt.contains('T') ? dt.split('T')[1].replaceAll('Z', '') : dt;
+      final parts = timeStr.split(':');
+      int h = int.parse(parts[0]);
+      final m = parts[1].padLeft(2, '0');
+      final period = h >= 12 ? 'PM' : 'AM';
+      h = h > 12 ? h - 12 : (h == 0 ? 12 : h);
+      return '$h:$m $period';
+    } catch (_) {
+      return dt;
+    }
+  }
+
   String _fmtPrinted(String? iso) {
     if (iso == null) return '—';
     try {
@@ -216,6 +231,23 @@ class _TicketPageState extends State<TicketPage> {
     } catch (_) {
       return iso;
     }
+  }
+
+  String _fmtDrawDateTime(String drawDate, String? drawTime) {
+    String datePart = '';
+    String timePart = '';
+    try {
+      if (drawDate.isNotEmpty) {
+        final d = DateTime.parse('${drawDate}T00:00:00');
+        const months = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+        datePart = '${months[d.month - 1]} ${d.day}';
+      }
+    } catch (_) {}
+    timePart = _fmtDrawTime(drawTime);
+    if (datePart.isEmpty && timePart == '—') return '—';
+    if (datePart.isEmpty) return timePart;
+    if (timePart == '—') return datePart;
+    return '$datePart · $timePart';
   }
 
   String _fmtAmount(double? v) {
@@ -296,12 +328,23 @@ class _TicketPageState extends State<TicketPage> {
 
   bool _canReprint(Ticket ticket) {
     final status = (ticket.status ?? '').toLowerCase();
-    if (ticket.hasActiveRequest ||
+    if ((ticket.hasActiveRequest && !ticket.hasApprovedReprintRequest) ||
         status == 'pending_void' ||
         status == 'voided') {
       return false;
     }
     if (ticket.betObjects?.isEmpty ?? true) return false;
+    // Reprint only allowed on the same calendar day the ticket was created.
+    if (ticket.createdAt != null) {
+      try {
+        final created = DateTime.parse(ticket.createdAt!).toLocal();
+        final now = DateTime.now();
+        final sameDay = created.year == now.year &&
+            created.month == now.month &&
+            created.day == now.day;
+        if (!sameDay) return false;
+      } catch (_) {}
+    }
     // Direct print still available → button enabled
     if (_isDirectPrint(ticket)) return true;
     // Request reprint path
@@ -325,7 +368,7 @@ class _TicketPageState extends State<TicketPage> {
   /// Whether to render the reprint button at all (requires active admin config).
   bool _showReprintButton(Ticket ticket) {
     final status = (ticket.status ?? '').toLowerCase();
-    if (status == 'voided') return false;
+    if (status == 'voided' || status == 'lost' || status == 'won') return false;
     return _activeReprintSetup != null && _activeReprintSetup!.isActive;
   }
 
@@ -746,7 +789,11 @@ class _TicketPageState extends State<TicketPage> {
           return _TicketCard(
             ticket: t,
             shortId: t.ticketNo ?? _shortId(t.id),
-            fmtPrinted: _fmtPrinted(t.createdAt),
+            fmtPrinted: _fmtDrawDateTime(
+              t.betObjects?.isNotEmpty == true ? (t.betObjects!.first.drawDate ?? '') : '',
+              t.betObjects?.isNotEmpty == true ? t.betObjects!.first.drawTime : null,
+            ),
+            fmtDrawDate: _fmtPrinted(t.createdAt),
             fmtAmount: _fmtAmount,
             fmtClock: _fmtClock,
             voidTimeLeft: _voidTimeLeft(t),
@@ -764,7 +811,7 @@ class _TicketPageState extends State<TicketPage> {
               }
             }),
             onVoid: () => _showVoidSheet(t),
-            onReprint: _isDirectPrint(t) ? () => _doPrint(t) : () => _doReprint(t),
+            onReprint: (t.hasApprovedReprintRequest || _isDirectPrint(t)) ? () => _doPrint(t) : () => _doReprint(t),
           );
         },
       ),
@@ -802,6 +849,7 @@ class _TicketCard extends StatelessWidget {
   final Ticket ticket;
   final String shortId;
   final String fmtPrinted;
+  final String fmtDrawDate;
   final String Function(double?) fmtAmount;
   final String Function(Duration) fmtClock;
   final Duration? voidTimeLeft;
@@ -819,6 +867,7 @@ class _TicketCard extends StatelessWidget {
     required this.ticket,
     required this.shortId,
     required this.fmtPrinted,
+    required this.fmtDrawDate,
     required this.fmtAmount,
     required this.fmtClock,
     required this.voidTimeLeft,
@@ -855,6 +904,10 @@ class _TicketCard extends StatelessWidget {
         bg = const Color(0xFFFFFBEB);
         fg = const Color(0xFFD97706);
         label = 'Void Request';
+      case 'lost':
+        bg = _hair;
+        fg = _muted;
+        label = 'Lose';
       default:
         bg = _hair;
         fg = _muted;
@@ -970,7 +1023,7 @@ class _TicketCard extends StatelessWidget {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                // Bets count + printed
+                // Bets count + draw time
                 Row(
                   mainAxisAlignment: MainAxisAlignment.spaceBetween,
                   children: [
@@ -1000,7 +1053,7 @@ class _TicketCard extends StatelessWidget {
                       crossAxisAlignment: CrossAxisAlignment.end,
                       children: [
                         const Text(
-                          'PRINTED',
+                          'DRAW DATE & TIME',
                           style: TextStyle(
                             fontSize: 9,
                             fontWeight: FontWeight.w700,
@@ -1010,6 +1063,59 @@ class _TicketCard extends StatelessWidget {
                         ),
                         Text(
                           fmtPrinted,
+                          style: const TextStyle(
+                            fontSize: 13.5,
+                            fontWeight: FontWeight.w800,
+                            color: _ink,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ],
+                ),
+
+                // Draw date + total bet amount
+                const SizedBox(height: 6),
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  children: [
+                    Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        const Text(
+                          'PRINTED DATE & TIME',
+                          style: TextStyle(
+                            fontSize: 9,
+                            fontWeight: FontWeight.w700,
+                            letterSpacing: 0.5,
+                            color: _muted2,
+                          ),
+                        ),
+                        Text(
+                          fmtDrawDate.isNotEmpty ? fmtDrawDate : '—',
+                          style: const TextStyle(
+                            fontSize: 13.5,
+                            fontWeight: FontWeight.w800,
+                            color: _ink,
+                          ),
+                        ),
+                      ],
+                    ),
+                    Column(
+                      crossAxisAlignment: CrossAxisAlignment.end,
+                      children: [
+                        const Text(
+                          'TOTAL BET',
+                          style: TextStyle(
+                            fontSize: 9,
+                            fontWeight: FontWeight.w700,
+                            letterSpacing: 0.5,
+                            color: _muted2,
+                          ),
+                        ),
+                        Text(
+                          fmtAmount(bets.fold<double>(0.0, (s, b) =>
+                              s + (b.straightBetAmount ?? 0.0) + (b.rambleBetAmount ?? 0.0))),
                           style: const TextStyle(
                             fontSize: 13.5,
                             fontWeight: FontWeight.w800,
@@ -1084,7 +1190,37 @@ class _TicketCard extends StatelessWidget {
                     duration: const Duration(milliseconds: 220),
                     curve: Curves.easeOut,
                     child: expanded
-                        ? _BetsTable(bets: bets, fmtAmount: fmtAmount)
+                        ? Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              _BetsTable(bets: bets, fmtAmount: fmtAmount),
+                              const SizedBox(height: 8),
+                              Row(
+                                mainAxisAlignment: MainAxisAlignment.end,
+                                children: [
+                                  const Text(
+                                    'TOTAL BET',
+                                    style: TextStyle(
+                                      fontSize: 9,
+                                      fontWeight: FontWeight.w800,
+                                      letterSpacing: 0.5,
+                                      color: _muted2,
+                                    ),
+                                  ),
+                                  const SizedBox(width: 8),
+                                  Text(
+                                    fmtAmount(bets.fold<double>(0.0, (s, b) =>
+                                        s + (b.straightBetAmount ?? 0.0) + (b.rambleBetAmount ?? 0.0))),
+                                    style: const TextStyle(
+                                      fontSize: 13,
+                                      fontWeight: FontWeight.w800,
+                                      color: _ink,
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ],
+                          )
                         : const SizedBox.shrink(),
                   ),
               ],
@@ -1376,6 +1512,7 @@ class _TDStatus extends StatelessWidget {
     final s = status.toLowerCase();
     final bg = s == 'voided' ? _redL : _blueL;
     final fg = s == 'voided' ? _red : _blueD;
+    final label = s == 'lost' ? 'LOSE' : status.toUpperCase();
     return Padding(
       padding: const EdgeInsets.symmetric(vertical: 5),
       child: Container(
@@ -1385,7 +1522,7 @@ class _TDStatus extends StatelessWidget {
           borderRadius: BorderRadius.circular(20),
         ),
         child: Text(
-          status.toUpperCase(),
+          label,
           style: TextStyle(
             fontSize: 9.5,
             fontWeight: FontWeight.w800,

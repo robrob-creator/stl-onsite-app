@@ -109,17 +109,32 @@ BetAvailabilityResult? buildBetAvailabilityResult({
   final N = perm.summary.available > 0
       ? perm.summary.available
       : perm.rambol.permutationCount;
-  final rambolAmountExceeds = rambolAmount > 0 &&
-      N > 0 &&
-      perm.permutations.isNotEmpty &&
-      perm.permutations.any((p) {
-        final share = rambolAmount / N;
-        return !p.isSoldOut && p.remaining > 0 && share > p.remaining;
-      });
+  // Use server-supplied total group available amount when present (Bug #1 fix).
+  // max_amount is the TOTAL group limit for rambol; compare bet directly.
+  final rambolAmountExceeds = rambolAmount > 0 && (() {
+    if (perm.rambol.availableAmount != null) {
+      return rambolAmount > perm.rambol.availableAmount!;
+    }
+    return N > 0 &&
+        perm.permutations.isNotEmpty &&
+        perm.permutations.any((p) {
+          final share = rambolAmount / N;
+          return !p.isSoldOut && p.remaining > 0 && share > p.remaining;
+        });
+  })();
 
-  // Compute max valid rambol amount for conflict modal "update to ₱X"
+  // Compute max valid rambol amount for conflict modal "update to ₱X".
+  // Prefer the server-computed availableAmount (= total group limit − exposure).
   double? rambolAvailAmt;
-  if (rambolAmount > 0 && N > 0 && perm.permutations.isNotEmpty) {
+  if (perm.rambol.availableAmount != null) {
+    final serverAmt = perm.rambol.availableAmount!;
+    if (serverAmt >= (perm.rambol.minAmount > 0 ? perm.rambol.minAmount : 1)) {
+      // Round down to nearest valid multiple of permCount
+      final divisor = N > 0 ? N : 1;
+      rambolAvailAmt = ((serverAmt / divisor).floor() * divisor).toDouble();
+      if (rambolAvailAmt! < divisor) rambolAvailAmt = null;
+    }
+  } else if (rambolAmount > 0 && N > 0 && perm.permutations.isNotEmpty) {
     final availPerms = perm.permutations.where((p) => !p.isSoldOut && p.remaining > 0);
     if (availPerms.isNotEmpty) {
       final minRem = availPerms.map((p) => p.remaining).reduce(min);

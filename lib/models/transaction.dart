@@ -242,9 +242,8 @@ class TransactionGroup {
     // Treat 'printed' as completed (printed tickets imply transaction completed
     // from a printing perspective). Consider any of these as completed-like.
     final completedLike = (String s) => s.toLowerCase() == 'completed' || s.toLowerCase() == 'printed';
-    if (transactions.isNotEmpty && transactions.every((t) => completedLike(t.status))) return 'completed';
     if (transactions.any((t) => t.status.toLowerCase() == 'failed')) return 'failed';
-    return 'pending';
+    return 'completed';
   }
 
   String get createdAt =>
@@ -357,9 +356,8 @@ class TicketGroup {
 
   String get overallStatus {
     final completedLike = (String s) => s.toLowerCase() == 'completed' || s.toLowerCase() == 'printed';
-    if (tickets.isNotEmpty && tickets.every((t) => completedLike(t.status))) return 'completed';
     if (tickets.any((t) => t.status.toLowerCase() == 'failed')) return 'failed';
-    return 'pending';
+    return 'completed';
   }
 
   String get createdAt => tickets.isNotEmpty ? tickets.first.createdAt : '';

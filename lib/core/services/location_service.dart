@@ -1,3 +1,5 @@
+import 'dart:developer';
+
 import 'package:geolocator/geolocator.dart';
 import 'package:http/http.dart' as http;
 import 'dart:convert';
@@ -35,12 +37,19 @@ class LocationService {
   static Future<void> updateUserLocation() async {
     try {
       final position = await getCurrentPosition();
-      if (position == null) return;
+      if (position == null) {
+        log('⚠ LocationService: GPS unavailable or denied');
+        return;
+      }
 
       final token = Get.find<AuthController>().token.value;
       if (token.isEmpty) return;
 
-      await http
+      log(
+        '✓ LocationService: updating location lat=${position.latitude} lng=${position.longitude}',
+      );
+
+      final response = await http
           .patch(
             Uri.parse('${AppConstants.apiBaseUrl}/auth/location'),
             headers: {
@@ -53,7 +62,10 @@ class LocationService {
             }),
           )
           .timeout(const Duration(seconds: 10));
-    } catch (_) {
+
+      log('✓ LocationService: location update response ${response.statusCode}');
+    } catch (e) {
+      log('✗ LocationService: location update failed: $e');
       // Best-effort — never block betting flow
     }
   }

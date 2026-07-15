@@ -141,6 +141,38 @@ class _EodReportPageState extends State<EodReportPage> {
                 _buildRow('Hits', report.hits),
                 _buildRow('Total Net', report.totalNet),
                 _buildRow('For Collection', report.forCollection),
+                _buildCountRow('Total Bets', report.totalBets),
+                if (report.breakdown.isNotEmpty) ...[
+                  const SizedBox(height: 20),
+                  const Divider(thickness: 1),
+                  const Padding(
+                    padding: EdgeInsets.symmetric(vertical: 8),
+                    child: Text(
+                      'Game Breakdown',
+                      style: TextStyle(
+                        fontWeight: FontWeight.w700,
+                        fontSize: 15,
+                      ),
+                    ),
+                  ),
+                  const Divider(thickness: 1),
+                  for (final item in report.breakdown) ...[
+                    const SizedBox(height: 10),
+                    Text(
+                      item.gameName.isNotEmpty ? item.gameName : 'Game',
+                      style: const TextStyle(
+                        fontWeight: FontWeight.w600,
+                        fontSize: 14,
+                      ),
+                    ),
+                    const SizedBox(height: 4),
+                    _buildCountRow('Bets', item.betCount),
+                    _buildRow('Gross', item.grossSales),
+                    _buildRow('Hits', item.hits),
+                    _buildRow('Net', item.net),
+                    const Divider(thickness: 0.5),
+                  ],
+                ],
                 const SizedBox(height: 32),
                 SizedBox(
                   width: double.infinity,
@@ -161,6 +193,7 @@ class _EodReportPageState extends State<EodReportPage> {
                     ),
                   ),
                 ),
+                const SizedBox(height: 32),
               ],
             ),
           );
@@ -203,25 +236,141 @@ class _EodReportPageState extends State<EodReportPage> {
       _isPrinting = false;
     });
 
+    if (result.success) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('EOD report sent to printer.'),
+          backgroundColor: Colors.green,
+        ),
+      );
+      return;
+    }
+
+    if (result.error == PrintError.noPrinterConfigured ||
+        result.error == PrintError.notConnected) {
+      Get.dialog(
+        Dialog(
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+          backgroundColor: Colors.white,
+          child: Padding(
+            padding: const EdgeInsets.fromLTRB(24, 32, 24, 24),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Container(
+                  width: 72,
+                  height: 72,
+                  decoration: const BoxDecoration(
+                    color: Color(0xFFFFF3E0),
+                    shape: BoxShape.circle,
+                  ),
+                  child: const Icon(
+                    Icons.bluetooth_disabled,
+                    color: Color(0xFFF59E0B),
+                    size: 36,
+                  ),
+                ),
+                const SizedBox(height: 20),
+                Text(
+                  result.error == PrintError.noPrinterConfigured
+                      ? 'No Printer Connected'
+                      : 'Printer Not Connected',
+                  textAlign: TextAlign.center,
+                  style: const TextStyle(
+                    fontSize: 18,
+                    fontWeight: FontWeight.bold,
+                    color: Colors.black87,
+                  ),
+                ),
+                const SizedBox(height: 12),
+                Text(
+                  result.error == PrintError.noPrinterConfigured
+                      ? 'No printer configured. Please set up a Bluetooth printer to print the EOD report.'
+                      : 'Unable to connect to printer. Make sure Bluetooth is on and the printer is paired.',
+                  textAlign: TextAlign.center,
+                  style: const TextStyle(
+                    fontSize: 14,
+                    color: Colors.black54,
+                    height: 1.4,
+                  ),
+                ),
+                const SizedBox(height: 24),
+                SizedBox(
+                  width: double.infinity,
+                  child: ElevatedButton(
+                    onPressed: () {
+                      Get.back();
+                      Get.toNamed('/printer-settings');
+                    },
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: const Color(0xFF3D5A99),
+                      padding: const EdgeInsets.symmetric(vertical: 14),
+                      elevation: 0,
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(12),
+                      ),
+                    ),
+                    child: const Text(
+                      'Set Up Printer',
+                      style: TextStyle(
+                        color: Colors.white,
+                        fontWeight: FontWeight.bold,
+                        fontSize: 15,
+                      ),
+                    ),
+                  ),
+                ),
+                const SizedBox(height: 8),
+                TextButton(
+                  onPressed: () => Get.back(),
+                  child: const Text(
+                    'Cancel',
+                    style: TextStyle(color: Colors.black45),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      );
+      return;
+    }
+
     final message = switch (result.error) {
-      null => 'EOD report sent to printer.',
-      PrintError.noPrinterConfigured => 'No printer configured.',
       PrintError.permissionDenied => 'Bluetooth permission denied.',
-      PrintError.notConnected => 'Unable to connect to printer.',
       PrintError.outOfPaper => 'Printer is out of paper.',
       PrintError.nearEndOfPaper => 'Printer is near end of paper.',
-      PrintError.unknown => 'Failed to print EOD report.',
+      _ => 'Failed to print EOD report.',
     };
 
     ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: Text(message),
-        backgroundColor: result.success ? Colors.green : Colors.red,
+      SnackBar(content: Text(message), backgroundColor: Colors.red),
+    );
+  }
+
+  Widget _buildCountRow(String label, int count) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 6.0),
+      child: Row(
+        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+        children: [
+          Text(label, style: const TextStyle(fontSize: 15)),
+          Text('$count', style: const TextStyle(fontSize: 15)),
+        ],
       ),
     );
   }
 
   Widget _buildRow(String label, double value, {bool highlight = false}) {
+    final isNegative = value < 0;
+    final displayValue = isNegative
+        ? '- ₱ ${value.abs().toStringAsFixed(2)}'
+        : '₱ ${value.toStringAsFixed(2)}';
+    final color = highlight
+        ? Colors.green
+        : isNegative
+            ? Colors.red
+            : Colors.black;
     return Padding(
       padding: const EdgeInsets.symmetric(vertical: 6.0),
       child: Row(
@@ -229,11 +378,11 @@ class _EodReportPageState extends State<EodReportPage> {
         children: [
           Text(label, style: const TextStyle(fontSize: 15)),
           Text(
-            '₱ ${value.toStringAsFixed(2)}',
+            displayValue,
             style: TextStyle(
               fontSize: 15,
-              fontWeight: highlight ? FontWeight.bold : FontWeight.normal,
-              color: highlight ? Colors.green : Colors.black,
+              fontWeight: highlight || isNegative ? FontWeight.bold : FontWeight.normal,
+              color: color,
             ),
           ),
         ],

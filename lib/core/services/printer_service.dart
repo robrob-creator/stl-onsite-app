@@ -145,10 +145,14 @@ class PrinterService {
     }
 
     try {
+      // Use a single fast-timeout probe — retries=1 so we don't hang multiple
+      // seconds when the printer is off. The per-attempt timeout bounds the
+      // worst-case delay to ~3 s instead of 10+ s.
       final connected = await _connectWithRetry(
         mac,
-        retries: 2,
-        delay: const Duration(milliseconds: 800),
+        retries: 1,
+        delay: Duration.zero,
+        connectTimeout: const Duration(seconds: 3),
       );
       if (!connected) {
         return false;
@@ -178,10 +182,15 @@ class PrinterService {
     String mac, {
     int retries = 3,
     Duration delay = const Duration(seconds: 2),
+    Duration? connectTimeout,
   }) async {
     for (int attempt = 1; attempt <= retries; attempt++) {
       try {
-        final ok = await PrintBluetoothThermal.connect(macPrinterAddress: mac);
+        Future<bool> connectFuture = PrintBluetoothThermal.connect(macPrinterAddress: mac);
+        if (connectTimeout != null) {
+          connectFuture = connectFuture.timeout(connectTimeout, onTimeout: () => false);
+        }
+        final ok = await connectFuture;
         if (ok) return true;
       } catch (e) {
         log('Connect attempt $attempt failed: $e', name: 'PrinterService');
@@ -200,6 +209,7 @@ class PrinterService {
     required Map<String, dynamic> teller,
     required String gameName,
     required String drawTimeLabel,
+    String drawDate = '',
   }) async {
     final mac = savedMac;
     if (mac == null || mac.isEmpty) {
@@ -232,6 +242,7 @@ class PrinterService {
         teller: teller,
         gameName: gameName,
         drawTimeLabel: drawTimeLabel,
+        drawDate: drawDate,
       );
 
       final result = await PrintBluetoothThermal.writeBytes(bytes);
@@ -256,7 +267,7 @@ class PrinterService {
 
     final authCtrl = Get.find<AuthController>();
     final user = authCtrl.currentUser.value;
-    final teller = {'id': user?.id ?? '', 'name': user?.name ?? ''};
+    final teller = {'id': user?.id ?? '', 'name': user?.name ?? '', 'area_name': user?.areaName ?? ''};
 
     final betEntries = _buildBetEntriesFromTicketBets(betObjects);
     if (betEntries.isEmpty) {
@@ -276,6 +287,7 @@ class PrinterService {
       teller: teller,
       gameName: firstBet.gameName ?? 'STL',
       drawTimeLabel: firstBet.drawTime ?? '',
+      drawDate: firstBet.drawDate ?? '',
     );
   }
 
@@ -361,6 +373,7 @@ class PrinterService {
     required Map<String, dynamic> teller,
     required String gameName,
     required String drawTimeLabel,
+    String drawDate = '',
   }) async {
     final profile = await CapabilityProfile.load();
     final generator = Generator(PaperSize.mm58, profile);
@@ -383,6 +396,20 @@ class PrinterService {
       'Nov.',
       'Dec.',
     ];
+
+    // Draw date: use the bet's actual draw date; fall back to today
+    String drawDateStr;
+    if (drawDate.isNotEmpty) {
+      try {
+        final d = DateTime.parse(drawDate);
+        drawDateStr = '${monthAbbr[d.month - 1]} ${d.day.toString().padLeft(2, '0')}, ${d.year}';
+      } catch (_) {
+        drawDateStr = '${monthAbbr[now.month - 1]} ${now.day.toString().padLeft(2, '0')}, ${now.year}';
+      }
+    } else {
+      drawDateStr = '${monthAbbr[now.month - 1]} ${now.day.toString().padLeft(2, '0')}, ${now.year}';
+    }
+
     final dateStr =
         '${monthAbbr[now.month - 1]} ${now.day.toString().padLeft(2, '0')}, ${now.year}';
     final hour = now.hour;
@@ -391,20 +418,25 @@ class PrinterService {
     final timeStr =
         '${hour12.toString().padLeft(2, '0')}:${now.minute.toString().padLeft(2, '0')}:${now.second.toString().padLeft(2, '0')} $period';
 
-    // Teller fields from response
-    final tellerIdRaw =
-        (teller['id'] ?? teller['teller_id'] ?? teller['code'] ?? '')
-            .toString();
-    final tellerId = tellerIdRaw.length > 7
-        ? tellerIdRaw.substring(tellerIdRaw.length - 7)
-        : tellerIdRaw;
-    final location =
-        (teller['location'] ??
-                teller['area_name'] ??
-                teller['area'] ??
-                teller['cluster_name'] ??
-                '')
-            .toString();
+    // Teller fields — prefer API response, fall back to current user
+    AuthController? authCtrl;
+    try { authCtrl = Get.find<AuthController>(); } catch (_) {}
+    final currentUser = authCtrl?.currentUser.value;
+
+    final tellerName = (() {
+      final v = (teller['name'] ?? '').toString().trim();
+      if (v.isNotEmpty) return v;
+      return (currentUser?.name ?? '').toString().trim();
+    })();
+    final areaName = (() {
+      final v = (teller['area_name'] ??
+              teller['location'] ??
+              teller['area'] ??
+              teller['cluster_name'] ??
+              '').toString().trim();
+      if (v.isNotEmpty) return v;
+      return (currentUser?.areaName ?? '').toString().trim();
+    })();
 
     // ── Header ────────────────────────────────────────────────────
     bool logoLoaded = false;
@@ -477,7 +509,7 @@ class PrinterService {
       );
     }
 
-    infoRow('Draw Date:', dateStr);
+    infoRow('Draw Date:', drawDateStr);
     infoRow('Draw Time:', drawTimeLabel);
     infoRow(
       'Ticket No:',
@@ -485,8 +517,8 @@ class PrinterService {
           ? ticketNo.substring(ticketNo.length - 10)
           : ticketNo,
     );
-    infoRow('Teller ID:', tellerId);
-    if (location.isNotEmpty) infoRow('Location:', location);
+    if (tellerName.isNotEmpty) infoRow('Teller:', tellerName);
+    if (areaName.isNotEmpty) infoRow('Area:', areaName);
 
     bytes.addAll(generator.hr(ch: '-'));
 
@@ -518,7 +550,7 @@ class PrinterService {
             width: 2,
           ),
           PosColumn(text: formatted, width: 3),
-          PosColumn(text: entry.betType, width: 3),
+          PosColumn(text: entry.betType.substring(0, 1), width: 3),
           PosColumn(
             text: entry.betAmount.toStringAsFixed(0),
             width: 2,
@@ -549,7 +581,6 @@ class PrinterService {
     bytes.addAll(generator.hr(ch: '-'));
 
     // ── Footer info ───────────────────────────────────────────────
-    infoRow('Tnx Count:', '${betEntries.length}');
     infoRow('Total Amt:', totalAmount.toStringAsFixed(0));
     infoRow('Date:', dateStr);
     infoRow('Time:', timeStr);
@@ -591,8 +622,6 @@ class PrinterService {
       );
       bytes.addAll([0x1B, 0x61, 0x00]);
     }
-    // Minimize trailing blank lines for ticket printing
-    bytes.addAll(generator.feed(1));
     bytes.addAll(generator.cut());
 
     return bytes;
@@ -732,14 +761,6 @@ class PrinterService {
       }
     }
 
-    bytes.addAll(
-      generator.text(
-        'Generated by Onstite',
-        styles: const PosStyles(align: PosAlign.center),
-      ),
-    );
-    // Minimize trailing blank lines on EOD report to reduce extra white space
-    bytes.addAll(generator.feed(1));
     bytes.addAll(generator.cut());
     return bytes;
   }
