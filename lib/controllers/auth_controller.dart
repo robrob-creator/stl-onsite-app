@@ -357,6 +357,9 @@ class AuthController extends GetxController {
     });
 
     wsService.on('draw_result.posted', (payload) {
+      // Only notify when result is fully approved — not when submitted for approval.
+      final status = (payload['status'] as String? ?? '').toLowerCase();
+      if (status == 'pending') return;
       final result = payload['result'];
       final resultStr = result is List ? result.join('-') : (result?.toString() ?? '');
       final drawDate = payload['drawDate'] as String? ?? '';

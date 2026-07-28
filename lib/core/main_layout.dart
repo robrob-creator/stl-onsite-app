@@ -1,11 +1,15 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:get/get.dart';
+import 'package:onstite/pages/app/collection_page.dart';
 import 'package:onstite/pages/app/eod_report_page.dart';
 import 'package:onstite/pages/app/summary_report_page.dart';
 import 'package:onstite/pages/app/live_page.dart';
 import '../controllers/auth_controller.dart';
 import '../controllers/live_draw_controller.dart';
+import 'services/websocket_service.dart';
 import 'utils/manila_time.dart';
 
 /// Main layout widget with AppBar and BottomNavigationBar
@@ -43,6 +47,53 @@ class MainLayout extends StatefulWidget {
 
 class _MainLayoutState extends State<MainLayout> {
   final GlobalKey<ScaffoldState> _scaffoldKey = GlobalKey<ScaffoldState>();
+
+  // Show the disconnected banner only after the WebSocket has been down for
+  // this long, so a quick reconnect (common during backoff resets) never
+  // flashes the warning at the user.
+  static const Duration _disconnectGrace = Duration(seconds: 5);
+
+  Timer? _disconnectTimer;
+  Worker? _wsWorker;
+  bool _showDisconnectedBanner = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _watchWebSocketConnection();
+  }
+
+  @override
+  void dispose() {
+    _disconnectTimer?.cancel();
+    _wsWorker?.dispose();
+    super.dispose();
+  }
+
+  void _watchWebSocketConnection() {
+    if (!Get.isRegistered<WebSocketService>()) return;
+    final ws = Get.find<WebSocketService>();
+    _handleConnectionChanged(ws.isConnected.value);
+    _wsWorker = ever<bool>(ws.isConnected, _handleConnectionChanged);
+  }
+
+  void _handleConnectionChanged(bool connected) {
+    if (connected) {
+      _disconnectTimer?.cancel();
+      _disconnectTimer = null;
+      if (_showDisconnectedBanner && mounted) {
+        setState(() => _showDisconnectedBanner = false);
+      }
+      return;
+    }
+    // Debounce: only show the banner if we stay disconnected past the grace
+    // period. Cancels itself if a reconnect arrives first.
+    _disconnectTimer?.cancel();
+    _disconnectTimer = Timer(_disconnectGrace, () {
+      if (!mounted) return;
+      setState(() => _showDisconnectedBanner = true);
+    });
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -106,7 +157,12 @@ class _MainLayoutState extends State<MainLayout> {
       ),
       drawer: _buildDrawer(),
 
-      body: widget.body,
+      body: Column(
+        children: [
+          if (_showDisconnectedBanner) _buildDisconnectedBanner(),
+          Expanded(child: widget.body),
+        ],
+      ),
       bottomNavigationBar: widget.bottomNavItems != null
           ? BottomNavigationBar(
               currentIndex: widget.currentIndex ?? 0,
@@ -333,6 +389,34 @@ class _MainLayoutState extends State<MainLayout> {
                       dense: true,
                       minLeadingWidth: 0,
                     ),
+                    // Collection
+                    ListTile(
+                      leading: const Icon(
+                        Icons.account_balance_wallet_outlined,
+                        color: Color(0xFF222222),
+                      ),
+                      title: const Text(
+                        'Collection',
+                        style: TextStyle(
+                          fontWeight: FontWeight.w500,
+                          color: Color(0xFF222222),
+                        ),
+                      ),
+                      onTap: () {
+                        Navigator.pop(context);
+                        Navigator.of(context).push(
+                          MaterialPageRoute(
+                            builder: (_) => const CollectionPage(),
+                          ),
+                        );
+                      },
+                      contentPadding: const EdgeInsets.symmetric(
+                        horizontal: 12,
+                        vertical: 0,
+                      ),
+                      dense: true,
+                      minLeadingWidth: 0,
+                    ),
                     // Live Draw
                     Obx(() {
                       final isLive = Get.isRegistered<LiveDrawController>()
@@ -463,6 +547,48 @@ class _MainLayoutState extends State<MainLayout> {
                       ],
                     ),
                   ),
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildDisconnectedBanner() {
+    return Material(
+      color: const Color(0xFFFEE2E2),
+      child: SafeArea(
+        top: false,
+        bottom: false,
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+          child: Row(
+            children: [
+              const Icon(
+                Icons.wifi_off_rounded,
+                size: 18,
+                color: Color(0xFFDC2626),
+              ),
+              const SizedBox(width: 10),
+              const Expanded(
+                child: Text(
+                  'Realtime updates paused — reconnecting…',
+                  style: TextStyle(
+                    fontSize: 13,
+                    color: Color(0xFF991B1B),
+                    fontWeight: FontWeight.w500,
+                  ),
+                ),
+              ),
+              SizedBox(
+                width: 14,
+                height: 14,
+                child: const CircularProgressIndicator(
+                  strokeWidth: 2,
+                  valueColor:
+                      AlwaysStoppedAnimation<Color>(Color(0xFFDC2626)),
                 ),
               ),
             ],

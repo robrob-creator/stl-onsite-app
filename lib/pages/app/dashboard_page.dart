@@ -293,19 +293,23 @@ class _DashboardPageState extends State<DashboardPage> {
 
   List<Widget> _buildDrawCards() {
     if (drawResults == null || drawResults!.drawTimes.isEmpty) return [];
-    final maxBet = drawResults!.drawTimes
-        .map((d) => d.betSummary?.totalBet ?? 0)
-        .fold(0, (a, b) => a > b ? a : b);
     return drawResults!.drawTimes.map((drawTime) {
       final formattedTime = _formatDrawTime(drawTime.drawTime ?? '');
       final resultText = _parseResultString(drawTime.latestResult?.result);
+      final b = drawTime.betSummary?.totalBet ?? 0;
+      final w = drawTime.betSummary?.totalWon ?? 0;
+      // Per-card scale: normalize against the larger of gross vs hits FOR
+      // THIS draw only. A shared global scale hides small bars when another
+      // draw has a huge winning payout dominating the range.
+      final perCardMax = b > w ? b : w;
       return _buildDrawCard(
         time: formattedTime,
         result: resultText,
         winningAmnt: drawTime.latestResult?.winAmount?.toString(),
-        totalBet: drawTime.betSummary?.totalBet ?? 0,
-        totalWon: drawTime.betSummary?.totalWon ?? 0,
-        maxTotalBet: maxBet,
+        totalBet: b,
+        totalWon: w,
+        winningBetsCount: drawTime.betSummary?.winningBetsCount ?? 0,
+        maxTotalBet: perCardMax,
         chartStyle: _chartStyle,
       );
     }).toList();
@@ -317,6 +321,7 @@ class _DashboardPageState extends State<DashboardPage> {
     required String? winningAmnt,
     required int totalBet,
     required int totalWon,
+    required int winningBetsCount,
     required int maxTotalBet,
     required String chartStyle,
   }) {
@@ -513,8 +518,8 @@ class _DashboardPageState extends State<DashboardPage> {
                 else
                   _GrossHitsRing(totalBet: totalBet, totalWon: totalWon),
 
-                // ── Prize payout ───────────────────────────────────
-                if (winningAmnt != null && winningAmnt != '0') ...[
+                // ── No of ticket wins ──────────────────────────────
+                if (winningBetsCount > 0) ...[
                   const SizedBox(height: 12),
                   Container(
                     padding: const EdgeInsets.symmetric(
@@ -538,7 +543,7 @@ class _DashboardPageState extends State<DashboardPage> {
                         ),
                         const SizedBox(width: 6),
                         const Text(
-                          'Prize per Win',
+                          'No of Ticket wins',
                           style: TextStyle(
                             fontSize: 12,
                             fontWeight: FontWeight.w600,
@@ -547,7 +552,7 @@ class _DashboardPageState extends State<DashboardPage> {
                         ),
                         const Spacer(),
                         Text(
-                          _formatAmount(winningAmnt),
+                          '$winningBetsCount',
                           style: const TextStyle(
                             fontSize: 14,
                             fontWeight: FontWeight.w800,
@@ -602,19 +607,30 @@ class _DashboardPageState extends State<DashboardPage> {
     return '$weekday, $month.$day, ${date.year}';
   }
 
-  String _formatDrawTime(String isoTime) {
+  String _formatDrawTime(String raw) {
+    if (raw.isEmpty) return raw;
     try {
-      // Parse ISO 8601 format: "0000-01-01T10:30:00Z"
-      final time = DateTime.parse(isoTime);
-      final hour = time.hour;
-      final minute = time.minute;
+      int hour;
+      int minute;
+      // Backend may send either an ISO 8601 timestamp
+      // ("0000-01-01T14:00:00Z") or a bare Postgres time ("14:00:00").
+      if (raw.contains('T')) {
+        final time = DateTime.parse(raw);
+        hour = time.hour;
+        minute = time.minute;
+      } else {
+        final parts = raw.split(':');
+        if (parts.length < 2) return raw;
+        hour = int.parse(parts[0]);
+        minute = int.parse(parts[1]);
+      }
 
       final period = hour >= 12 ? 'PM' : 'AM';
       final displayHour = hour > 12 ? hour - 12 : (hour == 0 ? 12 : hour);
 
       return '${displayHour.toString().padLeft(2, '0')}:${minute.toString().padLeft(2, '0')} $period';
-    } catch (e) {
-      return isoTime; // Return original if parsing fails
+    } catch (_) {
+      return raw;
     }
   }
 
@@ -638,7 +654,7 @@ class _DashboardPageState extends State<DashboardPage> {
       context: context,
       initialDate: selectedDate,
       firstDate: DateTime(2020),
-      lastDate: DateTime.now(),
+      lastDate: DateTime(2030),
       builder: (context, child) {
         return Theme(
           data: Theme.of(context).copyWith(
@@ -679,10 +695,14 @@ class _GrossHitsRing extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final payoutRatio = totalBet > 0 ? totalWon / totalBet : 0.0;
     final netAmount = totalBet - totalWon;
     final isProfit = netAmount >= 0;
-    final ringRatio = payoutRatio.clamp(0.0, 1.0);
+    // Stacked ring: blue arc for sales + red arc for hits, together fill the
+    // full circle in proportion to their share of the (sales + hits) total.
+    // Both arcs are on the same ring so they connect visually.
+    final total = totalBet + totalWon;
+    final salesFraction = total > 0 ? totalBet / total : 0.0;
+    final hitsFraction = total > 0 ? totalWon / total : 0.0;
 
     return Row(
       crossAxisAlignment: CrossAxisAlignment.center,
@@ -696,7 +716,11 @@ class _GrossHitsRing extends StatelessWidget {
             children: [
               CustomPaint(
                 size: const Size(84, 84),
-                painter: _RingPainter(ratio: ringRatio, isOverPayout: payoutRatio > 1),
+                painter: _RingPainter(
+                  salesFraction: salesFraction,
+                  hitsFraction: hitsFraction,
+                  isOverPayout: totalWon > totalBet,
+                ),
               ),
               Column(
                 mainAxisSize: MainAxisSize.min,
@@ -795,47 +819,65 @@ class _GrossHitsRing extends StatelessWidget {
 }
 
 class _RingPainter extends CustomPainter {
-  final double ratio;
+  final double salesFraction;
+  final double hitsFraction;
   final bool isOverPayout;
 
-  _RingPainter({required this.ratio, required this.isOverPayout});
+  _RingPainter({
+    required this.salesFraction,
+    required this.hitsFraction,
+    required this.isOverPayout,
+  });
 
   @override
   void paint(Canvas canvas, Size size) {
     final center = Offset(size.width / 2, size.height / 2);
     final radius = (size.width / 2) - 6;
     const strokeWidth = 10.0;
+    const twoPi = 2 * math.pi;
+    const startAngle = -math.pi / 2;
 
     // Background track
     final trackPaint = Paint()
       ..color = const Color(0xFFEEF1F6)
       ..style = PaintingStyle.stroke
       ..strokeWidth = strokeWidth
-      ..strokeCap = StrokeCap.round;
-
+      ..strokeCap = StrokeCap.butt;
     canvas.drawCircle(center, radius, trackPaint);
 
-    // Arc fill (starts from top = -π/2)
-    if (ratio > 0) {
-      final arcPaint = Paint()
-        ..color = isOverPayout ? const Color(0xFFDC2626) : const Color(0xFF2563EB)
+    final rect = Rect.fromCircle(center: center, radius: radius);
+    final salesSweep = twoPi * salesFraction;
+    final hitsSweep = twoPi * hitsFraction;
+
+    // Sales arc — blue, starts at top
+    if (salesSweep > 0) {
+      final salesPaint = Paint()
+        ..color = const Color(0xFF2563EB)
         ..style = PaintingStyle.stroke
         ..strokeWidth = strokeWidth
-        ..strokeCap = StrokeCap.round;
+        ..strokeCap = StrokeCap.butt;
+      canvas.drawArc(rect, startAngle, salesSweep, false, salesPaint);
+    }
 
-      final sweepAngle = 2 * math.pi * ratio;
-      canvas.drawArc(
-        Rect.fromCircle(center: center, radius: radius),
-        -math.pi / 2,
-        sweepAngle,
-        false,
-        arcPaint,
-      );
+    // Hits arc — continues from where sales ended. Red when over-payout,
+    // green otherwise so the profit/loss state is instantly readable.
+    if (hitsSweep > 0) {
+      final hitsPaint = Paint()
+        ..color = isOverPayout
+            ? const Color(0xFFDC2626)
+            : const Color(0xFF10B981)
+        ..style = PaintingStyle.stroke
+        ..strokeWidth = strokeWidth
+        ..strokeCap = StrokeCap.butt;
+      canvas.drawArc(rect, startAngle + salesSweep, hitsSweep, false, hitsPaint);
     }
   }
 
   @override
-  bool shouldRepaint(_RingPainter old) => old.ratio != ratio || old.isOverPayout != isOverPayout;
+  bool shouldRepaint(_RingPainter old) =>
+      old.salesFraction != salesFraction ||
+      old.hitsFraction != hitsFraction ||
+      old.isOverPayout != isOverPayout;
 }
 
 // ── 1b: Single Hits bar relative to Gross + Net Result callout ──────────────

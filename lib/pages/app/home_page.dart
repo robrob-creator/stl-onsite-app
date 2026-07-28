@@ -218,14 +218,14 @@ class _HomePageState extends State<HomePage> {
   }
 
   String _formatAmount(double value) {
-    final intVal = value.toInt();
-    final str = intVal.toString();
+    final isNeg = value < 0;
+    final str = value.abs().toInt().toString();
     final buffer = StringBuffer();
     for (int i = 0; i < str.length; i++) {
       if (i > 0 && (str.length - i) % 3 == 0) buffer.write(',');
       buffer.write(str[i]);
     }
-    return '₱ ${buffer.toString()}';
+    return '${isNeg ? '₱ -' : '₱ '}${buffer.toString()}';
   }
 
   @override
@@ -235,10 +235,12 @@ class _HomePageState extends State<HomePage> {
       title: _currentIndex == 0 ? 'Dashboard' : null,
       appBarTrailing: Obx(() {
         final balance = Get.find<LotteryController>().balance.value;
+        final isNegative = balance < 0;
+        final accent = isNegative ? const Color(0xFFDC2626) : AppColors.primary;
         return Container(
           padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
           decoration: BoxDecoration(
-            color: AppColors.primary.withOpacity(0.1),
+            color: accent.withOpacity(0.1),
             borderRadius: BorderRadius.circular(10),
           ),
           child: Row(
@@ -248,13 +250,13 @@ class _HomePageState extends State<HomePage> {
                 'assets/images/icons/moneys.png',
                 width: 16,
                 height: 16,
-                color: AppColors.primary,
+                color: accent,
               ),
               const SizedBox(width: 8),
               Text(
                 _formatAmount(balance),
                 style: TextStyle(
-                  color: AppColors.primary.withOpacity(0.9),
+                  color: accent.withOpacity(0.9),
                   fontWeight: FontWeight.bold,
                   fontSize: 14,
                 ),

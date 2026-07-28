@@ -2,7 +2,6 @@ import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 import '../../core/services/game_service.dart';
 import '../../core/services/summary_report_service.dart';
-import '../../core/utils/manila_time.dart';
 import '../../models/game.dart';
 import '../../models/summary_report.dart';
 
@@ -66,7 +65,7 @@ class _SummaryReportPageState extends State<SummaryReportPage> {
       context: context,
       initialDate: _selectedDate,
       firstDate: DateTime(2020),
-      lastDate: ManilaTime.today(),
+      lastDate: DateTime(2030),
       initialEntryMode: DatePickerEntryMode.calendarOnly,
     );
     if (picked == null) return;

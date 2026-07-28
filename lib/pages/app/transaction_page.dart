@@ -30,7 +30,7 @@ class _TransactionPageState extends State<TransactionPage> {
       context: context,
       initialDate: _selectedDate,
       firstDate: DateTime(2020),
-      lastDate: ManilaTime.today(),
+      lastDate: DateTime(2030),
       initialEntryMode: DatePickerEntryMode.calendarOnly,
       builder: (context, child) {
         return Theme(

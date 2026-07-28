@@ -106,6 +106,8 @@ class LotteryController extends GetxController {
   // Increment this tick whenever bets are placed/changed so UI pages (Dashboard)
   // can react and refresh cached draw summaries.
   final RxInt drawRefreshTick = 0.obs;
+  // Increment when a collection is created/updated so CollectionPage refreshes.
+  final RxInt collectionRefreshTick = 0.obs;
 
   // Permutation availability from server (preview endpoint)
   final Rx<PermutationAvailability?> permAvailability =
@@ -119,6 +121,15 @@ class LotteryController extends GetxController {
   // Blackout time restriction (computed from selected game)
   final RxBool isBlackoutTime = false.obs;
   Timer? _blackoutTimer;
+
+  // Draw times that already have a posted result for the currently-selected
+  // game + betDate. Used to disable those chips in the bet entry selector so
+  // agents cannot place bets for a slot that already drew.
+  final RxSet<String> drawnDrawTimeIds = <String>{}.obs;
+
+  // Guards refreshDrawnDrawTimes from running concurrently for the same
+  // (gameId, drawDate) pair — key format "gameId::YYYY-MM-DD".
+  String? _drawnFetchInFlightKey;
 
   // The date bets will be placed for (today or tomorrow when after last draw)
   final Rx<DateTime> betDate = DateTime.now().obs;
@@ -136,6 +147,10 @@ class LotteryController extends GetxController {
     loadProfile();
     _subscribeToWebSocketEvents();
     _startBlackoutTimer();
+    // Re-check which draw times already drew whenever the selected game or
+    // bet date changes, so the selector chips disable/enable correctly.
+    ever<String>(selectedGameId, (_) => refreshDrawnDrawTimes());
+    ever<DateTime>(betDate, (_) => refreshDrawnDrawTimes());
     // Update user's location in background on app open
     LocationService.updateUserLocation();
   }
@@ -199,12 +214,20 @@ class LotteryController extends GetxController {
       ws.on('bet.placed', (_) => loadProfile());
       ws.on('bet.bulk_placed', (_) => loadProfile());
       ws.on('claim.paid', (_) => loadProfile());
+      // Refresh balance and collection list when collector records a payment.
+      void onCollectionEvent(_) {
+        loadProfile();
+        collectionRefreshTick.value = collectionRefreshTick.value + 1;
+      }
+      ws.on('collection.created', onCollectionEvent);
+      ws.on('collection.updated', onCollectionEvent);
       // Trigger dashboard re-fetch when draw results are published and
       // refresh the agent's balance since winning payouts are deducted from
       // the maker's balance on approval.
       ws.on('draw_result.posted', (_) {
         drawRefreshTick.value = drawRefreshTick.value + 1;
         loadProfile();
+        refreshDrawnDrawTimes();
       });
       // Sync agent app when admin changes game/schedule/no-game config
       ws.on('api.mutation', (payload) {
@@ -220,6 +243,11 @@ class LotteryController extends GetxController {
         // No-game date added/removed
         if (endpoints.any((e) => e.contains('/api/no-game-date'))) {
           _checkNoGameDay();
+        }
+        // Collection created/updated — refresh balance and collection list
+        if (endpoints.any((e) => e.contains('collection'))) {
+          loadProfile();
+          collectionRefreshTick.value = collectionRefreshTick.value + 1;
         }
         // Sold-out config changed — re-check permutations if user has digits entered
         if (endpoints.any((e) =>
@@ -382,10 +410,64 @@ class LotteryController extends GetxController {
       ..sort(DrawTime.compareChronologically);
     final date = betDate.value;
     return drawTimes
-            .where((dt) => dt.isAvailableForDate(date))
+            .where((dt) =>
+                dt.isAvailableForDate(date) && !isDrawTimeDrawn(dt.id))
             .firstOrNull
             ?.id ??
         '';
+  }
+
+  /// True when a draw result has already been posted for this draw time on
+  /// the currently-selected game + bet date.
+  bool isDrawTimeDrawn(String drawTimeId) =>
+      drawnDrawTimeIds.contains(drawTimeId);
+
+  /// Refresh [drawnDrawTimeIds] for the currently-selected game and bet date.
+  /// Silently no-ops if there is no active game. Cheap to call on every
+  /// game/date change and on `draw_result.posted` WS events.
+  Future<void> refreshDrawnDrawTimes() async {
+    final game = currentGame;
+    if (game == null) {
+      drawnDrawTimeIds.clear();
+      return;
+    }
+    final d = betDate.value;
+    final dateStr =
+        '${d.year.toString().padLeft(4, '0')}-${d.month.toString().padLeft(2, '0')}-${d.day.toString().padLeft(2, '0')}';
+    final key = '${game.id}::$dateStr';
+    if (_drawnFetchInFlightKey == key) return;
+    _drawnFetchInFlightKey = key;
+    try {
+      final response = await DrawResultsService.getLatestResultsByGameAndDate(
+        gameId: game.id,
+        drawDate: dateStr,
+      );
+      if (response == null) return;
+      // Ignore if game/date changed while the request was in flight.
+      if (game.id != currentGame?.id) return;
+      final next = <String>{};
+      for (final dt in response.drawTimes) {
+        final id = dt.id;
+        if (id == null || id.isEmpty) continue;
+        if (dt.latestResult != null) next.add(id);
+      }
+      drawnDrawTimeIds
+        ..clear()
+        ..addAll(next);
+      // If the currently-selected draw time just became drawn, jump to the
+      // next available slot so the UI does not sit on a disabled chip.
+      if (selectedTime.value.isNotEmpty &&
+          isDrawTimeDrawn(selectedTime.value)) {
+        selectedTime.value = getFirstAvailableDrawTimeId(game);
+      }
+      update();
+    } catch (_) {
+      // Fail open — chips stay enabled rather than incorrectly disabled.
+    } finally {
+      if (_drawnFetchInFlightKey == key) {
+        _drawnFetchInFlightKey = null;
+      }
+    }
   }
 
   /// Calculate the number of unique permutations for the given digits

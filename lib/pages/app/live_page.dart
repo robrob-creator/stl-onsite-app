@@ -4,7 +4,6 @@ import 'package:get/get.dart';
 import 'package:intl/intl.dart';
 import 'package:webview_flutter/webview_flutter.dart';
 import '../../core/design_system.dart';
-import '../../core/services/draw_results_service.dart';
 import '../../core/services/draw_time_service.dart';
 import '../../core/services/game_service.dart';
 import '../../core/services/websocket_service.dart';
@@ -28,10 +27,6 @@ class _LivePageState extends State<LivePage> {
   String _timeLeft = '';
   bool _isLive = false;
   Timer? _timer;
-  List<LiveDrawResult> _latestResults = [];
-  bool _isLoadingResults = true;
-  String? _resultsError;
-  VoidCallback? _removeDrawResultListener;
 
   late final WebViewController _webController;
   bool _videoError = false;
@@ -138,12 +133,10 @@ class _LivePageState extends State<LivePage> {
       ..loadRequest(Uri.parse(_pcsoLiveUrl));
 
     _loadSchedule();
-    _loadLatestResults();
-    _bindRealtimeUpdates();
     try {
       final ws = Get.find<WebSocketService>();
-      ws.on('draw.started', (_) { _loadLatestResults(); _tick(); });
-      ws.on('draw.streaming', (_) { _loadLatestResults(); _tick(); });
+      ws.on('draw.started', (_) => _tick());
+      ws.on('draw.streaming', (_) => _tick());
     } catch (_) {}
 
     _timer = Timer.periodic(const Duration(seconds: 1), (_) => _tick());
@@ -151,7 +144,6 @@ class _LivePageState extends State<LivePage> {
 
   @override
   void dispose() {
-    _removeDrawResultListener?.call();
     _timer?.cancel();
     super.dispose();
   }
@@ -226,57 +218,6 @@ class _LivePageState extends State<LivePage> {
     }
   }
 
-  void _bindRealtimeUpdates() {
-    try {
-      final ws = Get.find<WebSocketService>();
-      _removeDrawResultListener = ws.on('draw_result.posted', (_) {
-        _loadLatestResults();
-        _tick();
-      });
-    } catch (_) {
-      _removeDrawResultListener = null;
-    }
-  }
-
-  Future<void> _loadLatestResults() async {
-    try {
-      final results = await DrawResultsService.getLatestResults(
-        drawDate: _currentManilaDate(),
-      );
-      if (!mounted) return;
-
-      // Determine if any recent result indicates a live draw (within postWindow)
-      final manilaNow = DateTime.now().toUtc().add(_manilaOffset);
-      bool liveFromResults = results.any((r) {
-        if (r.updatedAt == null) return false;
-        final parsed = DateTime.tryParse(r.updatedAt!);
-        if (parsed == null) return false;
-        final updated = parsed.toUtc().add(_manilaOffset);
-        final diff = manilaNow.difference(updated).abs();
-        return diff <= _postWindow;
-      });
-
-      setState(() {
-        _latestResults = results;
-        _isLoadingResults = false;
-        _resultsError = null;
-        // If schedule already determined live, keep it true; otherwise use results
-        _isLive = _isLive || liveFromResults;
-      });
-    } catch (e) {
-      if (!mounted) return;
-      setState(() {
-        // Keep existing results visible — don't wipe on transient server error
-        _isLoadingResults = false;
-        _resultsError = e.toString();
-      });
-      // Retry once after 2s (handles pq burst 500s right after draw result approval)
-      Future.delayed(const Duration(seconds: 2), () {
-        if (mounted) _loadLatestResults();
-      });
-    }
-  }
-
   void _tick() {
     if (_schedule.isEmpty || !mounted) {
       return;
@@ -330,11 +271,6 @@ class _LivePageState extends State<LivePage> {
     });
   }
 
-  String _currentManilaDate() {
-    final manilaNow = DateTime.now().toUtc().add(_manilaOffset);
-    return DateFormat('yyyy-MM-dd').format(manilaNow);
-  }
-
   String _formatDuration(Duration duration) {
     final normalized = duration.isNegative ? Duration.zero : duration;
     final hours = normalized.inHours;
@@ -347,37 +283,9 @@ class _LivePageState extends State<LivePage> {
     return '${minutes.toString().padLeft(2, '0')}m ${seconds.toString().padLeft(2, '0')}s';
   }
 
-  String _formatScheduleTime(DrawTimeData drawTime) {
-    final time = drawTime.extractTime();
-    final date = DateTime(2000, 1, 1, time['hour'] ?? 0, time['minute'] ?? 0);
-    return DateFormat.jm().format(date);
-  }
-
   String _formatNextDraw() {
     if (_nextDraw == null) return '—';
     return DateFormat('MMM d, h:mm a').format(_nextDraw!);
-  }
-
-  String _formatLiveUpdatedAt(String? updatedAt) {
-    if (updatedAt == null || updatedAt.isEmpty) {
-      return 'Just now';
-    }
-    final parsed = DateTime.tryParse(updatedAt);
-    if (parsed == null) {
-      return 'Just now';
-    }
-    return DateFormat('h:mm a').format(parsed.toUtc().add(_manilaOffset));
-  }
-
-  String _drawLabelForResult(LiveDrawResult result) {
-    final match = _schedule.cast<DrawTimeData?>().firstWhere(
-      (item) => item?.id == result.drawTimeId,
-      orElse: () => null,
-    );
-    if (match == null) {
-      return result.drawDate;
-    }
-    return _formatScheduleTime(match);
   }
 
   @override
@@ -760,100 +668,6 @@ class _LivePageState extends State<LivePage> {
               ),
             ),
           ),
-        const SizedBox(height: 24),
-        _buildLatestResults(),
-      ],
-    );
-  }
-
-  Widget _buildLatestResults() {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        const Text(
-          'Latest Draw Results',
-          style: TextStyle(
-            fontSize: 15,
-            fontWeight: FontWeight.w600,
-            color: Color(0xFF374151),
-          ),
-        ),
-        const SizedBox(height: 10),
-        if (_isLoadingResults)
-          Padding(
-            padding: const EdgeInsets.symmetric(vertical: 16),
-            child: Text(
-              'Loading latest results...',
-              style: TextStyle(fontSize: 14, color: Colors.grey[500]),
-            ),
-          )
-        else if (_resultsError != null)
-          Padding(
-            padding: const EdgeInsets.symmetric(vertical: 16),
-            child: Text(
-              'Unable to load draw results right now.',
-              style: TextStyle(fontSize: 14, color: Colors.grey[500]),
-            ),
-          )
-        else if (_latestResults.isEmpty)
-          Padding(
-            padding: const EdgeInsets.symmetric(vertical: 16),
-            child: Text(
-              'No draw results posted yet for today.',
-              style: TextStyle(fontSize: 14, color: Colors.grey[500]),
-            ),
-          )
-        else
-          ..._latestResults.take(5).map((result) {
-            final resultValue = result.result.isEmpty
-                ? '-'
-                : result.result.join('-');
-            return Container(
-              margin: const EdgeInsets.only(bottom: 10),
-              padding: const EdgeInsets.all(14),
-              decoration: BoxDecoration(
-                color: Colors.white,
-                borderRadius: BorderRadius.circular(12),
-                border: Border.all(color: const Color(0xFFE5E7EB)),
-              ),
-              child: Row(
-                children: [
-                  Expanded(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text(
-                          _drawLabelForResult(result),
-                          style: const TextStyle(
-                            fontSize: 14,
-                            fontWeight: FontWeight.w700,
-                            color: Color(0xFF111827),
-                          ),
-                        ),
-                        const SizedBox(height: 4),
-                        Text(
-                          'Updated ${_formatLiveUpdatedAt(result.updatedAt)}',
-                          style: TextStyle(
-                            fontSize: 12,
-                            color: Colors.grey[600],
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-                  Text(
-                    resultValue,
-                    style: const TextStyle(
-                      fontSize: 20,
-                      fontWeight: FontWeight.bold,
-                      color: Color(0xFF2563EB),
-                      letterSpacing: 1.2,
-                    ),
-                  ),
-                ],
-              ),
-            );
-          }),
       ],
     );
   }

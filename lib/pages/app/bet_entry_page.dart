@@ -798,7 +798,9 @@ class _BetEntryPageState extends State<BetEntryPage> {
               GetBuilder<LotteryController>(
                 builder: (ctrl) {
                   final drawTimes = ctrl.currentDrawTimes
-                      .where((dt) => dt.isAvailableForDate(ctrl.betDate.value))
+                      .where((dt) =>
+                          dt.isAvailableForDate(ctrl.betDate.value) &&
+                          !ctrl.isDrawTimeDrawn(dt.id))
                       .toList();
 
                   // If the previously selected draw time is no longer available,
