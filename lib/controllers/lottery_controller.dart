@@ -173,6 +173,7 @@ class LotteryController extends GetxController {
   void _updateBlackoutState() {
     final game = currentGame;
     isBlackoutTime.value = game?.isInBlackout ?? false;
+    update(); // refresh game chips so per-chip blackout indicators stay current
   }
 
   /// Called from UI when user switches game tab.
@@ -231,6 +232,7 @@ class LotteryController extends GetxController {
       });
       // Sync agent app when admin changes game/schedule/no-game config
       ws.on('api.mutation', (payload) {
+        final endpoint = (payload['endpoint'] as String?) ?? '';
         final endpoints =
             (payload['endpoints_to_update'] as List<dynamic>? ?? [])
                 .map((e) => e.toString())
@@ -244,8 +246,14 @@ class LotteryController extends GetxController {
         if (endpoints.any((e) => e.contains('/api/no-game-date'))) {
           _checkNoGameDay();
         }
-        // Collection created/updated — refresh balance and collection list
-        if (endpoints.any((e) => e.contains('collection'))) {
+        // Collection created/updated (direct check) or inferred from endpoint —
+        // catches collector tapada payment, add-fund/tapada, and tapada-receive
+        // even when endpoints_to_update doesn't list a collection endpoint.
+        final isCollectionAction = endpoints.any((e) => e.contains('collection')) ||
+            endpoint.contains('/api/collections') ||
+            endpoint.contains('tapada') ||
+            endpoint.contains('add-fund');
+        if (isCollectionAction) {
           loadProfile();
           collectionRefreshTick.value = collectionRefreshTick.value + 1;
         }
@@ -278,10 +286,31 @@ class LotteryController extends GetxController {
       final games = await GameService.fetchGames();
       availableGames.value = games;
 
-      // Set the first game as selected by default
       if (games.isNotEmpty) {
-        selectedGameId.value = games[0].id;
-        selectedTime.value = getFirstAvailableDrawTimeId(games[0]);
+        // Preserve current selection when reloading — only reset if the
+        // previously selected game is gone or nothing was selected yet.
+        final prevGameId = selectedGameId.value;
+        final prevTimeId = selectedTime.value;
+        final prevGameStillExists = games.any((g) => g.id == prevGameId);
+
+        if (prevGameId.isEmpty || !prevGameStillExists) {
+          selectedGameId.value = games[0].id;
+          selectedTime.value = getFirstAvailableDrawTimeId(games[0]);
+        } else {
+          // Game preserved — check if the draw time is still valid.
+          final game = games.firstWhere((g) => g.id == prevGameId);
+          final drawTimes = List<DrawTime>.from(game.drawTimes)
+            ..sort(DrawTime.compareChronologically);
+          final timeStillValid = drawTimes.any(
+            (dt) =>
+                dt.id == prevTimeId &&
+                dt.isAvailableForDate(betDate.value) &&
+                !isDrawTimeDrawn(dt.id),
+          );
+          if (!timeStillValid) {
+            selectedTime.value = getFirstAvailableDrawTimeId(game);
+          }
+        }
       }
       _updateBlackoutState();
       _updateBetDate();

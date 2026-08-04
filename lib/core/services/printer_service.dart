@@ -1,6 +1,5 @@
 import 'dart:developer';
 import 'dart:io';
-import 'dart:ui' as ui;
 import 'package:esc_pos_utils_plus/esc_pos_utils_plus.dart';
 import 'package:flutter/services.dart';
 import 'package:get/get.dart';
@@ -23,6 +22,11 @@ enum PrintError {
   unknown,
 }
 
+enum PrinterProfile {
+  gsV0,     // GS v 0 raster — standard ESC/POS printers
+  escStar,  // ESC * 24-pin — Goojprt PT-210 / MTP-2 series
+}
+
 enum PrinterReachabilityStatus {
   notConfigured,
   permissionDenied,
@@ -41,20 +45,42 @@ class PrintResult {
 class PrinterService {
   static const _macKey = 'bluetooth_printer_mac';
   static const _nameKey = 'bluetooth_printer_name';
+  static const _profileKey = 'bluetooth_printer_profile';
 
   static final _storage = GetStorage();
 
   static String? get savedMac => _storage.read<String>(_macKey);
   static String? get savedName => _storage.read<String>(_nameKey);
+  static PrinterProfile get savedProfile {
+    final v = _storage.read<String>(_profileKey);
+    return v == 'escStar' ? PrinterProfile.escStar : PrinterProfile.gsV0;
+  }
 
   static void savePrinter(String mac, String name) {
     _storage.write(_macKey, mac);
     _storage.write(_nameKey, name);
+    _storage.write(_profileKey, _detectProfile(name).name);
   }
 
   static void clearPrinter() {
     _storage.remove(_macKey);
     _storage.remove(_nameKey);
+    _storage.remove(_profileKey);
+  }
+
+  static void setProfile(PrinterProfile profile) {
+    _storage.write(_profileKey, profile.name);
+  }
+
+  static PrinterProfile _detectProfile(String deviceName) {
+    final n = deviceName.toLowerCase();
+    if (n.contains('mtp') ||
+        n.contains('goojprt') ||
+        n.contains('pt-2') ||
+        n.contains('pt210')) {
+      return PrinterProfile.escStar;
+    }
+    return PrinterProfile.gsV0;
   }
 
   static Future<List<BluetoothInfo>> getPairedDevices() async {
@@ -210,6 +236,7 @@ class PrinterService {
     required String gameName,
     required String drawTimeLabel,
     String drawDate = '',
+    int reprintCount = 0,
   }) async {
     final mac = savedMac;
     if (mac == null || mac.isEmpty) {
@@ -243,9 +270,11 @@ class PrinterService {
         gameName: gameName,
         drawTimeLabel: drawTimeLabel,
         drawDate: drawDate,
+        reprintCount: reprintCount,
       );
 
       final result = await PrintBluetoothThermal.writeBytes(bytes);
+      await _drainDelay(savedProfile);
       try {
         await PrintBluetoothThermal.disconnect;
       } catch (_) {}
@@ -267,7 +296,7 @@ class PrinterService {
 
     final authCtrl = Get.find<AuthController>();
     final user = authCtrl.currentUser.value;
-    final teller = {'id': user?.id ?? '', 'name': user?.name ?? '', 'area_name': user?.areaName ?? ''};
+    final teller = {'id': user?.id ?? '', 'name': user?.name ?? '', 'area_name': user?.areaName ?? '', 'agent_no': user?.agentNo ?? ''};
 
     final betEntries = _buildBetEntriesFromTicketBets(betObjects);
     if (betEntries.isEmpty) {
@@ -288,6 +317,7 @@ class PrinterService {
       gameName: firstBet.gameName ?? 'STL',
       drawTimeLabel: firstBet.drawTime ?? '',
       drawDate: firstBet.drawDate ?? '',
+      reprintCount: ticket.printCount ?? 1,
     );
   }
 
@@ -317,6 +347,7 @@ class PrinterService {
 
       final bytes = await _buildEodReportBytes(report: report);
       final result = await PrintBluetoothThermal.writeBytes(bytes);
+      await _drainDelay(savedProfile);
       try {
         await PrintBluetoothThermal.disconnect;
       } catch (_) {}
@@ -374,9 +405,11 @@ class PrinterService {
     required String gameName,
     required String drawTimeLabel,
     String drawDate = '',
+    int reprintCount = 0,
   }) async {
     final profile = await CapabilityProfile.load();
     final generator = Generator(PaperSize.mm58, profile);
+    final printerProfile = savedProfile;
     final List<int> bytes = [];
 
     final now = DateTime.now();
@@ -428,14 +461,10 @@ class PrinterService {
       if (v.isNotEmpty) return v;
       return (currentUser?.name ?? '').toString().trim();
     })();
-    final areaName = (() {
-      final v = (teller['area_name'] ??
-              teller['location'] ??
-              teller['area'] ??
-              teller['cluster_name'] ??
-              '').toString().trim();
+    final agentNo = (() {
+      final v = (teller['agent_no'] ?? '').toString().trim();
       if (v.isNotEmpty) return v;
-      return (currentUser?.areaName ?? '').toString().trim();
+      return (currentUser?.agentNo ?? '').toString().trim();
     })();
 
     // ── Header ────────────────────────────────────────────────────
@@ -457,9 +486,7 @@ class PrinterService {
           height: targetHeight,
         );
 
-        // Build ESC/POS raster bytes manually — bypasses the
-        // fixed-length list bug in generator.imageRaster().
-        bytes.addAll(_imageToEscPosRaster(resized));
+        bytes.addAll(_encodeImage(resized, printerProfile));
         logoLoaded = true;
       }
     } catch (err) {
@@ -478,7 +505,6 @@ class PrinterService {
         ),
       );
     }
-    bytes.addAll(generator.feed(1));
     bytes.addAll(
       generator.text(
         'OFFICIAL RECEIPT',
@@ -492,19 +518,17 @@ class PrinterService {
     );
     bytes.addAll(generator.hr(ch: '-'));
 
-    // ── Info rows (label | value) ─────────────────────────────────
-    // 1(pad) + 4(label) + 6(value) + 1(pad) = 12
+    // ── Info rows (label | value) — full width, no side padding ──
+    // 5(label) + 7(value) = 12
     void infoRow(String label, String value) {
       bytes.addAll(
         generator.row([
-          PosColumn(text: '', width: 1),
-          PosColumn(text: label, width: 4, styles: const PosStyles(bold: true)),
+          PosColumn(text: label, width: 5, styles: const PosStyles(bold: true)),
           PosColumn(
             text: value,
-            width: 6,
+            width: 7,
             styles: const PosStyles(align: PosAlign.right),
           ),
-          PosColumn(text: '', width: 1),
         ]),
       );
     }
@@ -518,72 +542,102 @@ class PrinterService {
           : ticketNo,
     );
     if (tellerName.isNotEmpty) infoRow('Teller:', tellerName);
-    if (areaName.isNotEmpty) infoRow('Area:', areaName);
+    if (agentNo.isNotEmpty) infoRow('Agent No:', agentNo);
 
     bytes.addAll(generator.hr(ch: '-'));
 
-    // ── Bet table ─────────────────────────────────────────────────
-    // 1(pad) + 2(game) + 3(entry) + 3(type) + 2(amnt) + 1(pad) = 12
+    // ── Bet table with inline Win column ──────────────────────────
+    // #(1) + Game(2) + Nos(2) + Amt(2) + Type(2) + Win(3) = 12
     bytes.addAll(
       generator.row([
-        PosColumn(text: '', width: 1),
-        PosColumn(text: 'Game', width: 2, styles: const PosStyles(bold: true)),
-        PosColumn(text: 'Entry', width: 3, styles: const PosStyles(bold: true)),
-        PosColumn(text: 'Type', width: 3, styles: const PosStyles(bold: true)),
+        PosColumn(text: '#', width: 1, styles: const PosStyles(bold: true)),
         PosColumn(
-          text: 'Amnt',
+          text: 'Game',
+          width: 2,
+          styles: const PosStyles(bold: true),
+        ),
+        PosColumn(
+          text: 'Nos',
+          width: 2,
+          styles: const PosStyles(bold: true),
+        ),
+        PosColumn(
+          text: 'Amt',
           width: 2,
           styles: const PosStyles(bold: true, align: PosAlign.right),
         ),
-        PosColumn(text: '', width: 1),
+        PosColumn(
+          text: 'Type',
+          width: 2,
+          styles: const PosStyles(bold: true),
+        ),
+        PosColumn(
+          text: 'Win',
+          width: 3,
+          styles: const PosStyles(bold: true, align: PosAlign.right),
+        ),
       ]),
     );
     bytes.addAll(generator.hr(ch: '-'));
 
-    for (final entry in betEntries) {
-      final formatted = entry.digits.isNotEmpty ? entry.digits.join('-') : '-';
+    for (int i = 0; i < betEntries.length; i++) {
+      final entry = betEntries[i];
+      final nos = entry.digits.isNotEmpty ? entry.digits.join('') : '-';
+      final gameAbbr = _abbreviateGame(
+        entry.game.isNotEmpty ? entry.game : gameName,
+      );
       bytes.addAll(
         generator.row([
-          PosColumn(text: '', width: 1),
-          PosColumn(
-            text: entry.game.isNotEmpty ? entry.game : gameName,
-            width: 2,
-          ),
-          PosColumn(text: formatted, width: 3),
-          PosColumn(text: entry.betType.substring(0, 1), width: 3),
+          PosColumn(text: '${i + 1}', width: 1),
+          PosColumn(text: gameAbbr, width: 2),
+          PosColumn(text: nos, width: 2),
           PosColumn(
             text: entry.betAmount.toStringAsFixed(0),
             width: 2,
             styles: const PosStyles(align: PosAlign.right),
           ),
-          PosColumn(text: '', width: 1),
+          PosColumn(text: entry.betType.substring(0, 1), width: 2),
+          PosColumn(
+            text: _formatAmount(entry.winAmount),
+            width: 3,
+            styles: const PosStyles(align: PosAlign.right),
+          ),
         ]),
       );
     }
 
     bytes.addAll(generator.hr(ch: '-'));
 
-    // TOTAL row — 1+2+6+2+1 = 12
+    // TOTAL row — 4(label) + 5(empty) + 3(amount) = 12
     bytes.addAll(
       generator.row([
-        PosColumn(text: '', width: 1),
-        PosColumn(text: 'TOTAL', width: 3, styles: const PosStyles(bold: true)),
+        PosColumn(
+          text: 'TOTAL',
+          width: 4,
+          styles: const PosStyles(bold: true),
+        ),
         PosColumn(text: '', width: 5),
         PosColumn(
           text: totalAmount.toStringAsFixed(0),
-          width: 2,
+          width: 3,
           styles: const PosStyles(bold: true, align: PosAlign.right),
         ),
-        PosColumn(text: '', width: 1),
       ]),
     );
 
     bytes.addAll(generator.hr(ch: '-'));
 
     // ── Footer info ───────────────────────────────────────────────
-    infoRow('Total Amt:', totalAmount.toStringAsFixed(0));
-    infoRow('Date:', dateStr);
-    infoRow('Time:', timeStr);
+    if (reprintCount > 0) {
+      bytes.addAll(
+        generator.text(
+          'Reprint - $reprintCount',
+          styles: const PosStyles(align: PosAlign.center, bold: true),
+        ),
+      );
+    }
+    infoRow('Print Date:', dateStr);
+    infoRow('Print Time:', timeStr);
 
     bytes.addAll(generator.hr(ch: '-'));
     bytes.addAll(
@@ -600,8 +654,7 @@ class PrinterService {
     );
 
     // ── QR Code ───────────────────────────────────────────────────
-    bytes.addAll(generator.feed(1));
-    final qrImage = await _buildQrRasterImage(ticketNo);
+    final qrImage = _buildQrImage(ticketNo);
     if (qrImage != null) {
       final resizedQr = img.copyResize(
         qrImage,
@@ -609,7 +662,15 @@ class PrinterService {
         height: 120,
         interpolation: img.Interpolation.nearest,
       );
-      bytes.addAll(_imageToEscPosRaster(resizedQr));
+      bytes.addAll(_encodeImage(resizedQr, printerProfile));
+    } else if (printerProfile == PrinterProfile.escStar) {
+      // QR bitmap failed — print ticket number as text fallback
+      bytes.addAll(
+        generator.text(
+          ticketNo,
+          styles: const PosStyles(align: PosAlign.center),
+        ),
+      );
     } else {
       bytes.addAll([0x1B, 0x61, 0x01]);
       bytes.addAll(
@@ -622,7 +683,7 @@ class PrinterService {
       );
       bytes.addAll([0x1B, 0x61, 0x00]);
     }
-    bytes.addAll(generator.cut());
+    bytes.addAll(_cutOrFeed(generator, printerProfile));
 
     return bytes;
   }
@@ -632,6 +693,7 @@ class PrinterService {
   }) async {
     final profile = await CapabilityProfile.load();
     final generator = Generator(PaperSize.mm58, profile);
+    final printerProfile = savedProfile;
     final List<int> bytes = [];
     final now = DateTime.now();
 
@@ -683,7 +745,7 @@ class PrinterService {
           width: targetWidth,
           height: targetHeight,
         );
-        bytes.addAll(_imageToEscPosRaster(resized));
+        bytes.addAll(_encodeImage(resized, printerProfile));
         logoLoaded = true;
       }
     } catch (err) {
@@ -761,29 +823,130 @@ class PrinterService {
       }
     }
 
-    bytes.addAll(generator.cut());
+    bytes.addAll(_cutOrFeed(generator, printerProfile));
     return bytes;
   }
 
-  static Future<img.Image?> _buildQrRasterImage(String data) async {
+  /// Renders a QR code directly from its module matrix — no Flutter rendering
+  /// pipeline, no async, no silent failures.
+  static img.Image? _buildQrImage(String data) {
     try {
       final qrCode = QrCode.fromData(
         data: data,
         errorCorrectLevel: QrErrorCorrectLevel.M,
       );
       final qrImage = QrImage(qrCode);
-      final byteData = await qrImage.toImageAsBytes(
-        size: 240,
-        format: ui.ImageByteFormat.png,
-      );
-      if (byteData == null) {
-        return null;
+      final int dim = qrImage.moduleCount;
+
+      const int moduleSize = 4; // pixels per QR module
+      const int quietZone = 4; // blank modules around QR
+      final int totalModules = dim + quietZone * 2;
+      final int size = totalModules * moduleSize;
+
+      final image = img.Image(width: size, height: size);
+      img.fill(image, color: img.ColorRgb8(255, 255, 255));
+
+      for (int row = 0; row < dim; row++) {
+        for (int col = 0; col < dim; col++) {
+          if (qrImage.isDark(row, col)) {
+            for (int py = 0; py < moduleSize; py++) {
+              for (int px = 0; px < moduleSize; px++) {
+                image.setPixel(
+                  (col + quietZone) * moduleSize + px,
+                  (row + quietZone) * moduleSize + py,
+                  img.ColorRgb8(0, 0, 0),
+                );
+              }
+            }
+          }
+        }
       }
-      return img.decodeImage(byteData.buffer.asUint8List());
+      return image;
     } catch (err) {
-      log('QR raster build failed: $err', name: 'PrinterService');
+      log('QR build failed: $err', name: 'PrinterService');
       return null;
     }
+  }
+
+  static String _abbreviateGame(String name) {
+    return name
+        .replaceAll(RegExp(r'[Ll]otto'), '')
+        .replaceAll(' ', '')
+        .trim();
+  }
+
+  static String _formatAmount(double amount) {
+    final str = amount.toInt().toString();
+    final buf = StringBuffer();
+    for (int i = 0; i < str.length; i++) {
+      if (i > 0 && (str.length - i) % 3 == 0) buf.write(',');
+      buf.write(str[i]);
+    }
+    return buf.toString();
+  }
+
+  static List<int> _encodeImage(img.Image image, PrinterProfile profile) {
+    return profile == PrinterProfile.escStar
+        ? _imageToEscPosStar(image)
+        : _imageToEscPosRaster(image);
+  }
+
+  // PT-210 has a small receive buffer — wait for it to drain before closing
+  // the socket, otherwise bytes at the end of the stream (QR, feed) get dropped.
+  static Future<void> _drainDelay(PrinterProfile profile) async {
+    if (profile == PrinterProfile.escStar) {
+      await Future.delayed(const Duration(seconds: 3));
+    }
+  }
+
+  // PT-210 has no cutter — feed paper so teller can tear cleanly.
+  static List<int> _cutOrFeed(Generator generator, PrinterProfile profile) {
+    if (profile == PrinterProfile.escStar) {
+      return [0x1B, 0x64, 5]; // ESC d 5 — feed 5 lines
+    }
+    return generator.cut();
+  }
+
+  /// ESC * 24-pin double-density — for Goojprt PT-210 / MTP-2 series.
+  static List<int> _imageToEscPosStar(img.Image image) {
+    final bytes = <int>[];
+    final int width = image.width;
+    final int height = image.height;
+
+    bytes.addAll([0x1B, 0x61, 0x01]); // ESC a 1 — center
+    bytes.addAll([0x1B, 0x33, 24]);   // ESC 3 24 — set line spacing to 24 dots
+
+    for (int y = 0; y < height; y += 24) {
+      // ESC * 33 nL nH — 24-dot double density
+      bytes.addAll([0x1B, 0x2A, 33, width & 0xFF, (width >> 8) & 0xFF]);
+
+      for (int x = 0; x < width; x++) {
+        for (int byteIdx = 0; byteIdx < 3; byteIdx++) {
+          int b = 0;
+          for (int bit = 0; bit < 8; bit++) {
+            final int row = y + byteIdx * 8 + bit;
+            if (row < height) {
+              final p = image.getPixel(x, row);
+              final alpha = p.a.toDouble();
+              if (alpha > 30) {
+                final lum = 0.299 * p.r.toDouble() +
+                    0.587 * p.g.toDouble() +
+                    0.114 * p.b.toDouble();
+                if (lum < 127) b |= (0x80 >> bit);
+              }
+            }
+          }
+          bytes.add(b);
+        }
+      }
+
+      bytes.add(0x0A); // LF — advance to next band
+    }
+
+    bytes.addAll([0x1B, 0x32]); // ESC 2 — restore default line spacing
+    bytes.addAll([0x1B, 0x61, 0x00]); // ESC a 0 — restore left align
+
+    return bytes;
   }
 
   /// Converts an [img.Image] to ESC/POS GS v 0 raster bytes, centered.

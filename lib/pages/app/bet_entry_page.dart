@@ -46,6 +46,7 @@ class BetEntryPage extends StatefulWidget {
 
 class _BetEntryPageState extends State<BetEntryPage> {
   String _lottoNumbers = '';
+  String _selectedGroup = 'Local';
   late TextEditingController _targetAmountController;
   late TextEditingController _rambolAmountController;
   late FocusNode _targetAmountFocusNode;
@@ -654,10 +655,240 @@ class _BetEntryPageState extends State<BetEntryPage> {
                 );
               }),
 
-              // Disable all form fields when no-game day or blackout is active
+              // Game group + game selector — always interactive, not blocked by blackout
+              GetBuilder<LotteryController>(
+                builder: (ctrl) {
+                  final groups = ctrl.availableGames
+                      .map((g) => g.drawType)
+                      .toSet()
+                      .toList()
+                    ..sort((a, b) => a == 'Local' ? -1 : 1);
+
+                  final effectiveGroup = groups.contains(_selectedGroup)
+                      ? _selectedGroup
+                      : (groups.isNotEmpty ? groups.first : '');
+
+                  final filteredGames = ctrl.availableGames
+                      .where((g) => g.drawType == effectiveGroup)
+                      .toList();
+
+                  return Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      if (groups.length > 1) ...[
+                        Row(
+                          children: [
+                            for (int i = 0; i < groups.length; i++) ...[
+                              if (i > 0) const SizedBox(width: 8),
+                              Expanded(
+                                child: GestureDetector(
+                                  onTap: () {
+                                    final group = groups[i];
+                                    final firstInGroup = ctrl.availableGames
+                                        .firstWhereOrNull(
+                                          (g) => g.drawType == group,
+                                        );
+                                    setState(() {
+                                      _selectedGroup = group;
+                                      _lottoNumbers = '';
+                                    });
+                                    if (firstInGroup != null) {
+                                      ctrl.selectedGameId.value =
+                                          firstInGroup.id;
+                                      ctrl.selectedTime.value = ctrl
+                                          .getFirstAvailableDrawTimeId(
+                                            firstInGroup,
+                                          );
+                                      ctrl.isBlackoutTime.value =
+                                          firstInGroup.isInBlackout;
+                                      ctrl.updateBetDateForGame(firstInGroup);
+                                      ctrl.update();
+                                    }
+                                  },
+                                  child: Container(
+                                    padding: const EdgeInsets.symmetric(
+                                      vertical: 10,
+                                    ),
+                                    decoration: BoxDecoration(
+                                      color: effectiveGroup == groups[i]
+                                          ? const Color(0xFF2563EB)
+                                          : Colors.grey[100],
+                                      borderRadius: BorderRadius.circular(10),
+                                    ),
+                                    child: Text(
+                                      '${groups[i]} Games',
+                                      textAlign: TextAlign.center,
+                                      style: TextStyle(
+                                        fontWeight: FontWeight.w600,
+                                        fontSize: 13,
+                                        color: effectiveGroup == groups[i]
+                                            ? Colors.white
+                                            : Colors.grey[600],
+                                      ),
+                                    ),
+                                  ),
+                                ),
+                              ),
+                            ],
+                          ],
+                        ),
+                        const SizedBox(height: 12),
+                      ],
+
+                      if (filteredGames.isNotEmpty)
+                        Container(
+                          padding: const EdgeInsets.all(2),
+                          decoration: BoxDecoration(
+                            color: Colors.grey[100],
+                            borderRadius: BorderRadius.circular(12),
+                          ),
+                          child: Row(
+                            children: filteredGames
+                                .map(
+                                  (game) {
+                                    final inBlackout = game.isInBlackout;
+                                    final isSelected =
+                                        ctrl.selectedGameId.value == game.id;
+                                    return Expanded(
+                                      child: GestureDetector(
+                                        onTap: () {
+                                          setState(() {
+                                            _lottoNumbers = '';
+                                          });
+                                          ctrl.selectedGameId.value = game.id;
+                                          ctrl.selectedTime.value = ctrl
+                                              .getFirstAvailableDrawTimeId(
+                                                game,
+                                              );
+                                          ctrl.isBlackoutTime.value =
+                                              inBlackout;
+                                          ctrl.updateBetDateForGame(game);
+                                          ctrl.update();
+                                        },
+                                        child: Container(
+                                          padding: const EdgeInsets.symmetric(
+                                            horizontal: 12,
+                                            vertical: 12,
+                                          ),
+                                          margin: const EdgeInsets.symmetric(
+                                            horizontal: 2,
+                                          ),
+                                          decoration: BoxDecoration(
+                                            color: isSelected
+                                                ? Colors.white
+                                                : Colors.grey[50],
+                                            borderRadius:
+                                                BorderRadius.circular(12),
+                                            border: inBlackout
+                                                ? Border.all(
+                                                    color: const Color(
+                                                      0xFFF97316,
+                                                    ),
+                                                    width: 1.5,
+                                                  )
+                                                : null,
+                                          ),
+                                          child: Column(
+                                            mainAxisSize: MainAxisSize.min,
+                                            children: [
+                                              Row(
+                                                mainAxisAlignment:
+                                                    MainAxisAlignment.center,
+                                                children: [
+                                                  SizedBox(
+                                                    width: 24,
+                                                    height: 24,
+                                                    child: (game.imageUrl
+                                                                ?.isNotEmpty ==
+                                                            true)
+                                                        ? Image.network(
+                                                            game.imageUrl!,
+                                                            fit: BoxFit.contain,
+                                                            errorBuilder: (_, __,
+                                                                    ___) =>
+                                                                Image.asset(
+                                                              game.name
+                                                                      .contains(
+                                                                        '2D',
+                                                                      )
+                                                                  ? 'assets/images/logos/lotto2d.png'
+                                                                  : 'assets/images/logos/lotto3d.png',
+                                                              fit: BoxFit
+                                                                  .contain,
+                                                            ),
+                                                          )
+                                                        : Image.asset(
+                                                            game.name.contains(
+                                                                  '2D',
+                                                                )
+                                                                ? 'assets/images/logos/lotto2d.png'
+                                                                : 'assets/images/logos/lotto3d.png',
+                                                            fit: BoxFit.contain,
+                                                          ),
+                                                  ),
+                                                  const SizedBox(width: 4),
+                                                  Text(
+                                                    game.name,
+                                                    textAlign: TextAlign.center,
+                                                    style: TextStyle(
+                                                      fontWeight:
+                                                          FontWeight.w600,
+                                                      fontSize: 12,
+                                                      color: isSelected
+                                                          ? Colors.black
+                                                          : Colors.grey[600],
+                                                    ),
+                                                  ),
+                                                ],
+                                              ),
+                                              if (inBlackout) ...[
+                                                const SizedBox(height: 3),
+                                                const Row(
+                                                  mainAxisAlignment:
+                                                      MainAxisAlignment.center,
+                                                  children: [
+                                                    Icon(
+                                                      Icons.timer_off_rounded,
+                                                      size: 9,
+                                                      color: Color(0xFFF97316),
+                                                    ),
+                                                    SizedBox(width: 2),
+                                                    Text(
+                                                      'Blackout',
+                                                      style: TextStyle(
+                                                        fontSize: 9,
+                                                        color: Color(
+                                                          0xFFF97316,
+                                                        ),
+                                                        fontWeight:
+                                                            FontWeight.w600,
+                                                      ),
+                                                    ),
+                                                  ],
+                                                ),
+                                              ],
+                                            ],
+                                          ),
+                                        ),
+                                      ),
+                                    );
+                                  },
+                                )
+                                .toList(),
+                          ),
+                        ),
+                    ],
+                  );
+                },
+              ),
+
+              const SizedBox(height: 24),
+
+              // Form fields — blocked only when selected game is in blackout or no-game day
               Obx(() {
                 final _ctrl = Get.find<LotteryController>();
-                final _blocked = _ctrl.isNoGameDay.value || _ctrl.isBlackoutTime.value;
+                final _blocked =
+                    _ctrl.isNoGameDay.value || _ctrl.isBlackoutTime.value;
                 return IgnorePointer(
                   ignoring: _blocked,
                   child: Opacity(
@@ -665,88 +896,6 @@ class _BetEntryPageState extends State<BetEntryPage> {
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-
-              // Game Selector
-              GetBuilder<LotteryController>(
-                builder: (ctrl) => Container(
-                  padding: const EdgeInsets.all(2),
-                  decoration: BoxDecoration(
-                    color: Colors.grey[100],
-                    borderRadius: BorderRadius.circular(12),
-                  ),
-                  child: Row(
-                    children: ctrl.availableGames
-                        .map(
-                          (game) => Expanded(
-                            child: GestureDetector(
-                              onTap: () {
-                                setState(() {
-                                  _lottoNumbers = '';
-                                });
-                                ctrl.selectedGameId.value = game.id;
-                                ctrl.selectedTime.value = ctrl
-                                    .getFirstAvailableDrawTimeId(game);
-                                ctrl.isBlackoutTime.value =
-                                    game.isInBlackout;
-                                ctrl.updateBetDateForGame(game);
-                                ctrl.update();
-                              },
-                              child: Container(
-                                padding: const EdgeInsets.symmetric(
-                                  horizontal: 12,
-                                  vertical: 12,
-                                ),
-                                margin: const EdgeInsets.symmetric(
-                                  horizontal: 2,
-                                ),
-                                decoration: BoxDecoration(
-                                  color: ctrl.selectedGameId.value == game.id
-                                      ? Colors.white
-                                      : Colors.grey[50],
-                                  borderRadius: BorderRadius.circular(12),
-                                ),
-                                child: Row(
-                                  mainAxisAlignment: MainAxisAlignment.center,
-                                  children: [
-                                    Container(
-                                      padding: const EdgeInsets.only(right: 12),
-                                      width: 24,
-                                      height: 24,
-                                      decoration: BoxDecoration(
-                                        image: DecorationImage(
-                                          image: AssetImage(
-                                            game.name.contains('2D')
-                                                ? 'assets/images/logos/lotto2d.png'
-                                                : 'assets/images/logos/lotto3d.png',
-                                          ),
-                                        ),
-                                      ),
-                                    ),
-                                    SizedBox(width: 4),
-                                    Text(
-                                      game.name,
-                                      textAlign: TextAlign.center,
-                                      style: TextStyle(
-                                        fontWeight: FontWeight.w600,
-                                        fontSize: 12,
-                                        color:
-                                            ctrl.selectedGameId.value == game.id
-                                            ? Colors.black
-                                            : Colors.grey[600],
-                                      ),
-                                    ),
-                                  ],
-                                ),
-                              ),
-                            ),
-                          ),
-                        )
-                        .toList(),
-                  ),
-                ),
-              ),
-
-              const SizedBox(height: 24),
 
               // Lotto Number Input
               GetBuilder<LotteryController>(

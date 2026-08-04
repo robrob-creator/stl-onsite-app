@@ -12,6 +12,7 @@ class User {
   final double shareAmount;
   final String areaName;
   final String clusterName;
+  final String agentNo;
 
   User({
     required this.id,
@@ -27,6 +28,7 @@ class User {
     required this.shareAmount,
     this.areaName = '',
     this.clusterName = '',
+    this.agentNo = '',
   });
 
   factory User.fromJson(Map<String, dynamic> json) {
@@ -46,6 +48,7 @@ class User {
       shareAmount: (json['share_amount'] ?? 0).toDouble(),
       areaName: json['area_name'] as String? ?? '',
       clusterName: json['cluster_name'] as String? ?? '',
+      agentNo: json['agent_no'] as String? ?? '',
     );
   }
 
@@ -64,6 +67,7 @@ class User {
       'share_amount': shareAmount,
       'area_name': areaName,
       'cluster_name': clusterName,
+      'agent_no': agentNo,
     };
   }
 }

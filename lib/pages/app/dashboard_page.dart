@@ -45,6 +45,27 @@ class _DashboardPageState extends State<DashboardPage> {
     super.dispose();
   }
 
+  Widget _gameLogo(String? imageUrl, String gameName, double size) {
+    final fallback = gameName.contains('2D')
+        ? 'assets/images/logos/lotto2d.png'
+        : 'assets/images/logos/lotto3d.png';
+    return ClipRRect(
+      borderRadius: BorderRadius.circular(6),
+      child: SizedBox(
+        width: size,
+        height: size,
+        child: (imageUrl?.isNotEmpty == true)
+            ? Image.network(
+                imageUrl!,
+                fit: BoxFit.cover,
+                errorBuilder: (_, __, ___) =>
+                    Image.asset(fallback, fit: BoxFit.cover),
+              )
+            : Image.asset(fallback, fit: BoxFit.cover),
+      ),
+    );
+  }
+
   Future<void> _fetchDrawResults() async {
     if (!mounted) return;
     setState(() {
@@ -116,18 +137,12 @@ class _DashboardPageState extends State<DashboardPage> {
                       child: Row(
                         mainAxisAlignment: MainAxisAlignment.center,
                         children: [
-                          Container(
-                            width: 32,
-                            height: 32,
-                            decoration: BoxDecoration(
-                              borderRadius: BorderRadius.circular(6),
-                              image: const DecorationImage(
-                                image: AssetImage(
-                                  'assets/images/logos/lotto2d.png',
-                                ),
-                                fit: BoxFit.cover,
-                              ),
-                            ),
+                          _gameLogo(
+                            lotteryController.availableGames.isNotEmpty
+                                ? lotteryController.availableGames[0].imageUrl
+                                : null,
+                            '2D Lotto',
+                            32,
                           ),
                           const SizedBox(width: 12),
                           const Text(
@@ -165,18 +180,12 @@ class _DashboardPageState extends State<DashboardPage> {
                       child: Row(
                         mainAxisAlignment: MainAxisAlignment.center,
                         children: [
-                          Container(
-                            width: 32,
-                            height: 32,
-                            decoration: BoxDecoration(
-                              borderRadius: BorderRadius.circular(6),
-                              image: const DecorationImage(
-                                image: AssetImage(
-                                  'assets/images/logos/lotto3d.png',
-                                ),
-                                fit: BoxFit.cover,
-                              ),
-                            ),
+                          _gameLogo(
+                            lotteryController.availableGames.length > 1
+                                ? lotteryController.availableGames[1].imageUrl
+                                : null,
+                            '3D Lotto',
+                            32,
                           ),
                           const SizedBox(width: 12),
                           Text(
