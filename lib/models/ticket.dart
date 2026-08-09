@@ -66,10 +66,31 @@ class Ticket {
       id: json['id'] as String?,
       ticketNo: json['ticket_no'] as String?,
       batchId: json['batch_id'] as String?,
-      betIdList: (json['bet_ids'] as List?)?.cast<String>(),
-      betObjects: (json['bet_objects'] as List?)
-          ?.map((bet) => BetData.fromJson(bet as Map<String, dynamic>))
+      // bet_ids is a list of UUID strings from the list endpoint;
+      // /tickets/get puts full bet objects there instead of UUIDs.
+      betIdList: (json['bet_ids'] as List?)
+          ?.where((e) => e is String)
+          .cast<String>()
           .toList(),
+      betObjects: (() {
+        // prefer dedicated bet_objects key
+        final explicit = json['bet_objects'] as List?;
+        if (explicit != null) {
+          return explicit
+              .whereType<Map<String, dynamic>>()
+              .map((bet) => BetData.fromJson(bet))
+              .toList();
+        }
+        // fallback: /tickets/get returns bet models under bet_ids
+        final fromBetIds = json['bet_ids'] as List?;
+        if (fromBetIds != null && fromBetIds.isNotEmpty && fromBetIds.first is Map) {
+          return fromBetIds
+              .whereType<Map<String, dynamic>>()
+              .map((bet) => BetData.fromJson(bet))
+              .toList();
+        }
+        return null;
+      })(),
       status: json['status'] as String? ?? 'unknown',
       customer: json['customer'] != null
           ? CustomerData.fromJson(json['customer'] as Map<String, dynamic>)

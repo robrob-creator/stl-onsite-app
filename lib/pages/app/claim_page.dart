@@ -3,6 +3,7 @@ import 'package:flutter/foundation.dart';
 import 'package:get/get.dart';
 import 'package:http/http.dart' as http;
 import 'package:onstite/core/services/ticket_service.dart';
+import 'package:onstite/core/services/qr_crypto_service.dart';
 import 'dart:convert';
 import 'dart:async';
 import 'package:qr_code_scanner_plus/qr_code_scanner_plus.dart';
@@ -145,7 +146,7 @@ class _ClaimPageState extends State<ClaimPage> {
   }
 
   void _handleScannedQRCode(String qrCode) async {
-    String ticketId = qrCode.trim();
+    String ticketId = QrCryptoService.decrypt(qrCode.trim());
 
     _qrSubscription?.cancel();
     _qrSubscription = null;
@@ -362,11 +363,6 @@ class _ClaimPageState extends State<ClaimPage> {
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Text(
-              'Ticket: ${ticketData['ticket_no'] ?? 'N/A'}',
-              style: Theme.of(context).textTheme.bodyMedium,
-            ),
-            const SizedBox(height: 8),
             if (ticketData['created_at'] != null)
               Text(
                 'Issued: ${_formatDate(ticketData['created_at'])}',

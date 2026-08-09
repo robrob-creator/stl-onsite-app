@@ -334,17 +334,42 @@ class _TicketPageState extends State<TicketPage> {
       return false;
     }
     if (ticket.betObjects?.isEmpty ?? true) return false;
-    // Reprint only allowed on the same calendar day the ticket was created.
-    if (ticket.createdAt != null) {
+
+    // Enforce reprint cut-off window using the draw time + grace period from
+    // reprint setup. Falls back to same-calendar-day check when not configured.
+    final grace = _activeReprintSetup?.cutoffGraceMinutes ?? 0;
+    final bets = ticket.betObjects ?? [];
+    bool withinWindow = true;
+    if (grace > 0 && bets.isNotEmpty) {
       try {
-        final created = DateTime.parse(ticket.createdAt!).toLocal();
-        final now = DateTime.now();
-        final sameDay = created.year == now.year &&
-            created.month == now.month &&
-            created.day == now.day;
-        if (!sameDay) return false;
+        final firstBet = bets.first;
+        final drawDateStr = firstBet.drawDate; // "2026-08-09"
+        final drawTimeStr = firstBet.drawTime; // "14:00:00" or "14:00"
+        if (drawDateStr != null && drawTimeStr != null) {
+          final parts = drawTimeStr.split(':');
+          final h = int.parse(parts[0]);
+          final m = parts.length > 1 ? int.parse(parts[1]) : 0;
+          final drawBase = DateTime.parse(drawDateStr);
+          final drawDateTime = DateTime(drawBase.year, drawBase.month, drawBase.day, h, m);
+          final cutoff = drawDateTime.add(Duration(minutes: grace));
+          withinWindow = DateTime.now().isBefore(cutoff);
+        }
       } catch (_) {}
+    } else {
+      // No grace period configured — use same-calendar-day restriction.
+      if (ticket.createdAt != null) {
+        try {
+          final created = DateTime.parse(ticket.createdAt!).toLocal();
+          final now = DateTime.now();
+          final sameDay = created.year == now.year &&
+              created.month == now.month &&
+              created.day == now.day;
+          withinWindow = sameDay;
+        } catch (_) {}
+      }
     }
+    if (!withinWindow) return false;
+
     // Direct print still available → button enabled
     if (_isDirectPrint(ticket)) return true;
     // Request reprint path
@@ -469,7 +494,15 @@ class _TicketPageState extends State<TicketPage> {
   /// Direct BT print — used when printCount < maxPrints.
   /// Prints via Bluetooth then increments print_count on the backend.
   Future<void> _doPrint(Ticket ticket) async {
-    final result = await PrinterService.reprintTicket(ticket: ticket);
+    // Ticket list endpoint doesn't include bet objects — fetch full ticket first.
+    Ticket printTicket = ticket;
+    if (ticket.betObjects == null || ticket.betObjects!.isEmpty) {
+      final full = await TicketService.fetchTicketForPrint(ticket.id ?? '');
+      if (full != null && full.betObjects?.isNotEmpty == true) {
+        printTicket = full;
+      }
+    }
+    final result = await PrinterService.reprintTicket(ticket: printTicket);
     if (!result.success) {
       final msg = switch (result.error) {
         PrintError.noPrinterConfigured => 'No printer configured.',

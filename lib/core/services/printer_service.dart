@@ -12,6 +12,7 @@ import 'package:onstite/controllers/auth_controller.dart';
 import '../../controllers/lottery_controller.dart';
 import '../../models/eod_report.dart';
 import '../../models/ticket.dart';
+import 'qr_crypto_service.dart';
 
 enum PrintError {
   noPrinterConfigured,
@@ -317,7 +318,7 @@ class PrinterService {
       gameName: firstBet.gameName ?? 'STL',
       drawTimeLabel: firstBet.drawTime ?? '',
       drawDate: firstBet.drawDate ?? '',
-      reprintCount: ticket.printCount ?? 1,
+      reprintCount: (ticket.printCount ?? 0) + 1,
     );
   }
 
@@ -534,20 +535,15 @@ class PrinterService {
     }
 
     infoRow('Draw Date:', drawDateStr);
-    infoRow('Draw Time:', drawTimeLabel);
-    infoRow(
-      'Ticket No:',
-      ticketNo.length > 10
-          ? ticketNo.substring(ticketNo.length - 10)
-          : ticketNo,
-    );
+    infoRow('Draw Time:', _formatDrawTimeLabel(drawTimeLabel));
+    infoRow('Ticket No:', ticketNo);
     if (tellerName.isNotEmpty) infoRow('Teller:', tellerName);
     if (agentNo.isNotEmpty) infoRow('Agent No:', agentNo);
 
     bytes.addAll(generator.hr(ch: '-'));
 
     // ── Bet table with inline Win column ──────────────────────────
-    // #(1) + Game(2) + Nos(2) + Amt(2) + Type(2) + Win(3) = 12
+    // #(1) + Game(2) + Nos(3) + Amt(2) + T(1) + Win(3) = 12
     bytes.addAll(
       generator.row([
         PosColumn(text: '#', width: 1, styles: const PosStyles(bold: true)),
@@ -558,7 +554,7 @@ class PrinterService {
         ),
         PosColumn(
           text: 'Nos',
-          width: 2,
+          width: 3,
           styles: const PosStyles(bold: true),
         ),
         PosColumn(
@@ -566,11 +562,7 @@ class PrinterService {
           width: 2,
           styles: const PosStyles(bold: true, align: PosAlign.right),
         ),
-        PosColumn(
-          text: 'Type',
-          width: 2,
-          styles: const PosStyles(bold: true),
-        ),
+        PosColumn(text: 'T', width: 1, styles: const PosStyles(bold: true)),
         PosColumn(
           text: 'Win',
           width: 3,
@@ -582,7 +574,7 @@ class PrinterService {
 
     for (int i = 0; i < betEntries.length; i++) {
       final entry = betEntries[i];
-      final nos = entry.digits.isNotEmpty ? entry.digits.join('') : '-';
+      final nos = entry.digits.isNotEmpty ? entry.digits.join('-') : '-';
       final gameAbbr = _abbreviateGame(
         entry.game.isNotEmpty ? entry.game : gameName,
       );
@@ -590,13 +582,13 @@ class PrinterService {
         generator.row([
           PosColumn(text: '${i + 1}', width: 1),
           PosColumn(text: gameAbbr, width: 2),
-          PosColumn(text: nos, width: 2),
+          PosColumn(text: nos, width: 3),
           PosColumn(
             text: entry.betAmount.toStringAsFixed(0),
             width: 2,
             styles: const PosStyles(align: PosAlign.right),
           ),
-          PosColumn(text: entry.betType.substring(0, 1), width: 2),
+          PosColumn(text: entry.betType.substring(0, 1), width: 1),
           PosColumn(
             text: _formatAmount(entry.winAmount),
             width: 3,
@@ -654,20 +646,20 @@ class PrinterService {
     );
 
     // ── QR Code ───────────────────────────────────────────────────
-    final qrImage = _buildQrImage(ticketNo);
+    final encryptedQrData = QrCryptoService.encrypt(ticketNo);
+    final qrImage = _buildQrImage(encryptedQrData);
     if (qrImage != null) {
       final resizedQr = img.copyResize(
         qrImage,
-        width: 120,
-        height: 120,
+        width: 200,
+        height: 200,
         interpolation: img.Interpolation.nearest,
       );
       bytes.addAll(_encodeImage(resizedQr, printerProfile));
     } else if (printerProfile == PrinterProfile.escStar) {
-      // QR bitmap failed — print ticket number as text fallback
       bytes.addAll(
         generator.text(
-          ticketNo,
+          encryptedQrData,
           styles: const PosStyles(align: PosAlign.center),
         ),
       );
@@ -675,7 +667,7 @@ class PrinterService {
       bytes.addAll([0x1B, 0x61, 0x01]);
       bytes.addAll(
         generator.qrcode(
-          ticketNo,
+          encryptedQrData,
           align: PosAlign.center,
           size: QRSize.size4,
           cor: QRCorrection.M,
@@ -868,11 +860,41 @@ class PrinterService {
     }
   }
 
+  /// Converts raw draw_time strings to 12-hour format.
+  /// Handles "HH:MM:SS", "HH:MM", and ISO "0000-01-01THH:MM:SSZ" formats.
+  /// Returns the input unchanged if already in AM/PM format or unparseable.
+  static String _formatDrawTimeLabel(String label) {
+    if (label.isEmpty) return label;
+    if (label.contains('AM') || label.contains('PM')) return label;
+    try {
+      String timeStr = label;
+      if (label.contains('T')) {
+        timeStr = label.split('T')[1].replaceAll('Z', '');
+      }
+      final parts = timeStr.substring(0, 5).split(':');
+      if (parts.length < 2) return label;
+      final h = int.parse(parts[0]);
+      final m = parts[1];
+      final period = h >= 12 ? 'PM' : 'AM';
+      final h12 = h > 12 ? h - 12 : (h == 0 ? 12 : h);
+      return '${h12.toString().padLeft(2, '0')}:$m $period';
+    } catch (_) {
+      return label;
+    }
+  }
+
   static String _abbreviateGame(String name) {
-    return name
+    final abbr = name
         .replaceAll(RegExp(r'[Ll]otto'), '')
         .replaceAll(' ', '')
         .trim();
+    // Column width 2 on 58mm = 4 chars. If abbr is longer, preserve trailing
+    // digit (game variant) and truncate the text prefix to fit.
+    if (abbr.length <= 4) return abbr;
+    final trailingDigits = RegExp(r'\d+$').firstMatch(abbr)?.group(0) ?? '';
+    final textPart = abbr.substring(0, abbr.length - trailingDigits.length);
+    final maxText = (4 - trailingDigits.length).clamp(1, textPart.length);
+    return textPart.substring(0, maxText) + trailingDigits;
   }
 
   static String _formatAmount(double amount) {
@@ -902,7 +924,7 @@ class PrinterService {
   // PT-210 has no cutter — feed paper so teller can tear cleanly.
   static List<int> _cutOrFeed(Generator generator, PrinterProfile profile) {
     if (profile == PrinterProfile.escStar) {
-      return [0x1B, 0x64, 5]; // ESC d 5 — feed 5 lines
+      return [0x1B, 0x64, 2]; // ESC d 2 — feed 2 lines (enough to tear)
     }
     return generator.cut();
   }

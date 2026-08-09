@@ -114,6 +114,10 @@ class LotteryController extends GetxController {
       Rx<PermutationAvailability?>(null);
   final RxBool isCheckingPermutations = false.obs;
 
+  // Cache key for last successful permutation fetch — avoids double network call on Add Bet.
+  String? _permCacheKey;
+  PermutationAvailability? _permCacheResult;
+
   // No-game date restriction
   final RxBool isNoGameDay = false.obs;
   final RxString noGameDayDescription = ''.obs;
@@ -875,6 +879,17 @@ class LotteryController extends GetxController {
     }
   }
 
+  String _buildPermCacheKey({
+    required String gameId,
+    required String drawTimeId,
+    required String drawDate,
+    required List<String> digits,
+    required double targetAmt,
+    required double rambolAmt,
+    required int cartBetCount,
+  }) =>
+      '$gameId|$drawTimeId|$drawDate|${digits.join(",")}|$targetAmt|$rambolAmt|$cartBetCount';
+
   /// Calls POST /bet/token/permutations and stores result in [permAvailability].
   /// Pass [cartBets] to factor in existing draft bets.
   Future<void> fetchPermutations(
@@ -885,6 +900,8 @@ class LotteryController extends GetxController {
     if (game == null) return;
     final drawTimeId = selectedTime.value;
     final drawDate = ManilaTime.dateString(betDate.value);
+    final tAmt = targetAmount.value.toDouble();
+    final rAmt = rambolAmount.value.toDouble();
     isCheckingPermutations.value = true;
     try {
       final result = await SoldOutService.checkPermutations(
@@ -894,12 +911,24 @@ class LotteryController extends GetxController {
         drawDate: drawDate,
         tokens: digits,
         cartBets: cartBets,
-        targetAmount: targetAmount.value.toDouble(),
-        rambolAmount: rambolAmount.value.toDouble(),
+        targetAmount: tAmt,
+        rambolAmount: rAmt,
       );
       permAvailability.value = result;
+      _permCacheKey = _buildPermCacheKey(
+        gameId: game.id,
+        drawTimeId: drawTimeId,
+        drawDate: drawDate,
+        digits: digits,
+        targetAmt: tAmt,
+        rambolAmt: rAmt,
+        cartBetCount: cartBets.length,
+      );
+      _permCacheResult = result;
     } catch (_) {
       permAvailability.value = null;
+      _permCacheKey = null;
+      _permCacheResult = null;
     } finally {
       isCheckingPermutations.value = false;
     }
@@ -941,6 +970,31 @@ class LotteryController extends GetxController {
       }
     }
 
+    // Use cached result if fetchPermutations already checked identical params.
+    final cacheKey = _buildPermCacheKey(
+      gameId: game.id,
+      drawTimeId: drawTimeId,
+      drawDate: drawDate,
+      digits: digits,
+      targetAmt: targetAmount,
+      rambolAmt: rambolAmount,
+      cartBetCount: cartBets.length,
+    );
+    if (_permCacheKey == cacheKey && _permCacheResult != null && !isCheckingPermutations.value) {
+      final cached = _permCacheResult!;
+      final avail = buildBetAvailabilityResult(
+        gameId: game.id,
+        digits: digits,
+        drawTimeId: drawTimeId,
+        drawDate: drawDate,
+        targetAmount: targetAmount,
+        rambolAmount: rambolAmount,
+        perm: cached,
+      );
+      log('[AVAIL] cache_hit state=${cached.state} result=${avail == null ? "null(OPEN)" : "EXCEEDS"}', name: 'AVAIL');
+      return avail;
+    }
+
     try {
       final result = await SoldOutService.checkPermutations(
         gameId: game.id,
@@ -953,6 +1007,8 @@ class LotteryController extends GetxController {
         rambolAmount: rambolAmount,
       );
       permAvailability.value = result;
+      _permCacheKey = cacheKey;
+      _permCacheResult = result;
       final avail = buildBetAvailabilityResult(
         gameId: game.id,
         digits: digits,
@@ -1384,7 +1440,9 @@ class LotteryController extends GetxController {
         }
         lastTeller = teller;
 
-        final ticketNo = responseData['batch_id'] as String? ?? batchTicketNo;
+        final ticketNo = (responseData['ticket_no'] as String?)?.isNotEmpty == true
+            ? responseData['ticket_no'] as String
+            : batchTicketNo;
         final groupTotal = groupBets.fold<double>(0, (s, d) => s + d.totalBetAmount);
 
         // Resolve draw time label for this group

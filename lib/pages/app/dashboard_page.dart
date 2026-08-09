@@ -14,7 +14,9 @@ class DashboardPage extends StatefulWidget {
 }
 
 class _DashboardPageState extends State<DashboardPage> {
-  int selectedTab = 0; // 0 = 2D Lotto, 1 = 3D Lotto
+  int selectedTab = 0; // index within filtered group
+  String _selectedGroup = 'Local';
+  String _selectedGameId = '';
   DateTime selectedDate = DateTime.now();
   late LotteryController lotteryController;
   DrawResultsResponse? drawResults;
@@ -31,6 +33,17 @@ class _DashboardPageState extends State<DashboardPage> {
     super.initState();
     lotteryController = Get.find<LotteryController>();
     _chartStyle = _storage.read(_kChartStyleKey) ?? '1a';
+
+    // Seed selected game from first game in default group
+    final games = lotteryController.availableGames;
+    if (games.isNotEmpty) {
+      final groups = games.map((g) => g.drawType).toSet().toList()
+        ..sort((a, b) => a == 'Local' ? -1 : 1);
+      if (groups.isNotEmpty) _selectedGroup = groups.first;
+      final first = games.firstWhereOrNull((g) => g.drawType == _selectedGroup)
+          ?? games.first;
+      _selectedGameId = first.id;
+    }
 
     _refreshWorker = ever(lotteryController.drawRefreshTick, (_) {
       if (mounted) _fetchDrawResults();
@@ -80,7 +93,8 @@ class _DashboardPageState extends State<DashboardPage> {
         return;
       }
 
-      final selectedGame = games[selectedTab];
+      final selectedGame = games.firstWhereOrNull((g) => g.id == _selectedGameId)
+          ?? games[selectedTab];
       final drawDate =
           '${selectedDate.year}-${selectedDate.month.toString().padLeft(2, '0')}-${selectedDate.day.toString().padLeft(2, '0')}';
 
@@ -109,103 +123,135 @@ class _DashboardPageState extends State<DashboardPage> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          // Lottery type tabs
-          Container(
-            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-            decoration: BoxDecoration(color: Colors.grey[100]),
-            child: Row(
-              children: [
-                Expanded(
-                  child: GestureDetector(
-                    onTap: () {
-                      setState(() {
-                        selectedTab = 0;
-                      });
-                      _fetchDrawResults();
-                    },
-                    child: Container(
-                      padding: const EdgeInsets.symmetric(
-                        horizontal: 16,
-                        vertical: 12,
-                      ),
-                      decoration: BoxDecoration(
-                        color: selectedTab == 0
-                            ? Colors.white
-                            : Colors.grey[50],
-                        borderRadius: BorderRadius.circular(12),
-                      ),
-                      child: Row(
-                        mainAxisAlignment: MainAxisAlignment.center,
-                        children: [
-                          _gameLogo(
-                            lotteryController.availableGames.isNotEmpty
-                                ? lotteryController.availableGames[0].imageUrl
-                                : null,
-                            '2D Lotto',
-                            32,
-                          ),
-                          const SizedBox(width: 12),
-                          const Text(
-                            '2D Lotto',
-                            style: TextStyle(
-                              fontWeight: FontWeight.w600,
-                              fontSize: 14,
+          // Group + game tabs
+          Builder(builder: (context) {
+            final allGames = lotteryController.availableGames;
+            final groups = allGames.map((g) => g.drawType).toSet().toList()
+              ..sort((a, b) => a == 'Local' ? -1 : 1);
+            final effectiveGroup = groups.contains(_selectedGroup)
+                ? _selectedGroup
+                : (groups.isNotEmpty ? groups.first : '');
+            final filteredGames =
+                allGames.where((g) => g.drawType == effectiveGroup).toList();
+
+            return Container(
+              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+              decoration: BoxDecoration(color: Colors.grey[100]),
+              child: Column(
+                children: [
+                  // Group tabs — only when multiple groups exist
+                  if (groups.length > 1) ...[
+                    Row(
+                      children: [
+                        for (int i = 0; i < groups.length; i++) ...[
+                          if (i > 0) const SizedBox(width: 8),
+                          Expanded(
+                            child: GestureDetector(
+                              onTap: () {
+                                final group = groups[i];
+                                final firstInGroup = allGames
+                                    .firstWhereOrNull(
+                                      (g) => g.drawType == group,
+                                    );
+                                setState(() {
+                                  _selectedGroup = group;
+                                  if (firstInGroup != null) {
+                                    _selectedGameId = firstInGroup.id;
+                                    selectedTab = 0;
+                                  }
+                                });
+                                _fetchDrawResults();
+                              },
+                              child: Container(
+                                padding: const EdgeInsets.symmetric(
+                                  vertical: 10,
+                                ),
+                                decoration: BoxDecoration(
+                                  color: effectiveGroup == groups[i]
+                                      ? const Color(0xFF2563EB)
+                                      : Colors.grey[200],
+                                  borderRadius: BorderRadius.circular(10),
+                                ),
+                                child: Text(
+                                  '${groups[i]} Games',
+                                  textAlign: TextAlign.center,
+                                  style: TextStyle(
+                                    fontWeight: FontWeight.w600,
+                                    fontSize: 13,
+                                    color: effectiveGroup == groups[i]
+                                        ? Colors.white
+                                        : Colors.grey[600],
+                                  ),
+                                ),
+                              ),
                             ),
                           ),
                         ],
-                      ),
+                      ],
                     ),
-                  ),
-                ),
-                const SizedBox(width: 12),
-                Expanded(
-                  child: GestureDetector(
-                    onTap: () {
-                      setState(() {
-                        selectedTab = 1;
-                      });
-                      _fetchDrawResults();
-                    },
-                    child: Container(
-                      padding: const EdgeInsets.symmetric(
-                        horizontal: 16,
-                        vertical: 12,
-                      ),
-                      decoration: BoxDecoration(
-                        color: selectedTab == 1
-                            ? Colors.white
-                            : Colors.grey[50],
-                        borderRadius: BorderRadius.circular(12),
-                      ),
-                      child: Row(
-                        mainAxisAlignment: MainAxisAlignment.center,
-                        children: [
-                          _gameLogo(
-                            lotteryController.availableGames.length > 1
-                                ? lotteryController.availableGames[1].imageUrl
-                                : null,
-                            '3D Lotto',
-                            32,
-                          ),
-                          const SizedBox(width: 12),
-                          Text(
-                            '3D Lotto',
-                            style: TextStyle(
-                              fontWeight: FontWeight.w600,
-                              fontSize: 14,
-                              color: selectedTab == 1
-                                  ? Colors.black87
-                                  : Colors.grey[400],
+                    const SizedBox(height: 10),
+                  ],
+
+                  // Game chips for selected group
+                  if (filteredGames.isNotEmpty)
+                    Row(
+                      children: [
+                        for (int i = 0; i < filteredGames.length; i++) ...[
+                          if (i > 0) const SizedBox(width: 8),
+                          Expanded(
+                            child: GestureDetector(
+                              onTap: () {
+                                setState(() {
+                                  selectedTab = i;
+                                  _selectedGameId = filteredGames[i].id;
+                                });
+                                _fetchDrawResults();
+                              },
+                              child: Container(
+                                padding: const EdgeInsets.symmetric(
+                                  horizontal: 16,
+                                  vertical: 12,
+                                ),
+                                decoration: BoxDecoration(
+                                  color: selectedTab == i
+                                      ? Colors.white
+                                      : Colors.grey[50],
+                                  borderRadius: BorderRadius.circular(12),
+                                ),
+                                child: Row(
+                                  mainAxisAlignment: MainAxisAlignment.center,
+                                  children: [
+                                    _gameLogo(
+                                      filteredGames[i].imageUrl,
+                                      filteredGames[i].name,
+                                      28,
+                                    ),
+                                    const SizedBox(width: 8),
+                                    Flexible(
+                                      child: Text(
+                                        filteredGames[i].name,
+                                        overflow: TextOverflow.ellipsis,
+                                        style: TextStyle(
+                                          fontWeight: FontWeight.w600,
+                                          fontSize: 13,
+                                          color: selectedTab == i
+                                              ? Colors.black87
+                                              : Colors.grey[400],
+                                        ),
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              ),
                             ),
                           ),
                         ],
-                      ),
+                      ],
                     ),
-                  ),
-                ),
-              ],
-            ),
-          ),
+                ],
+              ),
+            );
+          }),
 
           Padding(
             padding: const EdgeInsets.symmetric(horizontal: 16),

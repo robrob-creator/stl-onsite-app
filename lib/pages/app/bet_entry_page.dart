@@ -827,16 +827,21 @@ class _BetEntryPageState extends State<BetEntryPage> {
                                                           ),
                                                   ),
                                                   const SizedBox(width: 4),
-                                                  Text(
-                                                    game.name,
-                                                    textAlign: TextAlign.center,
-                                                    style: TextStyle(
-                                                      fontWeight:
-                                                          FontWeight.w600,
-                                                      fontSize: 12,
-                                                      color: isSelected
-                                                          ? Colors.black
-                                                          : Colors.grey[600],
+                                                  Flexible(
+                                                    child: Text(
+                                                      game.name
+                                                          .replaceAll(RegExp(r'[Ll]otto\s*'), '')
+                                                          .trim(),
+                                                      textAlign: TextAlign.center,
+                                                      overflow: TextOverflow.ellipsis,
+                                                      style: TextStyle(
+                                                        fontWeight:
+                                                            FontWeight.w600,
+                                                        fontSize: 12,
+                                                        color: isSelected
+                                                            ? Colors.black
+                                                            : Colors.grey[600],
+                                                      ),
                                                     ),
                                                   ),
                                                 ],

@@ -8,12 +8,16 @@ class ReprintSetupItem {
   final String id;
   final int maxPrints;
   final int maxReprintRequests;
+  /// Minutes after the draw time during which reprinting is still allowed.
+  /// 0 = no grace period (no time-based cutoff enforced client-side).
+  final int cutoffGraceMinutes;
   final bool isActive;
 
   ReprintSetupItem({
     required this.id,
     required this.maxPrints,
     required this.maxReprintRequests,
+    required this.cutoffGraceMinutes,
     required this.isActive,
   });
 
@@ -26,6 +30,7 @@ class ReprintSetupItem {
       maxReprintRequests: (json['max_reprint_requests'] as int?) ??
           (json['reprint_limit'] as int?) ??
           0,
+      cutoffGraceMinutes: (json['cutoff_grace_minutes'] as int?) ?? 0,
       isActive: json['is_active'] as bool? ?? true,
     );
   }

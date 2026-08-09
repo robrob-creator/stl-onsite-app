@@ -9,10 +9,11 @@ import '../app_constants.dart';
 ///
 /// Connect with [connect] after login. Disconnect with [disconnect] on logout.
 /// Subscribe to typed events via [on].
-class WebSocketService extends GetxController {
+class WebSocketService extends GetxController with WidgetsBindingObserver {
   WebSocket? _socket;
   Timer? _reconnectTimer;
   bool _intentionalDisconnect = false;
+  String? _token;
 
   // Minimum delay before first reconnect attempt; doubles each retry up to [_maxReconnectDelay].
   static const Duration _initialReconnectDelay = Duration(seconds: 3);
@@ -45,8 +46,36 @@ class WebSocketService extends GetxController {
 
   // ── Public API ────────────────────────────────────────────────────────────
 
+  @override
+  void onInit() {
+    super.onInit();
+    WidgetsBinding.instance.addObserver(this);
+  }
+
+  @override
+  void onClose() {
+    WidgetsBinding.instance.removeObserver(this);
+    _reconnectTimer?.cancel();
+    _socket?.close();
+    super.onClose();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed) {
+      final t = _token;
+      if (t != null && !_intentionalDisconnect && !isConnected.value) {
+        print('✓ WebSocket app resumed — reconnecting immediately');
+        _reconnectDelay = _initialReconnectDelay;
+        _reconnectTimer?.cancel();
+        _connect(t);
+      }
+    }
+  }
+
   /// Open the WebSocket connection using [token] for authentication.
   Future<void> connect(String token) async {
+    _token = token;
     _intentionalDisconnect = false;
     _reconnectTimer?.cancel();
     await _connect(token);
@@ -175,10 +204,4 @@ class WebSocketService extends GetxController {
     });
   }
 
-  @override
-  void onClose() {
-    _reconnectTimer?.cancel();
-    _socket?.close();
-    super.onClose();
-  }
 }

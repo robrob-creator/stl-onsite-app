@@ -4,6 +4,7 @@ import 'package:get/get.dart';
 import '../../models/ticket.dart';
 import '../../controllers/auth_controller.dart';
 import '../app_constants.dart';
+import 'qr_crypto_service.dart';
 
 class TicketService {
   static const String baseUrl = '${AppConstants.apiBaseUrl}/tickets';
@@ -24,6 +25,24 @@ class TicketService {
       }
     } catch (_) {}
     return 'Request failed with status ${response.statusCode}';
+  }
+
+  /// Fetch a single ticket by ID, including full bet objects — used for reprint.
+  static Future<Ticket?> fetchTicketForPrint(String ticketId) async {
+    try {
+      final token = Get.find<AuthController>().token.value;
+      final uri = Uri.parse('$baseUrl/get').replace(queryParameters: {'id': ticketId});
+      final response = await http.get(
+        uri,
+        headers: {'Authorization': 'Bearer $token', 'Content-Type': 'application/json'},
+      ).timeout(const Duration(seconds: 15));
+      if (response.statusCode == 200) {
+        final body = jsonDecode(response.body) as Map<String, dynamic>;
+        final data = body['data'] as Map<String, dynamic>?;
+        if (data != null) return Ticket.fromJson(data);
+      }
+    } catch (_) {}
+    return null;
   }
 
   /// Fetch tickets with optional search, status filter, and date range.
@@ -97,7 +116,7 @@ class TicketService {
   }
 
   static Future<String> resolveScannedTicketNumber(String scannedValue) async {
-    final trimmedValue = scannedValue.trim();
+    final trimmedValue = QrCryptoService.decrypt(scannedValue.trim());
     if (trimmedValue.isEmpty || !_uuidPattern.hasMatch(trimmedValue)) {
       return trimmedValue;
     }
