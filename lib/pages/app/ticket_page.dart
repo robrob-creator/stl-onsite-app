@@ -262,6 +262,25 @@ class _TicketPageState extends State<TicketPage> {
     return '$mm:$ss';
   }
 
+  Duration? _printTimeLeft(Ticket ticket) {
+    if (ticket.createdAt == null) return null;
+    // Prefer admin-configured print timer; fall back to void window minutes
+    // so the timer always shows when a print/void setup is active.
+    int timer = _activeReprintSetup?.printTimerMinutes ?? 0;
+    if (timer <= 0 && _activeVoidSetup != null && _activeVoidSetup!.isActive) {
+      timer = _activeVoidSetup!.minutes;
+    }
+    if (timer <= 0) return null;
+    try {
+      final created = DateTime.parse(ticket.createdAt!).toLocal();
+      final allowedUntil = created.add(Duration(minutes: timer));
+      final diff = allowedUntil.difference(DateTime.now());
+      return diff.isNegative ? Duration.zero : diff;
+    } catch (_) {
+      return null;
+    }
+  }
+
   Duration? _voidTimeLeft(Ticket ticket) {
     final now = DateTime.now();
     final expires = ticket.voidExpires;
@@ -830,6 +849,7 @@ class _TicketPageState extends State<TicketPage> {
             fmtAmount: _fmtAmount,
             fmtClock: _fmtClock,
             voidTimeLeft: _voidTimeLeft(t),
+            printTimeLeft: _printTimeLeft(t),
             canVoid: _canVoid(t),
             canReprint: _canReprint(t),
             isDirectPrint: _isDirectPrint(t),
@@ -886,6 +906,7 @@ class _TicketCard extends StatelessWidget {
   final String Function(double?) fmtAmount;
   final String Function(Duration) fmtClock;
   final Duration? voidTimeLeft;
+  final Duration? printTimeLeft;
   final bool canVoid;
   final bool canReprint;
   final bool isDirectPrint;
@@ -904,6 +925,7 @@ class _TicketCard extends StatelessWidget {
     required this.fmtAmount,
     required this.fmtClock,
     required this.voidTimeLeft,
+    required this.printTimeLeft,
     required this.canVoid,
     required this.canReprint,
     required this.isDirectPrint,
@@ -1170,6 +1192,9 @@ class _TicketCard extends StatelessWidget {
                           child: _ReprintButton(
                             enabled: canReprint,
                             label: isDirectPrint ? 'Print' : 'Request Reprint',
+                            isDirectPrint: isDirectPrint,
+                            printTimeLeft: printTimeLeft,
+                            fmtClock: fmtClock,
                             onTap: canReprint ? onReprint : null,
                           ),
                         ),
@@ -1405,45 +1430,120 @@ class _VoidButton extends StatelessWidget {
   }
 }
 
-// ── Reprint button ────────────────────────────────────────────────────────────
+// ── Reprint / Print button with optional countdown timer ──────────────────────
 
 class _ReprintButton extends StatelessWidget {
   final bool enabled;
   final String label;
+  final bool isDirectPrint;
+  final Duration? printTimeLeft;
+  final String Function(Duration) fmtClock;
   final VoidCallback? onTap;
-  const _ReprintButton({required this.enabled, required this.label, this.onTap});
+
+  const _ReprintButton({
+    required this.enabled,
+    required this.label,
+    required this.isDirectPrint,
+    required this.printTimeLeft,
+    required this.fmtClock,
+    this.onTap,
+  });
 
   @override
-  Widget build(BuildContext context) => GestureDetector(
-    onTap: onTap,
-    child: Container(
-      height: 38,
-      decoration: BoxDecoration(
-        color: Colors.white,
-        border: Border.all(color: enabled ? _blue : _border, width: 1.5),
-        borderRadius: BorderRadius.circular(11),
-      ),
-      child: Row(
-        mainAxisAlignment: MainAxisAlignment.center,
-        children: [
-          Icon(
-            Icons.print_outlined,
-            size: 14,
-            color: enabled ? _blue : _muted2,
-          ),
-          const SizedBox(width: 6),
-          Text(
-            label,
-            style: TextStyle(
-              fontSize: 12.5,
-              fontWeight: FontWeight.w700,
-              color: enabled ? _blue : _muted2,
+  Widget build(BuildContext context) {
+    // Show timer only on the direct Print button when a timer is configured
+    final showTimer = isDirectPrint && printTimeLeft != null;
+    final expired = showTimer && printTimeLeft!.inSeconds == 0;
+    final warn = showTimer && !expired && printTimeLeft!.inSeconds < 60;
+    final timeStr = showTimer && !expired ? fmtClock(printTimeLeft!) : null;
+
+    // Total window for progress bar (use printTimeLeft initial as approximation)
+    double pct = 0;
+    if (showTimer && !expired && printTimeLeft != null) {
+      // Use 5-min window as reference (same as void button)
+      const totalSecs = 5 * 60;
+      pct = 1.0 - (printTimeLeft!.inSeconds / totalSecs).clamp(0.0, 1.0);
+    }
+
+    final effectiveEnabled = enabled && !expired;
+    final borderColor = !effectiveEnabled
+        ? _border
+        : expired
+        ? _red
+        : warn
+        ? const Color(0xFFDC2626)
+        : _blue;
+    final textColor = !effectiveEnabled ? _muted2 : borderColor;
+    final bgColor = expired ? _redL : Colors.white;
+
+    return GestureDetector(
+      onTap: effectiveEnabled ? onTap : null,
+      child: Container(
+        height: 38,
+        decoration: BoxDecoration(
+          color: bgColor,
+          border: Border.all(color: borderColor, width: 1.5),
+          borderRadius: BorderRadius.circular(11),
+        ),
+        clipBehavior: Clip.antiAlias,
+        child: Stack(
+          children: [
+            // Progress fill when timer active
+            if (showTimer && !expired && pct > 0)
+              Positioned.fill(
+                child: Align(
+                  alignment: Alignment.centerLeft,
+                  child: FractionallySizedBox(
+                    widthFactor: pct,
+                    child: Container(
+                      color: _blue.withValues(alpha: 0.08),
+                    ),
+                  ),
+                ),
+              ),
+            Center(
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Icon(
+                    expired ? Icons.print_disabled_outlined : Icons.print_outlined,
+                    size: 14,
+                    color: textColor,
+                  ),
+                  const SizedBox(width: 6),
+                  Text(
+                    expired ? 'Print Closed' : label,
+                    style: TextStyle(
+                      fontSize: 12.5,
+                      fontWeight: FontWeight.w700,
+                      color: textColor,
+                    ),
+                  ),
+                  if (timeStr != null) ...[
+                    Container(
+                      width: 1,
+                      height: 14,
+                      margin: const EdgeInsets.symmetric(horizontal: 7),
+                      color: borderColor.withValues(alpha: 0.3),
+                    ),
+                    Text(
+                      timeStr,
+                      style: TextStyle(
+                        fontSize: 12.5,
+                        fontWeight: FontWeight.w800,
+                        color: textColor,
+                        letterSpacing: 0.2,
+                      ),
+                    ),
+                  ],
+                ],
+              ),
             ),
-          ),
-        ],
+          ],
+        ),
       ),
-    ),
-  );
+    );
+  }
 }
 
 // ── Bets table ────────────────────────────────────────────────────────────────
