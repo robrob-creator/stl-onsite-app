@@ -227,7 +227,10 @@ class _CollectionPageState extends State<CollectionPage> {
       // and represents what the agent still owes net (hits - gross). Include it
       // in balance so the agent sees their true net position.
       if (!isSettled) {
-        balance += c.isTapada ? c.netAmount : c.carryoverAmount;
+        // If net is negative (hits > bets), use netAmount directly so balance
+        // reflects the true position — collector owes agent the difference.
+        // Works even when is_tapada flag is false (e.g. draw result came in after collection).
+        balance += c.netAmount < 0 ? c.netAmount : c.carryoverAmount;
       }
     }
 
