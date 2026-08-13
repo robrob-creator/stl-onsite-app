@@ -223,7 +223,12 @@ class _CollectionPageState extends State<CollectionPage> {
       // carryoverAmount = remaining balance for both partial (leftover) and
       // uncollected (full net). Using this keeps Balance equal to the agent's
       // actual running balance after partial payments.
-      if (!isSettled) balance += c.carryoverAmount;
+      // For unsettled tapada collections (wins > bets), netAmount is negative
+      // and represents what the agent still owes net (hits - gross). Include it
+      // in balance so the agent sees their true net position.
+      if (!isSettled) {
+        balance += c.isTapada ? c.netAmount : c.carryoverAmount;
+      }
     }
 
     // Claimed = winnings where QR scan completed (status='claimed').
