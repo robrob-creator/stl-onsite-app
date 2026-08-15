@@ -1393,30 +1393,42 @@ class LotteryController extends GetxController {
 
       // Auto-roll draft bets to next available draw when their assigned draw's
       // cutoff has passed. Prevents late submits from being saved to a closed
-      // draw. If no next draw available today, abort with error snackbar.
+      // draw. Tries today's next draw first; if none available today, rolls
+      // to tomorrow's first draw (advances bet_date for those drafts).
       final availableDrawTimes = List<DrawTime>.from(game.drawTimes)
         ..sort(DrawTime.compareChronologically);
+      // Tomorrow's first draw = earliest by draw_time (no cutoff check needed since it's future date).
+      final tomorrowFirstDt = availableDrawTimes.cast<DrawTime?>().firstWhere(
+            (d) => d != null,
+            orElse: () => null,
+          );
       final rolledDraftBets = <DraftBet>[];
       final movedFromLabels = <String>{};
+      bool anyRolledToTomorrow = false;
       for (final draft in draftBets) {
         final dtOrNull = availableDrawTimes.cast<DrawTime?>().firstWhere(
               (d) => d?.id == draft.drawTimeId,
               orElse: () => null,
             );
         if (dtOrNull != null && !dtOrNull.isAvailable()) {
-          final nextDt = availableDrawTimes.cast<DrawTime?>().firstWhere(
+          // Try today first.
+          final nextTodayDt = availableDrawTimes.cast<DrawTime?>().firstWhere(
                 (d) => d != null && d.isAvailable() && !isDrawTimeDrawn(d.id),
                 orElse: () => null,
               );
+          final nextDt = nextTodayDt ?? tomorrowFirstDt;
           if (nextDt == null) {
             isLoading.value = false;
             update();
             Get.snackbar(
               'Draw Closed',
-              'Selected draw closed and no next draw available today. Please try tomorrow.',
+              'Selected draw closed and no draw available. Please try later.',
               snackPosition: SnackPosition.BOTTOM,
             );
             return;
+          }
+          if (nextTodayDt == null) {
+            anyRolledToTomorrow = true;
           }
           movedFromLabels.add(dtOrNull.getFormattedTime());
           rolledDraftBets.add(draft.copyWith(
@@ -1428,11 +1440,17 @@ class LotteryController extends GetxController {
         }
       }
       if (movedFromLabels.isNotEmpty) {
+        final tomorrowNote = anyRolledToTomorrow ? ' (rolled to tomorrow)' : '';
         Get.snackbar(
           'Draw Rolled',
-          'Cutoff passed for ${movedFromLabels.join(", ")} — bets moved to next available draw.',
+          'Cutoff passed for ${movedFromLabels.join(", ")} — bets moved to next available draw$tomorrowNote.',
           snackPosition: SnackPosition.BOTTOM,
         );
+      }
+      // If any bet rolled to tomorrow, advance bet_date so backend saves under correct date.
+      if (anyRolledToTomorrow) {
+        final tomorrow = DateTime.now().add(const Duration(days: 1));
+        betDate.value = DateTime(tomorrow.year, tomorrow.month, tomorrow.day);
       }
 
       // Group draft bets by draw time — each group prints as a separate ticket
