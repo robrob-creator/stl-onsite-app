@@ -34,6 +34,7 @@ class _ClaimPageState extends State<ClaimPage> {
   bool _isProcessingClaim = false;
   String? _errorMessage;
   StreamSubscription? _qrSubscription;
+  bool _isScanning = false;
   Map<String, dynamic>? _scannedTicketData;
   final Map<String, String> _drawTimeMap = {}; // id → formatted time
   String _filterDate = '';
@@ -88,13 +89,21 @@ class _ClaimPageState extends State<ClaimPage> {
     super.dispose();
   }
 
+  void _resumeScanner() {
+    _isScanning = false;
+    controller?.resumeCamera();
+  }
+
   void _onQRViewCreated(QRViewController controller) {
     this.controller = controller;
     // Cancel any existing subscription before creating a new one
     _qrSubscription?.cancel();
     _qrSubscription = controller.scannedDataStream.listen((scanData) {
       final qrCode = scanData.code;
-      if (qrCode != null) {
+      // Debounce with _isScanning flag instead of cancelling subscription,
+      // so subsequent scans still trigger after resumeCamera().
+      if (qrCode != null && !_isScanning) {
+        _isScanning = true;
         controller.pauseCamera();
         _handleScannedQRCode(qrCode);
       }
@@ -148,9 +157,6 @@ class _ClaimPageState extends State<ClaimPage> {
   void _handleScannedQRCode(String qrCode) async {
     String ticketId = QrCryptoService.decrypt(qrCode.trim());
 
-    _qrSubscription?.cancel();
-    _qrSubscription = null;
-
     // Manual claim verification path: validate scanned ticket matches the claim.
     if (_claimBeingVerified != null) {
       await _verifyScannedTicketForClaim(ticketId, _claimBeingVerified!);
@@ -181,7 +187,7 @@ class _ClaimPageState extends State<ClaimPage> {
         );
         if (mounted) {
           setState(() => _showQRScanner = true);
-          controller?.resumeCamera();
+          _resumeScanner();
         }
         return;
       }
@@ -198,7 +204,7 @@ class _ClaimPageState extends State<ClaimPage> {
       _showErrorModal('Error', 'Failed to verify ticket: $e');
       if (mounted) {
         setState(() => _showQRScanner = true);
-        controller?.resumeCamera();
+        _resumeScanner();
       }
     }
   }
@@ -227,7 +233,7 @@ class _ClaimPageState extends State<ClaimPage> {
             );
             if (mounted) {
               setState(() => _showQRScanner = true);
-              controller?.resumeCamera();
+              _resumeScanner();
             }
           } else {
             // Gate on draw status before allowing claim
@@ -246,7 +252,7 @@ class _ClaimPageState extends State<ClaimPage> {
               );
               if (mounted) {
                 setState(() => _showQRScanner = true);
-                controller?.resumeCamera();
+                _resumeScanner();
               }
             } else if (isLost) {
               _showErrorModal(
@@ -255,7 +261,7 @@ class _ClaimPageState extends State<ClaimPage> {
               );
               if (mounted) {
                 setState(() => _showQRScanner = true);
-                controller?.resumeCamera();
+                _resumeScanner();
               }
             } else if (isPending) {
               _showErrorModal(
@@ -264,7 +270,7 @@ class _ClaimPageState extends State<ClaimPage> {
               );
               if (mounted) {
                 setState(() => _showQRScanner = true);
-                controller?.resumeCamera();
+                _resumeScanner();
               }
             } else if (isWon) {
               setState(() {
@@ -281,7 +287,7 @@ class _ClaimPageState extends State<ClaimPage> {
               );
               if (mounted) {
                 setState(() => _showQRScanner = true);
-                controller?.resumeCamera();
+                _resumeScanner();
               }
             } else {
               // Unknown status — fall through to verification, backend will validate
@@ -303,7 +309,7 @@ class _ClaimPageState extends State<ClaimPage> {
             setState(() {
               _showQRScanner = true;
             });
-            controller?.resumeCamera();
+            _resumeScanner();
           }
         }
       } else {
@@ -319,7 +325,7 @@ class _ClaimPageState extends State<ClaimPage> {
           setState(() {
             _showQRScanner = true;
           });
-          controller?.resumeCamera();
+          _resumeScanner();
         }
       }
     } catch (e) {
@@ -330,7 +336,7 @@ class _ClaimPageState extends State<ClaimPage> {
         setState(() {
           _showQRScanner = true;
         });
-        controller?.resumeCamera();
+        _resumeScanner();
       }
     }
   }
@@ -392,7 +398,7 @@ class _ClaimPageState extends State<ClaimPage> {
               setState(() {
                 _showQRScanner = true;
               });
-              controller?.resumeCamera();
+              _resumeScanner();
             },
             child: const Text('Cancel'),
           ),
