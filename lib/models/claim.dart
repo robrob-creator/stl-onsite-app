@@ -77,6 +77,8 @@ class Claim {
   final String? deletedAt;
   final Bet? bet;
   final Ticket? ticket;
+  final double ticketTargetTotal;
+  final double ticketRambolTotal;
 
   Claim({
     this.id,
@@ -95,6 +97,8 @@ class Claim {
     this.deletedAt,
     this.bet,
     this.ticket,
+    this.ticketTargetTotal = 0.0,
+    this.ticketRambolTotal = 0.0,
   });
 
   factory Claim.fromJson(Map<String, dynamic> json) {
@@ -115,6 +119,8 @@ class Claim {
       deletedAt: json['deleted_at'] as String?,
       bet: json['bet'] != null ? Bet.fromJson(json['bet']) : null,
       ticket: json['ticket'] != null ? Ticket.fromJson(json['ticket']) : null,
+      ticketTargetTotal: (json['ticket_target_total'] as num?)?.toDouble() ?? 0.0,
+      ticketRambolTotal: (json['ticket_rambol_total'] as num?)?.toDouble() ?? 0.0,
     );
   }
 

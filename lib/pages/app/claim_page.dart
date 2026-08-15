@@ -1088,8 +1088,15 @@ class _ClaimPageState extends State<ClaimPage> {
                       Expanded(
                         child: Text(
                           () {
-                            final t = bet.straightBetAmount;
-                            final r = bet.rambleBetAmount;
+                            // Prefer ticket-level totals (covers case where
+                            // ticket has separate target + rambol bets and
+                            // this claim only ties to one of them).
+                            final t = claim.ticketTargetTotal > 0
+                                ? claim.ticketTargetTotal
+                                : bet.straightBetAmount;
+                            final r = claim.ticketRambolTotal > 0
+                                ? claim.ticketRambolTotal
+                                : bet.rambleBetAmount;
                             if (t > 0 && r > 0) return 'T:${t.toInt()} R:${r.toInt()}';
                             if (t > 0) return '${t.toInt()}';
                             return '${r.toInt()}';
@@ -1101,8 +1108,8 @@ class _ClaimPageState extends State<ClaimPage> {
                       Expanded(
                         child: Text(
                           () {
-                            final t = bet.straightBetAmount > 0;
-                            final r = bet.rambleBetAmount > 0;
+                            final t = claim.ticketTargetTotal > 0 || bet.straightBetAmount > 0;
+                            final r = claim.ticketRambolTotal > 0 || bet.rambleBetAmount > 0;
                             if (t && r) return 'T & R';
                             if (t) return 'Target';
                             return 'Rambol';
