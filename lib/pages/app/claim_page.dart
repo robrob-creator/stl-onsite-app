@@ -1082,14 +1082,26 @@ class _ClaimPageState extends State<ClaimPage> {
                       ),
                       Expanded(
                         child: Text(
-                          '${bet.straightBetAmount.toInt()}',
+                          () {
+                            final t = bet.straightBetAmount;
+                            final r = bet.rambleBetAmount;
+                            if (t > 0 && r > 0) return 'T:${t.toInt()} R:${r.toInt()}';
+                            if (t > 0) return '${t.toInt()}';
+                            return '${r.toInt()}';
+                          }(),
                           style: const TextStyle(fontSize: 12),
                           textAlign: TextAlign.center,
                         ),
                       ),
                       Expanded(
                         child: Text(
-                          bet.straightBetAmount > 0 ? 'Target' : 'Rambol',
+                          () {
+                            final t = bet.straightBetAmount > 0;
+                            final r = bet.rambleBetAmount > 0;
+                            if (t && r) return 'T & R';
+                            if (t) return 'Target';
+                            return 'Rambol';
+                          }(),
                           style: const TextStyle(fontSize: 12),
                           textAlign: TextAlign.center,
                         ),
