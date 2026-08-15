@@ -565,6 +565,11 @@ class _ClaimPageState extends State<ClaimPage> {
       if (d != null && d.isNotEmpty) {
         queryParams['draw_date'] = d;
       }
+      // Scope claims to current logged-in agent — bets they placed (maker_id).
+      final currentUserId = authController.currentUser.value?.id;
+      if (currentUserId != null && currentUserId.isNotEmpty) {
+        queryParams['maker_id'] = currentUserId;
+      }
 
       final uri = Uri.parse(baseUrl).replace(queryParameters: queryParams);
 
