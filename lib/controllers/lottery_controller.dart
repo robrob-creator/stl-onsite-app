@@ -81,6 +81,34 @@ class DraftBet {
     this.drawTimeId = '',
   });
 
+  DraftBet copyWith({
+    String? id,
+    String? gameName,
+    String? gameId,
+    List<String>? digits,
+    double? straightBetAmount,
+    double? rambleBetAmount,
+    double? totalBetAmount,
+    double? estPayout,
+    int? combinations,
+    String? drawTimeLabel,
+    String? drawTimeId,
+  }) {
+    return DraftBet(
+      id: id ?? this.id,
+      gameName: gameName ?? this.gameName,
+      gameId: gameId ?? this.gameId,
+      digits: digits ?? this.digits,
+      straightBetAmount: straightBetAmount ?? this.straightBetAmount,
+      rambleBetAmount: rambleBetAmount ?? this.rambleBetAmount,
+      totalBetAmount: totalBetAmount ?? this.totalBetAmount,
+      estPayout: estPayout ?? this.estPayout,
+      combinations: combinations ?? this.combinations,
+      drawTimeLabel: drawTimeLabel ?? this.drawTimeLabel,
+      drawTimeId: drawTimeId ?? this.drawTimeId,
+    );
+  }
+
   String get betType {
     if (straightBetAmount > 0 && rambleBetAmount > 0) return 'Both';
     return straightBetAmount > 0 ? 'Target' : 'Rambol';
@@ -1363,9 +1391,53 @@ class LotteryController extends GetxController {
           ? game.clusters[0].id.substring(0, 3).toUpperCase()
           : 'UNK';
 
+      // Auto-roll draft bets to next available draw when their assigned draw's
+      // cutoff has passed. Prevents late submits from being saved to a closed
+      // draw. If no next draw available today, abort with error snackbar.
+      final availableDrawTimes = List<DrawTime>.from(game.drawTimes)
+        ..sort(DrawTime.compareChronologically);
+      final rolledDraftBets = <DraftBet>[];
+      final movedFromLabels = <String>{};
+      for (final draft in draftBets) {
+        final dtOrNull = availableDrawTimes.cast<DrawTime?>().firstWhere(
+              (d) => d?.id == draft.drawTimeId,
+              orElse: () => null,
+            );
+        if (dtOrNull != null && !dtOrNull.isAvailable()) {
+          final nextDt = availableDrawTimes.cast<DrawTime?>().firstWhere(
+                (d) => d != null && d.isAvailable() && !isDrawTimeDrawn(d.id),
+                orElse: () => null,
+              );
+          if (nextDt == null) {
+            isLoading.value = false;
+            update();
+            Get.snackbar(
+              'Draw Closed',
+              'Selected draw closed and no next draw available today. Please try tomorrow.',
+              snackPosition: SnackPosition.BOTTOM,
+            );
+            return;
+          }
+          movedFromLabels.add(dtOrNull.getFormattedTime());
+          rolledDraftBets.add(draft.copyWith(
+            drawTimeId: nextDt.id,
+            drawTimeLabel: nextDt.getFormattedTime(),
+          ));
+        } else {
+          rolledDraftBets.add(draft);
+        }
+      }
+      if (movedFromLabels.isNotEmpty) {
+        Get.snackbar(
+          'Draw Rolled',
+          'Cutoff passed for ${movedFromLabels.join(", ")} — bets moved to next available draw.',
+          snackPosition: SnackPosition.BOTTOM,
+        );
+      }
+
       // Group draft bets by draw time — each group prints as a separate ticket
       final groups = <String, List<DraftBet>>{};
-      for (final draft in draftBets) {
+      for (final draft in rolledDraftBets) {
         final key = draft.drawTimeId.isNotEmpty ? draft.drawTimeId : selectedTime.value;
         groups.putIfAbsent(key, () => []).add(draft);
       }
