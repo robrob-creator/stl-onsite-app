@@ -169,34 +169,42 @@ class _EodReportPageState extends State<EodReportPage> {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        _filterCard(
-          label: _apiDateFmt.format(_reportDate),
-          placeholder: 'Draw Date',
+        _FilterChip(
+          label: 'Draw Date',
+          value: _dateChipFmt.format(_reportDate),
+          icon: Icons.calendar_today_rounded,
           onTap: _pickDate,
-          isValueSet: true,
         ),
-        const SizedBox(height: 12),
+        const SizedBox(height: 10),
         Row(
           children: [
             Expanded(
-              child: _dropdownFilterCard(
+              child: _DropdownFilterChip(
                 label: 'Game',
                 value: _gameFilter,
+                displayValue: _gameFilter.isEmpty
+                    ? 'All Games'
+                    : (games[_gameFilter] ?? 'Game'),
+                icon: Icons.sports_esports_rounded,
                 items: [
-                  const DropdownMenuItem(value: '', child: Text('Game')),
+                  const DropdownMenuItem(value: '', child: Text('All Games')),
                   for (final entry in games.entries)
                     DropdownMenuItem(value: entry.key, child: Text(entry.value)),
                 ],
                 onChanged: (v) => setState(() => _gameFilter = v ?? ''),
               ),
             ),
-            const SizedBox(width: 12),
+            const SizedBox(width: 10),
             Expanded(
-              child: _dropdownFilterCard(
+              child: _DropdownFilterChip(
                 label: 'Draw Time',
                 value: _timeFilter,
+                displayValue: _timeFilter.isEmpty
+                    ? 'All Times'
+                    : _formatSched(_timeFilter),
+                icon: Icons.access_time_rounded,
                 items: [
-                  const DropdownMenuItem(value: '', child: Text('Draw Time')),
+                  const DropdownMenuItem(value: '', child: Text('All Times')),
                   for (final s in schedList)
                     DropdownMenuItem(value: s, child: Text(_formatSched(s))),
                 ],
@@ -209,66 +217,7 @@ class _EodReportPageState extends State<EodReportPage> {
     );
   }
 
-  Widget _filterCard({
-    required String label,
-    required String placeholder,
-    required VoidCallback onTap,
-    required bool isValueSet,
-  }) {
-    return InkWell(
-      onTap: onTap,
-      borderRadius: BorderRadius.circular(4),
-      child: Container(
-        height: 64,
-        alignment: Alignment.center,
-        decoration: BoxDecoration(
-          border: Border.all(color: Colors.black, width: 1.5),
-          borderRadius: BorderRadius.circular(4),
-        ),
-        child: Text(
-          isValueSet ? label : placeholder,
-          style: const TextStyle(
-            fontSize: 20,
-            fontWeight: FontWeight.w500,
-            color: Colors.black,
-          ),
-        ),
-      ),
-    );
-  }
-
-  Widget _dropdownFilterCard({
-    required String label,
-    required String value,
-    required List<DropdownMenuItem<String>> items,
-    required ValueChanged<String?> onChanged,
-  }) {
-    return Container(
-      height: 64,
-      padding: const EdgeInsets.symmetric(horizontal: 12),
-      decoration: BoxDecoration(
-        border: Border.all(color: Colors.black, width: 1.5),
-        borderRadius: BorderRadius.circular(4),
-      ),
-      child: DropdownButtonHideUnderline(
-        child: DropdownButton<String>(
-          value: value,
-          isExpanded: true,
-          items: items,
-          onChanged: onChanged,
-          style: const TextStyle(
-            fontSize: 20,
-            fontWeight: FontWeight.w500,
-            color: Colors.black,
-          ),
-          hint: Text(
-            label,
-            style: const TextStyle(fontSize: 20, color: Colors.black),
-          ),
-        ),
-      ),
-    );
-  }
+  static final _dateChipFmt = DateFormat('MMM d, yyyy');
 
   Widget _buildSalesHeader() {
     return Row(
@@ -631,6 +580,160 @@ class _EodReportPageState extends State<EodReportPage> {
     };
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(content: Text(message), backgroundColor: Colors.red),
+    );
+  }
+}
+
+/// Rounded pill filter chip that shows a small label + selected value with a
+/// leading icon and a right-side caret hint. Matches the visual language used
+/// on the Collections page.
+class _FilterChip extends StatelessWidget {
+  final String label;
+  final String value;
+  final IconData icon;
+  final VoidCallback onTap;
+
+  const _FilterChip({
+    required this.label,
+    required this.value,
+    required this.icon,
+    required this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return InkWell(
+      borderRadius: BorderRadius.circular(10),
+      onTap: onTap,
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+        decoration: BoxDecoration(
+          color: const Color(0xFFF3F4F6),
+          borderRadius: BorderRadius.circular(10),
+          border: Border.all(color: const Color(0xFFE5E7EB)),
+        ),
+        child: Row(
+          children: [
+            Icon(icon, size: 16, color: const Color(0xFF6B7280)),
+            const SizedBox(width: 10),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    label,
+                    style: const TextStyle(
+                      fontSize: 10,
+                      color: Color(0xFF6B7280),
+                      fontWeight: FontWeight.w600,
+                      letterSpacing: 0.4,
+                    ),
+                  ),
+                  const SizedBox(height: 2),
+                  Text(
+                    value,
+                    style: const TextStyle(
+                      fontSize: 13,
+                      fontWeight: FontWeight.w600,
+                      color: Color(0xFF1F2937),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            const Icon(
+              Icons.keyboard_arrow_down_rounded,
+              size: 18,
+              color: Color(0xFF6B7280),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+/// Same chip visual as [_FilterChip] but wraps a native [DropdownButton] so
+/// the caret opens the OS menu instead of routing through a manual bottom
+/// sheet. Selected value is displayed inline; menu items keep their own
+/// style.
+class _DropdownFilterChip extends StatelessWidget {
+  final String label;
+  final String value;
+  final String displayValue;
+  final IconData icon;
+  final List<DropdownMenuItem<String>> items;
+  final ValueChanged<String?> onChanged;
+
+  const _DropdownFilterChip({
+    required this.label,
+    required this.value,
+    required this.displayValue,
+    required this.icon,
+    required this.items,
+    required this.onChanged,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+      decoration: BoxDecoration(
+        color: const Color(0xFFF3F4F6),
+        borderRadius: BorderRadius.circular(10),
+        border: Border.all(color: const Color(0xFFE5E7EB)),
+      ),
+      child: Row(
+        children: [
+          Icon(icon, size: 16, color: const Color(0xFF6B7280)),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  label,
+                  style: const TextStyle(
+                    fontSize: 10,
+                    color: Color(0xFF6B7280),
+                    fontWeight: FontWeight.w600,
+                    letterSpacing: 0.4,
+                  ),
+                ),
+                DropdownButtonHideUnderline(
+                  child: DropdownButton<String>(
+                    value: value,
+                    isExpanded: true,
+                    isDense: true,
+                    icon: const SizedBox.shrink(),
+                    items: items,
+                    onChanged: onChanged,
+                    selectedItemBuilder: (context) => [
+                      for (var _ in items)
+                        Align(
+                          alignment: Alignment.centerLeft,
+                          child: Text(
+                            displayValue,
+                            style: const TextStyle(
+                              fontSize: 13,
+                              fontWeight: FontWeight.w600,
+                              color: Color(0xFF1F2937),
+                            ),
+                          ),
+                        ),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+          ),
+          const Icon(
+            Icons.keyboard_arrow_down_rounded,
+            size: 18,
+            color: Color(0xFF6B7280),
+          ),
+        ],
+      ),
     );
   }
 }
