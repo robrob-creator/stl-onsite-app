@@ -8,10 +8,9 @@ import '../../core/services/printer_service.dart';
 import '../../core/services/websocket_service.dart';
 import '../../models/eod_report.dart';
 
-/// Draw Report page — matches the third-party "DRAW REPORT" layout the
-/// operations team already uses on paper: header with date + agent, then
-/// one line per (draw time, game) with a per-sched subtotal, plus a filter
-/// row + action buttons at the bottom.
+/// End of Day Sales — visual layout matching the ops team wireframe:
+/// top filter row (Draw Date / Game / Draw Time), totals block, then a
+/// per-sched card with a Game/Gross/Hits/Bets/Payout/Net table.
 class EodReportPage extends StatefulWidget {
   final String makerId;
   final String date;
@@ -22,9 +21,13 @@ class EodReportPage extends StatefulWidget {
 }
 
 class _EodReportPageState extends State<EodReportPage> {
-  static final _pesoFmt = NumberFormat('#,##0.00', 'en_PH');
+  static final _pesoFmt = NumberFormat.currency(
+    locale: 'en_PH',
+    symbol: '₱ ',
+    decimalDigits: 2,
+  );
   static final _apiDateFmt = DateFormat('yyyy-MM-dd');
-  static final _displayDateFmt = DateFormat('yyyy-MM-dd');
+  static final _headerTimeFmt = DateFormat('MM/dd/yyyy, hh:mm a');
 
   late Future<EodReportModel> _futureReport;
   bool _isPrinting = false;
@@ -98,14 +101,24 @@ class _EodReportPageState extends State<EodReportPage> {
       lastDate: DateTime.now().add(const Duration(days: 30)),
     );
     if (picked == null) return;
-    setState(() => _reportDate = picked);
+    setState(() {
+      _reportDate = picked;
+      _futureReport = _fetch();
+    });
   }
+
+  List<EodSlotItem> _visibleSlots(EodReportModel r) => r.slots.where((s) {
+        if (_gameFilter.isNotEmpty && s.gameId != _gameFilter) return false;
+        if (_timeFilter.isNotEmpty && s.sched != _timeFilter) return false;
+        return true;
+      }).toList();
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
+      backgroundColor: Colors.white,
       appBar: AppBar(
-        title: const Text('Draw Report'),
+        title: const Text('EOD Report'),
         leading: const BackButton(),
       ),
       body: FutureBuilder<EodReportModel>(
@@ -121,230 +134,31 @@ class _EodReportPageState extends State<EodReportPage> {
             return const Center(child: Text('No data'));
           }
           final report = snapshot.data!;
-          return Column(
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: [
-              Expanded(
-                child: SingleChildScrollView(
-                  padding: const EdgeInsets.symmetric(vertical: 12),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.stretch,
-                    children: [
-                      _buildHeader(report),
-                      const SizedBox(height: 8),
-                      _buildTable(report),
-                    ],
-                  ),
-                ),
-              ),
-              _buildFilterBar(report),
-              _buildActionBar(report),
-            ],
+          return SingleChildScrollView(
+            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                _buildFilterRow(report),
+                const SizedBox(height: 20),
+                _buildSalesHeader(),
+                const SizedBox(height: 12),
+                _buildTotals(report),
+                const SizedBox(height: 20),
+                _buildSchedSections(report),
+                const SizedBox(height: 20),
+                _buildPrintButton(report),
+                const SizedBox(height: 24),
+              ],
+            ),
           );
         },
       ),
     );
   }
 
-  Widget _buildHeader(EodReportModel report) {
-    final agent = report.tellerName.isNotEmpty ? report.tellerName : '—';
-    final agentNo = report.agentNo.isNotEmpty ? report.agentNo : '';
-    final headerLine = agentNo.isEmpty ? agent : '$agent / $agentNo';
-    return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 16),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Text(
-            'DRAW REPORT ${_apiDateFmt.format(_reportDate)}',
-            style: const TextStyle(
-              fontFamily: 'monospace',
-              fontSize: 14,
-              fontWeight: FontWeight.w600,
-            ),
-          ),
-          Text(
-            headerLine.toUpperCase(),
-            style: const TextStyle(
-              fontFamily: 'monospace',
-              fontSize: 14,
-              fontWeight: FontWeight.w600,
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-
-  List<EodSlotItem> _filteredSlots(EodReportModel report) {
-    return report.slots.where((s) {
-      if (_gameFilter.isNotEmpty && s.gameId != _gameFilter) return false;
-      if (_timeFilter.isNotEmpty && s.sched != _timeFilter) return false;
-      return true;
-    }).toList();
-  }
-
-  Widget _buildTable(EodReportModel report) {
-    final slots = _filteredSlots(report);
-
-    // Group by sched preserving backend order (ORDER BY draw_time, game).
-    final Map<String, List<EodSlotItem>> grouped = <String, List<EodSlotItem>>{};
-    for (final s in slots) {
-      grouped.putIfAbsent(s.sched, () => <EodSlotItem>[]).add(s);
-    }
-
-    return SingleChildScrollView(
-      scrollDirection: Axis.horizontal,
-      padding: const EdgeInsets.symmetric(horizontal: 16),
-      child: DefaultTextStyle(
-        style: const TextStyle(
-          fontFamily: 'monospace',
-          fontSize: 13,
-          color: Colors.black87,
-        ),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            _headerRow(),
-            _dashRule(),
-            for (final entry in grouped.entries) ...[
-              for (final row in entry.value) _dataRow(row),
-              _dashRule(),
-              _subtotalRow(entry.key, entry.value),
-              _dashRule(),
-            ],
-            if (slots.isNotEmpty) _grandTotalRow(slots),
-          ],
-        ),
-      ),
-    );
-  }
-
-  static const _colSched = 90.0;
-  static const _colGame = 90.0;
-  static const _colNumeric = 90.0;
-
-  Widget _headerRow() {
-    return Row(
-      children: const [
-        SizedBox(width: _colSched, child: Text('Sched')),
-        SizedBox(width: _colGame, child: Text('Game')),
-        SizedBox(width: _colNumeric, child: Text('Lines', textAlign: TextAlign.right)),
-        SizedBox(width: _colNumeric, child: Text('Gross', textAlign: TextAlign.right)),
-        SizedBox(width: _colNumeric, child: Text('Hits', textAlign: TextAlign.right)),
-        SizedBox(width: _colNumeric, child: Text('Bets', textAlign: TextAlign.right)),
-        SizedBox(width: _colNumeric, child: Text('Payout', textAlign: TextAlign.right)),
-        SizedBox(width: _colNumeric, child: Text('Net', textAlign: TextAlign.right)),
-      ],
-    );
-  }
-
-  Widget _dashRule() {
-    return const Padding(
-      padding: EdgeInsets.symmetric(vertical: 2),
-      child: SizedBox(
-        width: _colSched + _colGame + _colNumeric * 6,
-        child: Text(
-          '----------------------------------------------------------------------------------------',
-          overflow: TextOverflow.clip,
-          maxLines: 1,
-          softWrap: false,
-        ),
-      ),
-    );
-  }
-
-  Widget _dataRow(EodSlotItem row) {
-    return Row(
-      children: [
-        SizedBox(width: _colSched, child: Text(_formatSched(row.sched))),
-        SizedBox(width: _colGame, child: Text(row.gameName)),
-        SizedBox(width: _colNumeric, child: Text('${row.lines}', textAlign: TextAlign.right)),
-        SizedBox(width: _colNumeric, child: Text(_pesoFmt.format(row.gross), textAlign: TextAlign.right)),
-        SizedBox(width: _colNumeric, child: Text('${row.hitsCount}', textAlign: TextAlign.right)),
-        SizedBox(width: _colNumeric, child: Text(_pesoFmt.format(row.betsAmount), textAlign: TextAlign.right)),
-        SizedBox(width: _colNumeric, child: Text(_pesoFmt.format(row.payout), textAlign: TextAlign.right)),
-        SizedBox(
-          width: _colNumeric,
-          child: Text(
-            _pesoFmt.format(row.net),
-            textAlign: TextAlign.right,
-            style: TextStyle(color: row.net < 0 ? Colors.red : null),
-          ),
-        ),
-      ],
-    );
-  }
-
-  Widget _subtotalRow(String sched, List<EodSlotItem> rows) {
-    final lines = rows.fold<int>(0, (a, r) => a + r.lines);
-    final gross = rows.fold<double>(0, (a, r) => a + r.gross);
-    final hits = rows.fold<int>(0, (a, r) => a + r.hitsCount);
-    final bets = rows.fold<double>(0, (a, r) => a + r.betsAmount);
-    final payout = rows.fold<double>(0, (a, r) => a + r.payout);
-    final net = gross - payout;
-    return Row(
-      children: [
-        const SizedBox(width: _colSched, child: SizedBox()),
-        const SizedBox(width: _colGame, child: Text('Total')),
-        SizedBox(width: _colNumeric, child: Text('$lines', textAlign: TextAlign.right)),
-        SizedBox(width: _colNumeric, child: Text(_pesoFmt.format(gross), textAlign: TextAlign.right)),
-        SizedBox(width: _colNumeric, child: Text('$hits', textAlign: TextAlign.right)),
-        SizedBox(width: _colNumeric, child: Text(_pesoFmt.format(bets), textAlign: TextAlign.right)),
-        SizedBox(width: _colNumeric, child: Text(_pesoFmt.format(payout), textAlign: TextAlign.right)),
-        SizedBox(
-          width: _colNumeric,
-          child: Text(
-            _pesoFmt.format(net),
-            textAlign: TextAlign.right,
-            style: TextStyle(color: net < 0 ? Colors.red : null),
-          ),
-        ),
-      ],
-    );
-  }
-
-  Widget _grandTotalRow(List<EodSlotItem> slots) {
-    final lines = slots.fold<int>(0, (a, r) => a + r.lines);
-    final gross = slots.fold<double>(0, (a, r) => a + r.gross);
-    final hits = slots.fold<int>(0, (a, r) => a + r.hitsCount);
-    final bets = slots.fold<double>(0, (a, r) => a + r.betsAmount);
-    final payout = slots.fold<double>(0, (a, r) => a + r.payout);
-    final net = gross - payout;
-    return Padding(
-      padding: const EdgeInsets.only(top: 4),
-      child: Row(
-        children: [
-          const SizedBox(width: _colSched, child: SizedBox()),
-          const SizedBox(
-            width: _colGame,
-            child: Text('GRAND', style: TextStyle(fontWeight: FontWeight.bold)),
-          ),
-          SizedBox(width: _colNumeric, child: Text('$lines', textAlign: TextAlign.right, style: const TextStyle(fontWeight: FontWeight.bold))),
-          SizedBox(width: _colNumeric, child: Text(_pesoFmt.format(gross), textAlign: TextAlign.right, style: const TextStyle(fontWeight: FontWeight.bold))),
-          SizedBox(width: _colNumeric, child: Text('$hits', textAlign: TextAlign.right, style: const TextStyle(fontWeight: FontWeight.bold))),
-          SizedBox(width: _colNumeric, child: Text(_pesoFmt.format(bets), textAlign: TextAlign.right, style: const TextStyle(fontWeight: FontWeight.bold))),
-          SizedBox(width: _colNumeric, child: Text(_pesoFmt.format(payout), textAlign: TextAlign.right, style: const TextStyle(fontWeight: FontWeight.bold))),
-          SizedBox(
-            width: _colNumeric,
-            child: Text(
-              _pesoFmt.format(net),
-              textAlign: TextAlign.right,
-              style: TextStyle(
-                fontWeight: FontWeight.bold,
-                color: net < 0 ? Colors.red : null,
-              ),
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildFilterBar(EodReportModel report) {
-    // Distinct games + sched values sourced from the current report so the
-    // dropdowns can only pick values that actually exist for this date.
-    final games = <String, String>{}; // gameId -> gameName
+  Widget _buildFilterRow(EodReportModel report) {
+    final games = <String, String>{};
     final scheds = <String>{};
     for (final s in report.slots) {
       if (s.gameId.isNotEmpty) games[s.gameId] = s.gameName;
@@ -352,118 +166,339 @@ class _EodReportPageState extends State<EodReportPage> {
     }
     final schedList = scheds.toList()..sort();
 
-    return Container(
-      padding: const EdgeInsets.fromLTRB(16, 8, 16, 4),
-      decoration: const BoxDecoration(
-        border: Border(top: BorderSide(color: Color(0xFFE5E7EB))),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: [
-          InkWell(
-            onTap: _pickDate,
-            child: Padding(
-              padding: const EdgeInsets.symmetric(vertical: 6),
-              child: Row(
-                children: [
-                  const Icon(Icons.calendar_today_rounded, size: 16),
-                  const SizedBox(width: 8),
-                  Text(_displayDateFmt.format(_reportDate),
-                      style: const TextStyle(fontWeight: FontWeight.w600)),
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        _filterCard(
+          label: _apiDateFmt.format(_reportDate),
+          placeholder: 'Draw Date',
+          onTap: _pickDate,
+          isValueSet: true,
+        ),
+        const SizedBox(height: 12),
+        Row(
+          children: [
+            Expanded(
+              child: _dropdownFilterCard(
+                label: 'Game',
+                value: _gameFilter,
+                items: [
+                  const DropdownMenuItem(value: '', child: Text('Game')),
+                  for (final entry in games.entries)
+                    DropdownMenuItem(value: entry.key, child: Text(entry.value)),
                 ],
+                onChanged: (v) => setState(() => _gameFilter = v ?? ''),
               ),
             ),
+            const SizedBox(width: 12),
+            Expanded(
+              child: _dropdownFilterCard(
+                label: 'Draw Time',
+                value: _timeFilter,
+                items: [
+                  const DropdownMenuItem(value: '', child: Text('Draw Time')),
+                  for (final s in schedList)
+                    DropdownMenuItem(value: s, child: Text(_formatSched(s))),
+                ],
+                onChanged: (v) => setState(() => _timeFilter = v ?? ''),
+              ),
+            ),
+          ],
+        ),
+      ],
+    );
+  }
+
+  Widget _filterCard({
+    required String label,
+    required String placeholder,
+    required VoidCallback onTap,
+    required bool isValueSet,
+  }) {
+    return InkWell(
+      onTap: onTap,
+      borderRadius: BorderRadius.circular(4),
+      child: Container(
+        height: 64,
+        alignment: Alignment.center,
+        decoration: BoxDecoration(
+          border: Border.all(color: Colors.black, width: 1.5),
+          borderRadius: BorderRadius.circular(4),
+        ),
+        child: Text(
+          isValueSet ? label : placeholder,
+          style: const TextStyle(
+            fontSize: 20,
+            fontWeight: FontWeight.w500,
+            color: Colors.black,
           ),
-          Row(
-            children: [
-              Expanded(
-                child: DropdownButtonFormField<String>(
-                  value: _gameFilter.isEmpty ? '' : _gameFilter,
-                  decoration: const InputDecoration(
-                    isDense: true,
-                    contentPadding: EdgeInsets.symmetric(horizontal: 10, vertical: 8),
-                    border: OutlineInputBorder(),
-                  ),
-                  items: [
-                    const DropdownMenuItem(value: '', child: Text('All Games')),
-                    for (final entry in games.entries)
-                      DropdownMenuItem(value: entry.key, child: Text(entry.value)),
-                  ],
-                  onChanged: (v) => setState(() => _gameFilter = v ?? ''),
-                ),
+        ),
+      ),
+    );
+  }
+
+  Widget _dropdownFilterCard({
+    required String label,
+    required String value,
+    required List<DropdownMenuItem<String>> items,
+    required ValueChanged<String?> onChanged,
+  }) {
+    return Container(
+      height: 64,
+      padding: const EdgeInsets.symmetric(horizontal: 12),
+      decoration: BoxDecoration(
+        border: Border.all(color: Colors.black, width: 1.5),
+        borderRadius: BorderRadius.circular(4),
+      ),
+      child: DropdownButtonHideUnderline(
+        child: DropdownButton<String>(
+          value: value,
+          isExpanded: true,
+          items: items,
+          onChanged: onChanged,
+          style: const TextStyle(
+            fontSize: 20,
+            fontWeight: FontWeight.w500,
+            color: Colors.black,
+          ),
+          hint: Text(
+            label,
+            style: const TextStyle(fontSize: 20, color: Colors.black),
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildSalesHeader() {
+    return Row(
+      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+      children: [
+        Row(
+          children: [
+            const Text(
+              'End of Day Sales ',
+              style: TextStyle(fontSize: 16, fontWeight: FontWeight.w600),
+            ),
+            Tooltip(
+              message: 'Total sales for the day.',
+              child: Icon(
+                Icons.info_outline,
+                size: 16,
+                color: Colors.grey[500],
               ),
-              const SizedBox(width: 8),
-              Expanded(
-                child: DropdownButtonFormField<String>(
-                  value: _timeFilter.isEmpty ? '' : _timeFilter,
-                  decoration: const InputDecoration(
-                    isDense: true,
-                    contentPadding: EdgeInsets.symmetric(horizontal: 10, vertical: 8),
-                    border: OutlineInputBorder(),
-                  ),
-                  items: [
-                    const DropdownMenuItem(value: '', child: Text('All Times')),
-                    for (final s in schedList)
-                      DropdownMenuItem(value: s, child: Text(_formatSched(s))),
-                  ],
-                  onChanged: (v) => setState(() => _timeFilter = v ?? ''),
-                ),
-              ),
-            ],
+            ),
+          ],
+        ),
+        Text(
+          _headerTimeFmt.format(DateTime.now()),
+          style: const TextStyle(
+            color: Colors.blue,
+            fontWeight: FontWeight.w500,
+            fontSize: 14,
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildTotals(EodReportModel report) {
+    return Column(
+      children: [
+        _totalsRow('Gross Sales', report.grossSales, highlight: true),
+        _totalsRow('Less Commission', report.lessCommission),
+        _totalsRow('Hits', report.hits),
+        _totalsRow('Total Net', report.totalNet),
+        _totalsRow('For Collection', report.forCollection),
+        _countRow('Total Bets', report.totalBets),
+      ],
+    );
+  }
+
+  Widget _totalsRow(String label, double value, {bool highlight = false}) {
+    final isNeg = value < 0;
+    final display = isNeg
+        ? '- ₱ ${value.abs().toStringAsFixed(2)}'
+        : '₱ ${value.toStringAsFixed(2)}';
+    final color = highlight
+        ? Colors.green
+        : isNeg
+            ? Colors.red
+            : Colors.black87;
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 6),
+      child: Row(
+        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+        children: [
+          Text(label, style: const TextStyle(fontSize: 15)),
+          Text(
+            display,
+            style: TextStyle(
+              fontSize: 15,
+              fontWeight: highlight || isNeg ? FontWeight.bold : FontWeight.normal,
+              color: color,
+            ),
           ),
         ],
       ),
     );
   }
 
-  Widget _buildActionBar(EodReportModel report) {
-    return Container(
-      padding: const EdgeInsets.fromLTRB(16, 8, 16, 16),
-      decoration: const BoxDecoration(
-        border: Border(top: BorderSide(color: Color(0xFFE5E7EB))),
-      ),
-      child: Column(
+  Widget _countRow(String label, int count) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 6),
+      child: Row(
+        mainAxisAlignment: MainAxisAlignment.spaceBetween,
         children: [
-          Row(
-            children: [
-              Expanded(
-                child: OutlinedButton(
-                  onPressed: _refresh,
-                  child: const Text('GET RPT'),
-                ),
-              ),
-              const SizedBox(width: 8),
-              Expanded(
-                child: ElevatedButton(
-                  onPressed: _isPrinting ? null : () => _handlePrint(report),
-                  style: ElevatedButton.styleFrom(
-                    backgroundColor: const Color(0xFF3D5A99),
-                    foregroundColor: Colors.white,
-                  ),
-                  child: Text(_isPrinting ? 'PRINTING...' : 'PRINT'),
-                ),
-              ),
-            ],
-          ),
-          const SizedBox(height: 8),
-          Row(
-            children: [
-              Expanded(
-                child: OutlinedButton(
-                  onPressed: null,
-                  child: const Text('MINMAX'),
-                ),
-              ),
-              const SizedBox(width: 8),
-              Expanded(
-                child: OutlinedButton(
-                  onPressed: () => Get.back(),
-                  child: const Text('CLOSE'),
-                ),
-              ),
-            ],
-          ),
+          Text(label, style: const TextStyle(fontSize: 15)),
+          Text('$count', style: const TextStyle(fontSize: 15)),
         ],
+      ),
+    );
+  }
+
+  Widget _buildSchedSections(EodReportModel report) {
+    final slots = _visibleSlots(report);
+    if (slots.isEmpty) {
+      return const Padding(
+        padding: EdgeInsets.symmetric(vertical: 24),
+        child: Center(
+          child: Text(
+            'No sales for the selected filters.',
+            style: TextStyle(color: Color(0xFF6B7280)),
+          ),
+        ),
+      );
+    }
+    final grouped = <String, List<EodSlotItem>>{};
+    for (final s in slots) {
+      grouped.putIfAbsent(s.sched, () => <EodSlotItem>[]).add(s);
+    }
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        for (final entry in grouped.entries) ...[
+          _schedSection(entry.key, entry.value),
+          const SizedBox(height: 20),
+        ],
+      ],
+    );
+  }
+
+  Widget _schedSection(String sched, List<EodSlotItem> rows) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Padding(
+          padding: const EdgeInsets.only(bottom: 6),
+          child: Text(
+            _formatSched(sched).toUpperCase(),
+            style: const TextStyle(
+              fontSize: 15,
+              fontWeight: FontWeight.w700,
+            ),
+          ),
+        ),
+        _schedTable(rows),
+      ],
+    );
+  }
+
+  Widget _schedTable(List<EodSlotItem> rows) {
+    final gross = rows.fold<double>(0, (a, r) => a + r.gross);
+    final hits = rows.fold<int>(0, (a, r) => a + r.hitsCount);
+    final bets = rows.fold<double>(0, (a, r) => a + r.betsAmount);
+    final payout = rows.fold<double>(0, (a, r) => a + r.payout);
+    final net = gross - payout;
+
+    return Table(
+      border: TableBorder.all(color: const Color(0xFF9CA3AF), width: 1),
+      columnWidths: const {
+        0: FlexColumnWidth(1.2),
+        1: FlexColumnWidth(1.4),
+        2: FlexColumnWidth(1.0),
+        3: FlexColumnWidth(1.4),
+        4: FlexColumnWidth(1.4),
+        5: FlexColumnWidth(1.4),
+      },
+      children: [
+        TableRow(
+          decoration: const BoxDecoration(color: Color(0xFFF3F4F6)),
+          children: [
+            _th('Game'),
+            _th('Gross'),
+            _th('Hits'),
+            _th('Bets'),
+            _th('Payout'),
+            _th('Net'),
+          ],
+        ),
+        for (final r in rows)
+          TableRow(children: [
+            _td(r.gameName),
+            _td(_pesoFmt.format(r.gross)),
+            _td('${r.hitsCount}'),
+            _td(_pesoFmt.format(r.betsAmount)),
+            _td(_pesoFmt.format(r.payout)),
+            _td(_pesoFmt.format(r.net), negative: r.net < 0),
+          ]),
+        TableRow(
+          decoration: const BoxDecoration(color: Color(0xFFF9FAFB)),
+          children: [
+            _td('Total', bold: true),
+            _td(_pesoFmt.format(gross), bold: true),
+            _td('$hits', bold: true),
+            _td(_pesoFmt.format(bets), bold: true),
+            _td(_pesoFmt.format(payout), bold: true),
+            _td(_pesoFmt.format(net), bold: true, negative: net < 0),
+          ],
+        ),
+      ],
+    );
+  }
+
+  Widget _th(String s) => Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 8),
+        child: Text(
+          s,
+          style: const TextStyle(
+            fontSize: 12,
+            fontWeight: FontWeight.w700,
+            color: Colors.black87,
+          ),
+        ),
+      );
+
+  Widget _td(String s, {bool bold = false, bool negative = false}) => Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 8),
+        child: Text(
+          s,
+          style: TextStyle(
+            fontSize: 12,
+            fontWeight: bold ? FontWeight.w700 : FontWeight.w500,
+            color: negative ? Colors.red : Colors.black87,
+          ),
+        ),
+      );
+
+  Widget _buildPrintButton(EodReportModel report) {
+    return SizedBox(
+      width: double.infinity,
+      child: ElevatedButton.icon(
+        onPressed: _isPrinting ? null : () => _handlePrint(report),
+        icon: Icon(
+          _isPrinting ? Icons.hourglass_top : Icons.print,
+          color: Colors.white,
+        ),
+        label: Text(_isPrinting ? 'Printing...' : 'Print Report'),
+        style: ElevatedButton.styleFrom(
+          backgroundColor: Colors.blue,
+          padding: const EdgeInsets.symmetric(vertical: 14),
+          textStyle: const TextStyle(
+            fontWeight: FontWeight.w600,
+            fontSize: 16,
+          ),
+        ),
       ),
     );
   }
@@ -475,11 +510,11 @@ class _EodReportPageState extends State<EodReportPage> {
     final h = int.tryParse(parts[0]);
     final m = int.tryParse(parts[1]);
     if (h == null || m == null) return raw;
-    final period = h >= 12 ? 'pm' : 'am';
+    final period = h >= 12 ? 'PM' : 'AM';
     var h12 = h % 12;
     if (h12 == 0) h12 = 12;
     if (m == 0) return '$h12$period';
-    return '$h12.${m.toString().padLeft(2, '0')}$period';
+    return '$h12:${m.toString().padLeft(2, '0')}$period';
   }
 
   Future<void> _handlePrint(EodReportModel report) async {
