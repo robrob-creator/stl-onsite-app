@@ -792,7 +792,10 @@ class PrinterService {
     infoRow('Coll:', currency(report.forCollection), numeric: true);
     infoRow('T-Bets:', report.totalBets.toString(), numeric: true);
 
-    if (report.breakdown.isNotEmpty) {
+    // Prefer the per-(draw time, game) slots so the printed breakdown can be
+    // grouped by draw time with a separator between groups; fall back to the
+    // legacy flat breakdown when the backend hasn't sent slots yet.
+    if (report.slots.isNotEmpty) {
       bytes.addAll(generator.hr(ch: '-'));
       bytes.addAll(
         generator.text(
@@ -802,21 +805,94 @@ class PrinterService {
       );
       bytes.addAll(generator.hr(ch: '-'));
 
+      String? currentSched;
+      for (final slot in report.slots) {
+        if (slot.sched != currentSched) {
+          if (currentSched != null) {
+            // Separator between groups so different draw times read distinct.
+            bytes.addAll(generator.hr(ch: '-'));
+          }
+          currentSched = slot.sched;
+          bytes.addAll(
+            generator.text(
+              _formatSchedForPrint(slot.sched),
+              styles: const PosStyles(bold: true),
+            ),
+          );
+          bytes.addAll(
+            generator.row([
+              PosColumn(text: 'Game', width: 3, styles: const PosStyles(bold: true)),
+              PosColumn(text: 'Bets', width: 2, styles: const PosStyles(bold: true, align: PosAlign.right)),
+              PosColumn(text: 'Gross', width: 3, styles: const PosStyles(bold: true, align: PosAlign.right)),
+              PosColumn(text: 'Hits', width: 2, styles: const PosStyles(bold: true, align: PosAlign.right)),
+              PosColumn(text: 'Net', width: 2, styles: const PosStyles(bold: true, align: PosAlign.right)),
+            ]),
+          );
+        }
+        bytes.addAll(
+          generator.row([
+            PosColumn(text: slot.gameName.isEmpty ? 'Game' : slot.gameName, width: 3),
+            PosColumn(text: slot.lines.toString(), width: 2, styles: const PosStyles(align: PosAlign.right)),
+            PosColumn(text: currency(slot.gross), width: 3, styles: const PosStyles(align: PosAlign.right)),
+            PosColumn(text: currency(slot.payout), width: 2, styles: const PosStyles(align: PosAlign.right)),
+            PosColumn(text: currency(slot.net), width: 2, styles: const PosStyles(align: PosAlign.right)),
+          ]),
+        );
+      }
+      bytes.addAll(generator.hr(ch: '-'));
+    } else if (report.breakdown.isNotEmpty) {
+      bytes.addAll(generator.hr(ch: '-'));
+      bytes.addAll(
+        generator.text(
+          'GAME BREAKDOWN',
+          styles: const PosStyles(align: PosAlign.center, bold: true),
+        ),
+      );
+      bytes.addAll(generator.hr(ch: '-'));
+
+      bytes.addAll(
+        generator.row([
+          PosColumn(text: 'Game', width: 3, styles: const PosStyles(bold: true)),
+          PosColumn(text: 'Bets', width: 2, styles: const PosStyles(bold: true, align: PosAlign.right)),
+          PosColumn(text: 'Gross', width: 3, styles: const PosStyles(bold: true, align: PosAlign.right)),
+          PosColumn(text: 'Hits', width: 2, styles: const PosStyles(bold: true, align: PosAlign.right)),
+          PosColumn(text: 'Net', width: 2, styles: const PosStyles(bold: true, align: PosAlign.right)),
+        ]),
+      );
       for (final item in report.breakdown) {
         final gameName = item.gameName.isEmpty ? 'Game' : item.gameName;
         bytes.addAll(
-          generator.text(gameName, styles: const PosStyles(bold: true)),
+          generator.row([
+            PosColumn(text: gameName, width: 3),
+            PosColumn(text: item.betCount.toString(), width: 2, styles: const PosStyles(align: PosAlign.right)),
+            PosColumn(text: currency(item.grossSales), width: 3, styles: const PosStyles(align: PosAlign.right)),
+            PosColumn(text: currency(item.hits), width: 2, styles: const PosStyles(align: PosAlign.right)),
+            PosColumn(text: currency(item.net), width: 2, styles: const PosStyles(align: PosAlign.right)),
+          ]),
         );
-        infoRow('Bets:', item.betCount.toString(), numeric: true);
-        infoRow('Gross:', currency(item.grossSales), numeric: true);
-        infoRow('Hits:', currency(item.hits), numeric: true);
-        infoRow('Net:', currency(item.net), numeric: true);
-        bytes.addAll(generator.hr(ch: '-'));
       }
+      bytes.addAll(generator.hr(ch: '-'));
     }
 
     bytes.addAll(_cutOrFeed(generator, printerProfile));
     return bytes;
+  }
+
+  /// Converts a Postgres TIME string ("14:00:00") to a compact schedule
+  /// label the printed EOD groups by (e.g. "2:00 PM"). Empty input becomes
+  /// "No Draw Time" so groups without a linked draw_time still print with a
+  /// header.
+  static String _formatSchedForPrint(String raw) {
+    if (raw.isEmpty) return 'No Draw Time';
+    final parts = raw.split(':');
+    if (parts.length < 2) return raw;
+    final h = int.tryParse(parts[0]);
+    final m = int.tryParse(parts[1]);
+    if (h == null || m == null) return raw;
+    final period = h >= 12 ? 'PM' : 'AM';
+    var h12 = h % 12;
+    if (h12 == 0) h12 = 12;
+    return '$h12:${m.toString().padLeft(2, '0')} $period';
   }
 
   /// Renders a QR code directly from its module matrix — no Flutter rendering
