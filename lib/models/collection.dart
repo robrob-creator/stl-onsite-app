@@ -11,6 +11,7 @@ class Collection {
   final double paidAmount;
   final double carryoverAmount;
   final bool isTapada;
+  final String tapadaStatus;
   final String status;
   final String remittanceStatus;
   final double remittedAmount;
@@ -30,6 +31,7 @@ class Collection {
     required this.paidAmount,
     required this.carryoverAmount,
     required this.isTapada,
+    required this.tapadaStatus,
     required this.status,
     required this.remittanceStatus,
     required this.remittedAmount,
@@ -41,6 +43,8 @@ class Collection {
 
   /// Human-facing label rendered inside the status badge on the row.
   String get statusLabel {
+    if (netAmount < 0 && tapadaStatus != 'completed') return 'Unsettled';
+    if (netAmount < 0) return 'Settled';
     if (isFullySettled) return 'Collected';
     if (agentOutstandingAmount > 0.005) return 'Partial';
     if (status == 'paid') return 'Pending Remittance';
@@ -90,6 +94,7 @@ class Collection {
       paidAmount: asDouble(json['paid_amount']),
       carryoverAmount: asDouble(json['carryover_amount']),
       isTapada: json['is_tapada'] as bool? ?? false,
+      tapadaStatus: (json['tapada_status'] as String? ?? '').toLowerCase(),
       status: (json['status'] as String? ?? '').toLowerCase(),
       remittanceStatus: json['remittance_status'] as String? ?? '',
       remittedAmount: asDouble(json['remit_approved_sum']),

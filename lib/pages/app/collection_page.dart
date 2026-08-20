@@ -245,6 +245,9 @@ class _CollectionPageState extends State<CollectionPage> {
     );
   }
 
+  bool _isUnsettledTapada(Collection c) =>
+      c.netAmount < 0 && c.tapadaStatus != 'completed';
+
   Widget _buildTotalsCard(List<Collection> items) {
     double gross = 0;
     double hits = 0;
@@ -542,8 +545,10 @@ class _CollectionPageState extends State<CollectionPage> {
                 const Icon(Icons.check_circle_outline, size: 14, color: Color(0xFF15803D)),
                 const SizedBox(width: 4),
                 Text(
-                  c.status == 'tapada'
-                      ? 'Tapada settled by collector'
+                  _isUnsettledTapada(c)
+                      ? 'Tapada unsettled'
+                      : c.status == 'tapada'
+                          ? 'Tapada settled by collector'
                       : 'Fully collected by collector',
                   style: const TextStyle(
                     fontSize: 12,
@@ -694,8 +699,13 @@ class _StatusBadge extends StatelessWidget {
         fg = const Color(0xFF92400E);
         break;
       case 'tapada':
-        bg = const Color(0xFFDCFCE7);
-        fg = const Color(0xFF15803D);
+        if (collection.tapadaStatus != 'completed') {
+          bg = const Color(0xFFFEF3C7);
+          fg = const Color(0xFF92400E);
+        } else {
+          bg = const Color(0xFFDCFCE7);
+          fg = const Color(0xFF15803D);
+        }
         break;
       default:
         bg = const Color(0xFFE5E7EB);
