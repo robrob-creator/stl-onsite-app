@@ -13,6 +13,8 @@ class Collection {
   final bool isTapada;
   final String status;
   final String remittanceStatus;
+  final double remittedAmount;
+  final double agentOutstandingAmount;
   final String? collectionId;
   final bool isCollected;
 
@@ -29,12 +31,16 @@ class Collection {
     required this.isTapada,
     required this.status,
     required this.remittanceStatus,
+    required this.remittedAmount,
+    required this.agentOutstandingAmount,
     required this.isCollected,
     this.collectionId,
   });
 
   /// Human-facing label rendered inside the status badge on the row.
   String get statusLabel {
+    if (isFullySettled) return 'Collected';
+    if (status == 'paid') return 'Pending Remittance';
     switch (status.toLowerCase()) {
       case 'paid':
         return 'Collected';
@@ -49,6 +55,22 @@ class Collection {
             ? 'Uncollected'
             : status[0].toUpperCase() + status.substring(1);
     }
+
+  }
+
+  bool get isFullySettled {
+    if (isTapada || netAmount <= 0) return true;
+    if (agentOutstandingAmount >= 0) {
+      return agentOutstandingAmount <= 0.005;
+    }
+    final remittance = remittanceStatus.toLowerCase();
+    final approved = remittance == 'remitted' ||
+        remittance == 'paid' ||
+        remittance == 'settle' ||
+        remittance == 'settled' ||
+        remittance == 'approved';
+    return approved &&
+        (remittance != 'partial' || remittedAmount >= netAmount - 0.005);
   }
 
   factory Collection.fromJson(Map<String, dynamic> json) {
@@ -67,6 +89,8 @@ class Collection {
       isTapada: json['is_tapada'] as bool? ?? false,
       status: (json['status'] as String? ?? '').toLowerCase(),
       remittanceStatus: json['remittance_status'] as String? ?? '',
+      remittedAmount: asDouble(json['remit_approved_sum']),
+      agentOutstandingAmount: asDouble(json['agent_outstanding_amount']),
       collectionId:
           (rawCollectionId == null || rawCollectionId.isEmpty) ? null : rawCollectionId,
       isCollected: json['is_collected'] as bool? ?? false,

@@ -207,31 +207,72 @@ class _CollectionPageState extends State<CollectionPage> {
     );
   }
 
+  double _remainingAmount(Collection c) {
+    if (c.agentOutstandingAmount >= 0) {
+      return c.agentOutstandingAmount.clamp(0.0, double.infinity);
+    }
+    final remittanceStatus = c.remittanceStatus.toLowerCase();
+    if (remittanceStatus == 'partial') {
+      return (c.netAmount - c.remittedAmount)
+          .clamp(0.0, double.infinity)
+          .toDouble();
+    }
+    if (remittanceStatus == 'remitted' ||
+        remittanceStatus == 'paid' ||
+        remittanceStatus == 'settle') {
+      return 0.0;
+    }
+    if (c.status == 'paid') return c.netAmount;
+    // Use the larger value so a stale zero carryover cannot hide an unpaid
+    // remainder when the server has already recorded the amount paid.
+    final calculatedRemaining =
+        (c.netAmount - c.paidAmount).clamp(0.0, double.infinity).toDouble();
+    return calculatedRemaining > c.carryoverAmount
+        ? calculatedRemaining
+        : c.carryoverAmount;
+  }
+
+  double _displayGross(Collection c) {
+    final calculatedGross = c.netAmount + c.hitsAmount + c.commissionAmount;
+    return calculatedGross >= 0 ? calculatedGross : c.grossAmount;
+  }
+
+  double _displayCollected(Collection c) {
+    if (c.isTapada) return c.paidAmount;
+    return c.remittedAmount.clamp(
+      0.0,
+      c.netAmount.clamp(0.0, double.infinity),
+    );
+  }
+
   Widget _buildTotalsCard(List<Collection> items) {
     double gross = 0;
     double hits = 0;
     double commission = 0;
     double totalCollected = 0;
-    double balance = 0; // sum of netAmount for unsettled draws only
+    // Balance = what agent still owes to company (official books).
+    // Decreases only when remittance is approved by admin, NOT when the
+    // collector physically takes the cash. A collected-but-unremitted draw
+    // still shows its full net in balance.
+    double balance = 0;
     for (final c in items) {
-      gross += c.grossAmount;
+      gross += _displayGross(c);
       hits += c.hitsAmount;
       commission += c.commissionAmount;
-      // Tapada = collector paid out → subtract. Normal = collector received → add.
-      totalCollected += c.isTapada ? -c.paidAmount : c.paidAmount;
-      final isSettled = c.status == 'paid' || c.status == 'tapada';
-      // carryoverAmount = remaining balance for both partial (leftover) and
-      // uncollected (full net). Using this keeps Balance equal to the agent's
-      // actual running balance after partial payments.
-      // For unsettled tapada collections (wins > bets), netAmount is negative
-      // and represents what the agent still owes net (hits - gross). Include it
-      // in balance so the agent sees their true net position.
-      if (!isSettled) {
-        // If net is negative (hits > bets), use netAmount directly so balance
-        // reflects the true position — collector owes agent the difference.
-        // Works even when is_tapada flag is false (e.g. draw result came in after collection).
-        balance += c.netAmount < 0 ? c.netAmount : c.carryoverAmount;
+      // Tapada = collector paid agent → negative for totalCollected.
+      // Partial admin remittance: only the approved portion counts as
+      // officially collected; the unremitted portion was credited back to
+      // the agent and must be re-collected.
+      if (c.isTapada) {
+        totalCollected -= c.paidAmount;
+      } else {
+        totalCollected += _displayCollected(c);
       }
+      if (c.isTapada || c.netAmount <= 0) {
+        // Tapada settled separately; negative net = agent net-positive (no balance owed).
+        continue;
+      }
+      balance += _remainingAmount(c);
     }
 
     // Claimed = winnings where QR scan completed (status='claimed').
@@ -352,12 +393,17 @@ class _CollectionPageState extends State<CollectionPage> {
   }
 
   Widget _buildRow(Collection c) {
-    final isPaid        = c.status == 'paid' || c.status == 'tapada';
-    final isPartial     = c.status == 'partial';
+    final isPartialRemit = c.status == 'paid' && !c.isFullySettled;
+    final remaining = _remainingAmount(c);
+    final isPaid = c.isFullySettled || remaining <= 0;
+    final isPartial = !isPaid && (c.status == 'partial' || isPartialRemit);
     final isUncollected = !isPaid && !isPartial;
     final netAbs = c.netAmount.abs();
+    // For partial-remit: progress = remitted / net; for regular partial: paid / net.
+    final effectivePaid = isPartialRemit ? c.remittedAmount : c.paidAmount;
+    final effectiveRemaining = remaining;
     final paidProgress = (netAbs > 0 && isPartial)
-        ? (c.paidAmount / netAbs).clamp(0.0, 1.0)
+        ? (effectivePaid / netAbs).clamp(0.0, 1.0)
         : 0.0;
 
     Color borderColor;
@@ -408,7 +454,7 @@ class _CollectionPageState extends State<CollectionPage> {
           Row(
             children: [
               Expanded(
-                child: _MoneyStat(label: 'Gross', value: _pesoFmt.format(c.grossAmount)),
+                child: _MoneyStat(label: 'Gross', value: _pesoFmt.format(_displayGross(c))),
               ),
               if (c.commissionAmount > 0)
                 Expanded(
@@ -430,7 +476,9 @@ class _CollectionPageState extends State<CollectionPage> {
               Expanded(
                 child: _MoneyStat(
                   label: isPaid ? 'Collected' : isPartial ? 'Paid So Far' : 'Paid',
-                  value: _pesoFmt.format(c.paidAmount),
+                  value: _pesoFmt.format(
+                    isPaid ? _displayCollected(c) : effectivePaid,
+                  ),
                   highlight: isPaid,
                   highlightColor: const Color(0xFF15803D),
                 ),
@@ -439,7 +487,7 @@ class _CollectionPageState extends State<CollectionPage> {
                 child: _MoneyStat(
                   label: isPaid ? 'Balance' : 'Remaining',
                   value: _pesoFmt.format(
-                    isPaid ? 0.0 : isPartial ? c.carryoverAmount : c.netAmount,
+                    isPaid ? 0.0 : isPartial ? effectiveRemaining : c.netAmount,
                   ),
                   highlight: !isPaid && c.netAmount > 0,
                   highlightColor: isPartial
@@ -481,7 +529,7 @@ class _CollectionPageState extends State<CollectionPage> {
                 const Icon(Icons.warning_amber_rounded, size: 14, color: Color(0xFFF59E0B)),
                 const SizedBox(width: 4),
                 Text(
-                  '${_pesoFmt.format(c.carryoverAmount)} remaining to pay collector',
+                  '${_pesoFmt.format(effectiveRemaining)} remaining to pay collector',
                   style: const TextStyle(
                     fontSize: 12,
                     fontWeight: FontWeight.w600,
@@ -505,6 +553,23 @@ class _CollectionPageState extends State<CollectionPage> {
                     fontSize: 12,
                     fontWeight: FontWeight.w600,
                     color: Color(0xFF15803D),
+                  ),
+                ),
+              ],
+            ),
+          ],
+          if (isPartial && isPartialRemit) ...[
+            const SizedBox(height: 8),
+            Row(
+              children: [
+                const Icon(Icons.pending_outlined, size: 14, color: Color(0xFF92400E)),
+                const SizedBox(width: 4),
+                Text(
+                  '${_pesoFmt.format(effectiveRemaining)} pending re-collection',
+                  style: const TextStyle(
+                    fontSize: 12,
+                    fontWeight: FontWeight.w600,
+                    color: Color(0xFF92400E),
                   ),
                 ),
               ],
@@ -621,7 +686,9 @@ class _StatusBadge extends StatelessWidget {
   Widget build(BuildContext context) {
     Color bg;
     Color fg;
-    switch (collection.status.toLowerCase()) {
+    final isPartialRemit =
+        collection.status == 'paid' && !collection.isFullySettled;
+    switch (isPartialRemit ? 'partial' : collection.status.toLowerCase()) {
       case 'paid':
         bg = const Color(0xFFDCFCE7);
         fg = const Color(0xFF15803D);
