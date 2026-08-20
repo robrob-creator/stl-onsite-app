@@ -15,6 +15,7 @@ class Collection {
   final String remittanceStatus;
   final double remittedAmount;
   final double agentOutstandingAmount;
+  final double rawBalance;
   final String? collectionId;
   final bool isCollected;
 
@@ -33,6 +34,7 @@ class Collection {
     required this.remittanceStatus,
     required this.remittedAmount,
     required this.agentOutstandingAmount,
+    required this.rawBalance,
     required this.isCollected,
     this.collectionId,
   });
@@ -40,6 +42,7 @@ class Collection {
   /// Human-facing label rendered inside the status badge on the row.
   String get statusLabel {
     if (isFullySettled) return 'Collected';
+    if (agentOutstandingAmount > 0.005) return 'Partial';
     if (status == 'paid') return 'Pending Remittance';
     switch (status.toLowerCase()) {
       case 'paid':
@@ -91,6 +94,7 @@ class Collection {
       remittanceStatus: json['remittance_status'] as String? ?? '',
       remittedAmount: asDouble(json['remit_approved_sum']),
       agentOutstandingAmount: asDouble(json['agent_outstanding_amount']),
+      rawBalance: asDouble(json['raw_balance']),
       collectionId:
           (rawCollectionId == null || rawCollectionId.isEmpty) ? null : rawCollectionId,
       isCollected: json['is_collected'] as bool? ?? false,

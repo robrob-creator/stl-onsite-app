@@ -268,11 +268,7 @@ class _CollectionPageState extends State<CollectionPage> {
       } else {
         totalCollected += _displayCollected(c);
       }
-      if (c.isTapada || c.netAmount <= 0) {
-        // Tapada settled separately; negative net = agent net-positive (no balance owed).
-        continue;
-      }
-      balance += _remainingAmount(c);
+      balance += c.rawBalance;
     }
 
     // Claimed = winnings where QR scan completed (status='claimed').
