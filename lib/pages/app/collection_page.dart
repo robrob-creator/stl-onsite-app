@@ -381,7 +381,7 @@ class _CollectionPageState extends State<CollectionPage> {
       padding: const EdgeInsets.fromLTRB(16, 16, 16, 6),
       child: Text(
         label,
-        style: const TextStyle(
+        style: TextStyle(
           fontSize: 12,
           fontWeight: FontWeight.w600,
           color: Color(0xFF6B7280),
@@ -395,6 +395,7 @@ class _CollectionPageState extends State<CollectionPage> {
     final isPartialRemit = c.status == 'paid' && !c.isFullySettled;
     final remaining = _remainingAmount(c);
     final isPaid = c.isFullySettled || remaining <= 0;
+    final isUnsettledTapada = _isUnsettledTapada(c);
     final isPartial = !isPaid && (c.status == 'partial' || isPartialRemit);
     final isUncollected = !isPaid && !isPartial;
     final netAbs = c.netAmount.abs();
@@ -408,7 +409,11 @@ class _CollectionPageState extends State<CollectionPage> {
     Color borderColor;
     Color bgColor;
     double borderWidth;
-    if (isPaid) {
+    if (isUnsettledTapada) {
+      borderColor = const Color(0xFFFDE68A);
+      bgColor = const Color(0xFFFFFBEB);
+      borderWidth = 1.5;
+    } else if (isPaid) {
       borderColor = const Color(0xFF86EFAC);
       bgColor     = const Color(0xFFF0FDF4);
       borderWidth = 1.5;
@@ -439,7 +444,7 @@ class _CollectionPageState extends State<CollectionPage> {
               const SizedBox(width: 6),
               Text(
                 _formatDrawTime(c.drawTime),
-                style: const TextStyle(
+                style: TextStyle(
                   fontSize: 14,
                   fontWeight: FontWeight.w600,
                   color: Color(0xFF1F2937),
@@ -529,7 +534,7 @@ class _CollectionPageState extends State<CollectionPage> {
                 const SizedBox(width: 4),
                 Text(
                   '${_pesoFmt.format(effectiveRemaining)} remaining to pay collector',
-                  style: const TextStyle(
+                  style: TextStyle(
                     fontSize: 12,
                     fontWeight: FontWeight.w600,
                     color: Color(0xFF92400E),
@@ -542,18 +547,28 @@ class _CollectionPageState extends State<CollectionPage> {
             const SizedBox(height: 8),
             Row(
               children: [
-                const Icon(Icons.check_circle_outline, size: 14, color: Color(0xFF15803D)),
+                Icon(
+                  isUnsettledTapada
+                      ? Icons.warning_amber_rounded
+                      : Icons.check_circle_outline,
+                  size: 14,
+                  color: isUnsettledTapada
+                      ? const Color(0xFFD97706)
+                      : const Color(0xFF15803D),
+                ),
                 const SizedBox(width: 4),
                 Text(
-                  _isUnsettledTapada(c)
+                  isUnsettledTapada
                       ? 'Tapada unsettled'
                       : c.status == 'tapada'
                           ? 'Tapada settled by collector'
                       : 'Fully collected by collector',
-                  style: const TextStyle(
+                  style: TextStyle(
                     fontSize: 12,
                     fontWeight: FontWeight.w600,
-                    color: Color(0xFF15803D),
+                    color: isUnsettledTapada
+                        ? const Color(0xFFB45309)
+                        : const Color(0xFF15803D),
                   ),
                 ),
               ],
