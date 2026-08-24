@@ -24,8 +24,8 @@ enum PrintError {
 }
 
 enum PrinterProfile {
-  gsV0,     // GS v 0 raster — standard ESC/POS printers
-  escStar,  // ESC * 24-pin — Goojprt PT-210 / MTP-2 series
+  gsV0, // GS v 0 raster — standard ESC/POS printers
+  escStar, // ESC * 24-pin — Goojprt PT-210 / MTP-2 series
 }
 
 enum PrinterReachabilityStatus {
@@ -213,9 +213,14 @@ class PrinterService {
   }) async {
     for (int attempt = 1; attempt <= retries; attempt++) {
       try {
-        Future<bool> connectFuture = PrintBluetoothThermal.connect(macPrinterAddress: mac);
+        Future<bool> connectFuture = PrintBluetoothThermal.connect(
+          macPrinterAddress: mac,
+        );
         if (connectTimeout != null) {
-          connectFuture = connectFuture.timeout(connectTimeout, onTimeout: () => false);
+          connectFuture = connectFuture.timeout(
+            connectTimeout,
+            onTimeout: () => false,
+          );
         }
         final ok = await connectFuture;
         if (ok) return true;
@@ -256,9 +261,14 @@ class PrinterService {
       try {
         await PrintBluetoothThermal.disconnect;
       } catch (_) {}
-      await Future.delayed(const Duration(milliseconds: 800));
+      await Future.delayed(const Duration(milliseconds: 250));
 
-      final connected = await _connectWithRetry(mac);
+      final connected = await _connectWithRetry(
+        mac,
+        retries: 1,
+        delay: Duration.zero,
+        connectTimeout: const Duration(seconds: 3),
+      );
       if (!connected) {
         return const PrintResult.fail(PrintError.notConnected);
       }
@@ -297,7 +307,12 @@ class PrinterService {
 
     final authCtrl = Get.find<AuthController>();
     final user = authCtrl.currentUser.value;
-    final teller = {'id': user?.id ?? '', 'name': user?.name ?? '', 'area_name': user?.areaName ?? '', 'agent_no': user?.agentNo ?? ''};
+    final teller = {
+      'id': user?.id ?? '',
+      'name': user?.name ?? '',
+      'area_name': user?.areaName ?? '',
+      'agent_no': user?.agentNo ?? '',
+    };
 
     final betEntries = _buildBetEntriesFromTicketBets(betObjects);
     if (betEntries.isEmpty) {
@@ -436,12 +451,15 @@ class PrinterService {
     if (drawDate.isNotEmpty) {
       try {
         final d = DateTime.parse(drawDate);
-        drawDateStr = '${monthAbbr[d.month - 1]} ${d.day.toString().padLeft(2, '0')}, ${d.year}';
+        drawDateStr =
+            '${monthAbbr[d.month - 1]} ${d.day.toString().padLeft(2, '0')}, ${d.year}';
       } catch (_) {
-        drawDateStr = '${monthAbbr[now.month - 1]} ${now.day.toString().padLeft(2, '0')}, ${now.year}';
+        drawDateStr =
+            '${monthAbbr[now.month - 1]} ${now.day.toString().padLeft(2, '0')}, ${now.year}';
       }
     } else {
-      drawDateStr = '${monthAbbr[now.month - 1]} ${now.day.toString().padLeft(2, '0')}, ${now.year}';
+      drawDateStr =
+          '${monthAbbr[now.month - 1]} ${now.day.toString().padLeft(2, '0')}, ${now.year}';
     }
 
     final dateStr =
@@ -454,7 +472,9 @@ class PrinterService {
 
     // Teller fields — prefer API response, fall back to current user
     AuthController? authCtrl;
-    try { authCtrl = Get.find<AuthController>(); } catch (_) {}
+    try {
+      authCtrl = Get.find<AuthController>();
+    } catch (_) {}
     final currentUser = authCtrl?.currentUser.value;
 
     final tellerName = (() {
@@ -547,16 +567,8 @@ class PrinterService {
     bytes.addAll(
       generator.row([
         PosColumn(text: '#', width: 1, styles: const PosStyles(bold: true)),
-        PosColumn(
-          text: 'Game',
-          width: 2,
-          styles: const PosStyles(bold: true),
-        ),
-        PosColumn(
-          text: 'Nos',
-          width: 3,
-          styles: const PosStyles(bold: true),
-        ),
+        PosColumn(text: 'Game', width: 2, styles: const PosStyles(bold: true)),
+        PosColumn(text: 'Nos', width: 3, styles: const PosStyles(bold: true)),
         PosColumn(
           text: 'Amt',
           width: 2,
@@ -603,11 +615,7 @@ class PrinterService {
     // TOTAL row — 4(label) + 5(empty) + 3(amount) = 12
     bytes.addAll(
       generator.row([
-        PosColumn(
-          text: 'TOTAL',
-          width: 4,
-          styles: const PosStyles(bold: true),
-        ),
+        PosColumn(text: 'TOTAL', width: 4, styles: const PosStyles(bold: true)),
         PosColumn(text: '', width: 5),
         PosColumn(
           text: totalAmount.toStringAsFixed(0),
@@ -689,7 +697,11 @@ class PrinterService {
     final List<int> bytes = [];
     final now = DateTime.now();
 
-    String currency(double value) => value.toStringAsFixed(2);
+    String currency(double value) {
+      final rounded = value.roundToDouble();
+      if ((value - rounded).abs() < 0.005) return rounded.toStringAsFixed(0);
+      return value.toStringAsFixed(2);
+    }
 
     final reportDate = DateTime.tryParse(report.reportDate);
     final reportDateLabel = reportDate != null
@@ -821,21 +833,62 @@ class PrinterService {
           );
           bytes.addAll(
             generator.row([
-              PosColumn(text: 'Game', width: 3, styles: const PosStyles(bold: true)),
-              PosColumn(text: 'Bets', width: 2, styles: const PosStyles(bold: true, align: PosAlign.right)),
-              PosColumn(text: 'Gross', width: 3, styles: const PosStyles(bold: true, align: PosAlign.right)),
-              PosColumn(text: 'Hits', width: 2, styles: const PosStyles(bold: true, align: PosAlign.right)),
-              PosColumn(text: 'Net', width: 2, styles: const PosStyles(bold: true, align: PosAlign.right)),
+              PosColumn(
+                text: 'Game',
+                width: 3,
+                styles: const PosStyles(bold: true),
+              ),
+              PosColumn(
+                text: 'Bets',
+                width: 2,
+                styles: const PosStyles(bold: true, align: PosAlign.right),
+              ),
+              PosColumn(
+                text: 'Gross',
+                width: 3,
+                styles: const PosStyles(bold: true, align: PosAlign.right),
+              ),
+              PosColumn(
+                text: 'Hits',
+                width: 2,
+                styles: const PosStyles(bold: true, align: PosAlign.right),
+              ),
+              PosColumn(
+                text: 'Net',
+                width: 2,
+                styles: const PosStyles(bold: true, align: PosAlign.right),
+              ),
             ]),
           );
         }
         bytes.addAll(
           generator.row([
-            PosColumn(text: slot.gameName.isEmpty ? 'Game' : slot.gameName, width: 3),
-            PosColumn(text: slot.lines.toString(), width: 2, styles: const PosStyles(align: PosAlign.right)),
-            PosColumn(text: currency(slot.gross), width: 3, styles: const PosStyles(align: PosAlign.right)),
-            PosColumn(text: currency(slot.payout), width: 2, styles: const PosStyles(align: PosAlign.right)),
-            PosColumn(text: currency(slot.net), width: 2, styles: const PosStyles(align: PosAlign.right)),
+            PosColumn(
+              text: _abbreviateGame(
+                slot.gameName.isEmpty ? 'Game' : slot.gameName,
+              ),
+              width: 3,
+            ),
+            PosColumn(
+              text: slot.lines.toString(),
+              width: 2,
+              styles: const PosStyles(align: PosAlign.right),
+            ),
+            PosColumn(
+              text: currency(slot.gross),
+              width: 3,
+              styles: const PosStyles(align: PosAlign.right),
+            ),
+            PosColumn(
+              text: currency(slot.payout),
+              width: 2,
+              styles: const PosStyles(align: PosAlign.right),
+            ),
+            PosColumn(
+              text: currency(slot.net),
+              width: 2,
+              styles: const PosStyles(align: PosAlign.right),
+            ),
           ]),
         );
       }
@@ -852,22 +905,60 @@ class PrinterService {
 
       bytes.addAll(
         generator.row([
-          PosColumn(text: 'Game', width: 3, styles: const PosStyles(bold: true)),
-          PosColumn(text: 'Bets', width: 2, styles: const PosStyles(bold: true, align: PosAlign.right)),
-          PosColumn(text: 'Gross', width: 3, styles: const PosStyles(bold: true, align: PosAlign.right)),
-          PosColumn(text: 'Hits', width: 2, styles: const PosStyles(bold: true, align: PosAlign.right)),
-          PosColumn(text: 'Net', width: 2, styles: const PosStyles(bold: true, align: PosAlign.right)),
+          PosColumn(
+            text: 'Game',
+            width: 3,
+            styles: const PosStyles(bold: true),
+          ),
+          PosColumn(
+            text: 'Bets',
+            width: 2,
+            styles: const PosStyles(bold: true, align: PosAlign.right),
+          ),
+          PosColumn(
+            text: 'Gross',
+            width: 3,
+            styles: const PosStyles(bold: true, align: PosAlign.right),
+          ),
+          PosColumn(
+            text: 'Hits',
+            width: 2,
+            styles: const PosStyles(bold: true, align: PosAlign.right),
+          ),
+          PosColumn(
+            text: 'Net',
+            width: 2,
+            styles: const PosStyles(bold: true, align: PosAlign.right),
+          ),
         ]),
       );
       for (final item in report.breakdown) {
-        final gameName = item.gameName.isEmpty ? 'Game' : item.gameName;
+        final gameName = _abbreviateGame(
+          item.gameName.isEmpty ? 'Game' : item.gameName,
+        );
         bytes.addAll(
           generator.row([
             PosColumn(text: gameName, width: 3),
-            PosColumn(text: item.betCount.toString(), width: 2, styles: const PosStyles(align: PosAlign.right)),
-            PosColumn(text: currency(item.grossSales), width: 3, styles: const PosStyles(align: PosAlign.right)),
-            PosColumn(text: currency(item.hits), width: 2, styles: const PosStyles(align: PosAlign.right)),
-            PosColumn(text: currency(item.net), width: 2, styles: const PosStyles(align: PosAlign.right)),
+            PosColumn(
+              text: item.betCount.toString(),
+              width: 2,
+              styles: const PosStyles(align: PosAlign.right),
+            ),
+            PosColumn(
+              text: currency(item.grossSales),
+              width: 3,
+              styles: const PosStyles(align: PosAlign.right),
+            ),
+            PosColumn(
+              text: currency(item.hits),
+              width: 2,
+              styles: const PosStyles(align: PosAlign.right),
+            ),
+            PosColumn(
+              text: currency(item.net),
+              width: 2,
+              styles: const PosStyles(align: PosAlign.right),
+            ),
           ]),
         );
       }
@@ -1012,7 +1103,7 @@ class PrinterService {
     final int height = image.height;
 
     bytes.addAll([0x1B, 0x61, 0x01]); // ESC a 1 — center
-    bytes.addAll([0x1B, 0x33, 24]);   // ESC 3 24 — set line spacing to 24 dots
+    bytes.addAll([0x1B, 0x33, 24]); // ESC 3 24 — set line spacing to 24 dots
 
     for (int y = 0; y < height; y += 24) {
       // ESC * 33 nL nH — 24-dot double density
@@ -1027,7 +1118,8 @@ class PrinterService {
               final p = image.getPixel(x, row);
               final alpha = p.a.toDouble();
               if (alpha > 30) {
-                final lum = 0.299 * p.r.toDouble() +
+                final lum =
+                    0.299 * p.r.toDouble() +
                     0.587 * p.g.toDouble() +
                     0.114 * p.b.toDouble();
                 if (lum < 127) b |= (0x80 >> bit);

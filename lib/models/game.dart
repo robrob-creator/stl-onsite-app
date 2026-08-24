@@ -285,6 +285,7 @@ class DrawTime {
 
   /// Check if draw time is still available based on current time and cutoff
   bool isAvailable() {
+    if (!isActive) return false;
     try {
       final now = DateTime.now();
       String timeStr = drawTime;

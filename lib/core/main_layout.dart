@@ -261,7 +261,7 @@ class _MainLayoutState extends State<MainLayout> {
                                       Clipboard.setData(ClipboardData(text: imei));
                                       Get.snackbar(
                                         'Copied',
-                                        'IMEI copied to clipboard',
+                                        'Device ID copied to clipboard',
                                         snackPosition: SnackPosition.BOTTOM,
                                         duration: const Duration(seconds: 2),
                                       );
@@ -271,7 +271,7 @@ class _MainLayoutState extends State<MainLayout> {
                                     children: [
                                       Flexible(
                                         child: Text(
-                                          'IMEI No. ${authCtrl.imei.value.isNotEmpty ? authCtrl.imei.value : 'N/A'}',
+                                          'Device ID: ${authCtrl.imei.value.isNotEmpty ? authCtrl.imei.value : 'N/A'}',
                                           style: const TextStyle(
                                             fontSize: 13,
                                             color: Color(0xFF888888),

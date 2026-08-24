@@ -50,6 +50,12 @@ class _TicketPageState extends State<TicketPage> {
   final GlobalKey _qrKey = GlobalKey(debugLabel: 'QR');
   bool _showQRScanner = false;
 
+  // Cache for resolved QR strings -> ticket numbers to avoid repeated network
+  // resolution on rapid repeated scans
+  final Map<String, String> _resolvedQrCache = {};
+  final Map<String, DateTime> _resolvedQrCacheTs = {};
+  static const Duration _resolvedQrCacheTTL = Duration(seconds: 60);
+
   // Single date filter
   bool _dateExplicitlySet = false;
   String _dateInput = '';
@@ -84,9 +90,10 @@ class _TicketPageState extends State<TicketPage> {
             (payload['endpoints_to_update'] as List<dynamic>? ?? [])
                 .map((e) => e.toString())
                 .toList();
-        if (endpoints.any((e) =>
-            e.contains('/api/void-setup') ||
-            e.contains('/api/reprint-setup'))) {
+        if (endpoints.any(
+          (e) =>
+              e.contains('/api/void-setup') || e.contains('/api/reprint-setup'),
+        )) {
           _fetchSetups();
         }
       });
@@ -193,7 +200,9 @@ class _TicketPageState extends State<TicketPage> {
   String _fmtDrawTime(String? dt) {
     if (dt == null || dt.isEmpty) return '—';
     try {
-      String timeStr = dt.contains('T') ? dt.split('T')[1].replaceAll('Z', '') : dt;
+      String timeStr = dt.contains('T')
+          ? dt.split('T')[1].replaceAll('Z', '')
+          : dt;
       final parts = timeStr.split(':');
       int h = int.parse(parts[0]);
       final m = parts[1].padLeft(2, '0');
@@ -239,7 +248,20 @@ class _TicketPageState extends State<TicketPage> {
     try {
       if (drawDate.isNotEmpty) {
         final d = DateTime.parse('${drawDate}T00:00:00');
-        const months = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+        const months = [
+          'Jan',
+          'Feb',
+          'Mar',
+          'Apr',
+          'May',
+          'Jun',
+          'Jul',
+          'Aug',
+          'Sep',
+          'Oct',
+          'Nov',
+          'Dec',
+        ];
         datePart = '${months[d.month - 1]} ${d.day}';
       }
     } catch (_) {}
@@ -319,7 +341,7 @@ class _TicketPageState extends State<TicketPage> {
 
   bool _canVoid(Ticket ticket) {
     final status = (ticket.status ?? '').toLowerCase();
-    if (status != 'pending' || ticket.hasActiveRequest) return false;
+    if (status != 'pending' || ticket.hasPendingVoidRequest) return false;
     if (ticket.voidExpiresAt != null || ticket.voidWindowMinutes != null) {
       return ticket.isVoidWindowActive();
     }
@@ -338,7 +360,8 @@ class _TicketPageState extends State<TicketPage> {
   /// True when the ticket still has direct-print allowance (printCount < maxPrints).
   /// Placing a bet counts as print #1, so printCount defaults to 1.
   bool _isDirectPrint(Ticket ticket) {
-    if (_activeReprintSetup == null || !_activeReprintSetup!.isActive) return false;
+    if (_activeReprintSetup == null || !_activeReprintSetup!.isActive)
+      return false;
     final maxP = _activeReprintSetup!.maxPrints;
     if (maxP <= 0) return false;
     final cur = ticket.printCount ?? 1;
@@ -369,7 +392,13 @@ class _TicketPageState extends State<TicketPage> {
           final h = int.parse(parts[0]);
           final m = parts.length > 1 ? int.parse(parts[1]) : 0;
           final drawBase = DateTime.parse(drawDateStr);
-          final drawDateTime = DateTime(drawBase.year, drawBase.month, drawBase.day, h, m);
+          final drawDateTime = DateTime(
+            drawBase.year,
+            drawBase.month,
+            drawBase.day,
+            h,
+            m,
+          );
           final cutoff = drawDateTime.add(Duration(minutes: grace));
           withinWindow = DateTime.now().isBefore(cutoff);
         }
@@ -380,7 +409,8 @@ class _TicketPageState extends State<TicketPage> {
         try {
           final created = DateTime.parse(ticket.createdAt!).toLocal();
           final now = DateTime.now();
-          final sameDay = created.year == now.year &&
+          final sameDay =
+              created.year == now.year &&
               created.month == now.month &&
               created.day == now.day;
           withinWindow = sameDay;
@@ -403,7 +433,7 @@ class _TicketPageState extends State<TicketPage> {
   /// Whether to render the void button at all (requires admin config or ticket-level window).
   bool _showVoidButton(Ticket ticket) {
     if ((ticket.status ?? '').toLowerCase() != 'pending') return false;
-    if (ticket.hasActiveRequest) return false;
+    if (ticket.hasPendingVoidRequest) return false;
     return _activeVoidSetup != null ||
         ticket.voidWindowMinutes != null ||
         ticket.voidExpiresAt != null;
@@ -434,7 +464,48 @@ class _TicketPageState extends State<TicketPage> {
 
   Future<void> _handleScannedQR(String code) async {
     _qrCtrl?.pauseCamera();
-    final resolved = await TicketService.resolveScannedTicketNumber(code);
+
+    // Instant local validation — reject garbage before any network call.
+    if (TicketService.tryDecodeValidQr(code) == null) {
+      Get.snackbar(
+        'Invalid QR',
+        'Not a valid ticket QR code.',
+        snackPosition: SnackPosition.BOTTOM,
+        backgroundColor: _red,
+        colorText: Colors.white,
+        duration: const Duration(seconds: 2),
+      );
+      await Future.delayed(const Duration(seconds: 2));
+      _qrCtrl?.resumeCamera();
+      return;
+    }
+
+    final now = DateTime.now();
+
+    // Use cached resolution if available
+    if (_resolvedQrCacheTs.containsKey(code) && _resolvedQrCache.containsKey(code)) {
+      final ts = _resolvedQrCacheTs[code]!;
+      if (now.difference(ts) <= _resolvedQrCacheTTL) {
+        final resolved = _resolvedQrCache[code]!;
+        setState(() => _showQRScanner = false);
+        _searchController.text = resolved;
+        await _ctrl.fetchTickets(resolved);
+        return;
+      }
+    }
+
+    String resolved;
+    try {
+      resolved = await TicketService.resolveScannedTicketNumber(code).timeout(const Duration(seconds: 5));
+    } catch (e) {
+      // fallback to raw code if resolution failed/timeout
+      resolved = code;
+    }
+
+    // cache resolved value
+    _resolvedQrCache[code] = resolved;
+    _resolvedQrCacheTs[code] = now;
+
     setState(() => _showQRScanner = false);
     _searchController.text = resolved;
     await _ctrl.fetchTickets(resolved);
@@ -512,7 +583,10 @@ class _TicketPageState extends State<TicketPage> {
 
   /// Direct BT print — used when printCount < maxPrints.
   /// Prints via Bluetooth then increments print_count on the backend.
-  Future<void> _doPrint(Ticket ticket) async {
+  Future<void> _doPrint(
+    Ticket ticket, {
+    bool incrementPrintCount = true,
+  }) async {
     // Ticket list endpoint doesn't include bet objects — fetch full ticket first.
     Ticket printTicket = ticket;
     if (ticket.betObjects == null || ticket.betObjects!.isEmpty) {
@@ -539,10 +613,12 @@ class _TicketPageState extends State<TicketPage> {
       );
       return;
     }
-    try {
-      await TicketService.incrementPrintCount(ticket.id ?? '');
-    } catch (_) {
-      // Print succeeded — backend count update failure is non-fatal
+    if (incrementPrintCount) {
+      try {
+        await TicketService.incrementPrintCount(ticket.id ?? '');
+      } catch (_) {
+        // Print succeeded — backend count update failure is non-fatal
+      }
     }
     _ctrl.fetchTickets();
     Get.snackbar(
@@ -552,6 +628,21 @@ class _TicketPageState extends State<TicketPage> {
       backgroundColor: _green,
       colorText: Colors.white,
     );
+  }
+
+  Future<void> _doApprovedPrint(Ticket ticket) async {
+    try {
+      await _ctrl.consumeApprovedReprint(ticket.id ?? '');
+      await _doPrint(ticket, incrementPrintCount: false);
+    } catch (e) {
+      Get.snackbar(
+        'Print Failed',
+        'Unable to use the approved reprint: $e',
+        snackPosition: SnackPosition.BOTTOM,
+        backgroundColor: _red,
+        colorText: Colors.white,
+      );
+    }
   }
 
   // ── date picker actions ────────────────────────────────────────────────────
@@ -566,9 +657,9 @@ class _TicketPageState extends State<TicketPage> {
       firstDate: DateTime(2020),
       lastDate: DateTime(2030),
       builder: (ctx, child) => Theme(
-        data: Theme.of(ctx).copyWith(
-          colorScheme: const ColorScheme.light(primary: _blue),
-        ),
+        data: Theme.of(
+          ctx,
+        ).copyWith(colorScheme: const ColorScheme.light(primary: _blue)),
         child: child!,
       ),
     );
@@ -711,8 +802,8 @@ class _TicketPageState extends State<TicketPage> {
           const SizedBox(width: 8),
           // Single date picker button
           Obx(() {
-            final active = _dateExplicitlySet &&
-                _ctrl.dateFrom.value.isNotEmpty;
+            final active =
+                _dateExplicitlySet && _ctrl.dateFrom.value.isNotEmpty;
             return GestureDetector(
               onTap: () => _pickDate(context),
               child: Container(
@@ -723,9 +814,7 @@ class _TicketPageState extends State<TicketPage> {
                 height: 42,
                 decoration: BoxDecoration(
                   color: active ? _blue : Colors.white,
-                  border: Border.all(
-                    color: active ? _blue : _border,
-                  ),
+                  border: Border.all(color: active ? _blue : _border),
                   borderRadius: BorderRadius.circular(10),
                 ),
                 child: Row(
@@ -842,8 +931,12 @@ class _TicketPageState extends State<TicketPage> {
             ticket: t,
             shortId: t.ticketNo ?? _shortId(t.id),
             fmtPrinted: _fmtDrawDateTime(
-              t.betObjects?.isNotEmpty == true ? (t.betObjects!.first.drawDate ?? '') : '',
-              t.betObjects?.isNotEmpty == true ? t.betObjects!.first.drawTime : null,
+              t.betObjects?.isNotEmpty == true
+                  ? (t.betObjects!.first.drawDate ?? '')
+                  : '',
+              t.betObjects?.isNotEmpty == true
+                  ? t.betObjects!.first.drawTime
+                  : null,
             ),
             fmtDrawDate: _fmtPrinted(t.createdAt),
             fmtAmount: _fmtAmount,
@@ -864,7 +957,11 @@ class _TicketPageState extends State<TicketPage> {
               }
             }),
             onVoid: () => _showVoidSheet(t),
-            onReprint: (t.hasApprovedReprintRequest || _isDirectPrint(t)) ? () => _doPrint(t) : () => _doReprint(t),
+            onReprint: t.hasApprovedReprintRequest
+                ? () => _doApprovedPrint(t)
+                : _isDirectPrint(t)
+                ? () => _doPrint(t)
+                : () => _doReprint(t),
           );
         },
       ),
@@ -1169,8 +1266,15 @@ class _TicketCard extends StatelessWidget {
                           ),
                         ),
                         Text(
-                          fmtAmount(bets.fold<double>(0.0, (s, b) =>
-                              s + (b.straightBetAmount ?? 0.0) + (b.rambleBetAmount ?? 0.0))),
+                          fmtAmount(
+                            bets.fold<double>(
+                              0.0,
+                              (s, b) =>
+                                  s +
+                                  (b.straightBetAmount ?? 0.0) +
+                                  (b.rambleBetAmount ?? 0.0),
+                            ),
+                          ),
                           style: const TextStyle(
                             fontSize: 13.5,
                             fontWeight: FontWeight.w800,
@@ -1267,8 +1371,15 @@ class _TicketCard extends StatelessWidget {
                                   ),
                                   const SizedBox(width: 8),
                                   Text(
-                                    fmtAmount(bets.fold<double>(0.0, (s, b) =>
-                                        s + (b.straightBetAmount ?? 0.0) + (b.rambleBetAmount ?? 0.0))),
+                                    fmtAmount(
+                                      bets.fold<double>(
+                                        0.0,
+                                        (s, b) =>
+                                            s +
+                                            (b.straightBetAmount ?? 0.0) +
+                                            (b.rambleBetAmount ?? 0.0),
+                                      ),
+                                    ),
                                     style: const TextStyle(
                                       fontSize: 13,
                                       fontWeight: FontWeight.w800,
@@ -1495,9 +1606,7 @@ class _ReprintButton extends StatelessWidget {
                   alignment: Alignment.centerLeft,
                   child: FractionallySizedBox(
                     widthFactor: pct,
-                    child: Container(
-                      color: _blue.withValues(alpha: 0.08),
-                    ),
+                    child: Container(color: _blue.withValues(alpha: 0.08)),
                   ),
                 ),
               ),
@@ -1506,7 +1615,9 @@ class _ReprintButton extends StatelessWidget {
                 mainAxisSize: MainAxisSize.min,
                 children: [
                   Icon(
-                    expired ? Icons.print_disabled_outlined : Icons.print_outlined,
+                    expired
+                        ? Icons.print_disabled_outlined
+                        : Icons.print_outlined,
                     size: 14,
                     color: textColor,
                   ),
@@ -1729,7 +1840,10 @@ class _VoidConfirmSheetState extends State<_VoidConfirmSheet> {
           decoration: InputDecoration(
             hintText: 'Reason for void (required)',
             hintStyle: const TextStyle(fontSize: 13, color: _muted2),
-            contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+            contentPadding: const EdgeInsets.symmetric(
+              horizontal: 12,
+              vertical: 10,
+            ),
             border: OutlineInputBorder(
               borderRadius: BorderRadius.circular(10),
               borderSide: const BorderSide(color: _border),
@@ -1771,7 +1885,9 @@ class _VoidConfirmSheetState extends State<_VoidConfirmSheet> {
             const SizedBox(width: 10),
             Expanded(
               child: GestureDetector(
-                onTap: _hasReason ? () => widget.onVoid(_reasonCtrl.text.trim()) : null,
+                onTap: _hasReason
+                    ? () => widget.onVoid(_reasonCtrl.text.trim())
+                    : null,
                 child: Container(
                   padding: const EdgeInsets.symmetric(vertical: 12),
                   decoration: BoxDecoration(

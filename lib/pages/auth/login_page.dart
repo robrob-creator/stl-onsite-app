@@ -32,7 +32,7 @@ class _LoginPageState extends State<LoginPage> {
         builder: (ctx, setS) => AlertDialog(
           shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
           title: const Text(
-            'Device IMEI',
+            'Device ID',
             style: TextStyle(fontSize: 16, fontWeight: FontWeight.w700),
           ),
           content: Column(
@@ -80,7 +80,7 @@ class _LoginPageState extends State<LoginPage> {
                             Text(
                               ctrl.deviceImei.value.isNotEmpty
                                   ? ctrl.deviceImei.value
-                                  : 'No device IMEI found',
+                                  : 'No device ID found',
                               style: TextStyle(
                                 fontSize: 10,
                                 color: Colors.grey.shade600,
@@ -98,7 +98,7 @@ class _LoginPageState extends State<LoginPage> {
                 ),
               ),
               const SizedBox(height: 10),
-              // Custom IMEI
+              // Custom device ID
               InkWell(
                 borderRadius: BorderRadius.circular(10),
                 onTap: () => setS(() => useCustom = true),
@@ -150,7 +150,7 @@ class _LoginPageState extends State<LoginPage> {
                     fontFamily: 'RobotoMono',
                   ),
                   decoration: InputDecoration(
-                    hintText: 'Enter IMEI or device ID',
+                    hintText: 'Enter device ID',
                     hintStyle: TextStyle(
                       fontSize: 12,
                       color: Colors.grey.shade400,
@@ -222,7 +222,7 @@ class _LoginPageState extends State<LoginPage> {
                     mainAxisAlignment: MainAxisAlignment.start,
                     children: [
                       const SizedBox(height: 40),
-                      // Logo — long-press to override IMEI
+                      // Logo — long-press to override the device ID
                       GestureDetector(
                         onLongPress: () => _showImeiDialog(context, authController),
                         child: Image.asset(
@@ -248,7 +248,7 @@ class _LoginPageState extends State<LoginPage> {
                                     ),
                               ),
                               const SizedBox(height: 12),
-                              // Subtitle with IMEI
+                              // Subtitle with device ID
                               Text(
                                 'Please enter your 6-digit MPIN',
                                 style: Theme.of(context).textTheme.bodyMedium
@@ -337,7 +337,7 @@ class _LoginPageState extends State<LoginPage> {
                             Clipboard.setData(ClipboardData(text: imei));
                             Get.snackbar(
                               'Copied',
-                              'IMEI copied to clipboard',
+                              'Device ID copied to clipboard',
                               snackPosition: SnackPosition.BOTTOM,
                               duration: const Duration(seconds: 2),
                             );
@@ -348,8 +348,8 @@ class _LoginPageState extends State<LoginPage> {
                           children: [
                             Text(
                               authController.imei.value.isNotEmpty
-                                  ? 'IMEI: ${authController.imei.value}'
-                                  : 'IMEI: ...',
+                                  ? 'Device ID: ${authController.imei.value}'
+                                  : 'Device ID: ...',
                               style: const TextStyle(
                                 color: Colors.grey,
                                 fontSize: 10,

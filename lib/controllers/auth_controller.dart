@@ -6,6 +6,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:device_info_plus/device_info_plus.dart';
+import 'package:android_id/android_id.dart';
 import '../models/login_response.dart';
 import '../core/app_constants.dart';
 import '../core/services/websocket_service.dart';
@@ -16,7 +17,7 @@ import 'lottery_controller.dart';
 class AuthController extends GetxController {
   final RxString phoneNumber = ''.obs;
   final RxString imei = ''.obs;
-  final RxString deviceImei = ''.obs; // hardware IMEI, never overwritten
+  final RxString deviceImei = ''.obs; // device identifier, never overwritten
   final RxString mpin = ''.obs;
   final RxBool isLoading = false.obs;
   final Rx<User?> currentUser = Rx<User?>(null);
@@ -26,6 +27,7 @@ class AuthController extends GetxController {
 
   late FlutterSecureStorage _secureStorage;
   late DeviceInfoPlugin _deviceInfo;
+  static const _androidId = AndroidId();
 
   static const String baseUrl = '${AppConstants.apiBaseUrl}/auth';
 
@@ -44,38 +46,44 @@ class AuthController extends GetxController {
     });
   }
 
-  /// Initialize device and get IMEI
+  /// Initialize device and get the device identifier.
   Future<void> _initializeDevice() async {
     try {
       final imeiValue = await _getDeviceImei();
       if (imeiValue.isNotEmpty) {
         imei.value = imeiValue;
         deviceImei.value = imeiValue;
-        print('✓ Device IMEI: $imeiValue');
+        print('✓ Device ID: $imeiValue');
       } else {
-        print('⚠ Warning: Could not retrieve device IMEI');
+        print('⚠ Warning: Could not retrieve device ID');
       }
     } catch (e) {
-      print('✗ Error getting IMEI: $e');
+      print('✗ Error getting device ID: $e');
     } finally {
       isDeviceInitialized.value = true;
       update();
     }
   }
 
-  /// Get device IMEI
+  /// Get the Android SSAID or iOS vendor identifier.
+  ///
+  /// AndroidDeviceInfo.id is the OS build ID and is shared by every phone
+  /// running the same firmware, so it must not be used for authentication.
   Future<String> _getDeviceImei() async {
     try {
-      final androidInfo = await _deviceInfo.androidInfo;
-      return androidInfo.id; // IMEI equivalent on Android
-    } catch (e) {
-      try {
-        final iosInfo = await _deviceInfo.iosInfo;
-        return iosInfo.identifierForVendor ??
-            ''; // Use identifierForVendor on iOS
-      } catch (e) {
-        return '';
+      final androidId = await _androidId.getId();
+      if (androidId != null && androidId.trim().isNotEmpty) {
+        return androidId.trim();
       }
+    } catch (e) {
+      // Continue with the iOS identifier lookup below.
+    }
+
+    try {
+      final iosInfo = await _deviceInfo.iosInfo;
+      return iosInfo.identifierForVendor?.trim() ?? '';
+    } catch (e) {
+      return '';
     }
   }
 
@@ -139,10 +147,14 @@ class AuthController extends GetxController {
       createdAt: user.createdAt,
       phoneNumber: user.phoneNumber,
       balance: newBalance,
+      cashFromCashier: user.cashFromCashier,
       isActive: user.isActive,
       isBlocked: user.isBlocked,
       winningsAmount: user.winningsAmount,
       shareAmount: user.shareAmount,
+      areaName: user.areaName,
+      clusterName: user.clusterName,
+      agentNo: user.agentNo,
     );
     unawaited(_saveSession());
     update();
@@ -194,7 +206,7 @@ class AuthController extends GetxController {
     if (imei.value.isEmpty) {
       Get.snackbar(
         'Error',
-        'Unable to retrieve device IMEI. Please restart the app.',
+        'Unable to retrieve device ID. Please restart the app.',
         snackPosition: SnackPosition.BOTTOM,
       );
       return;
@@ -206,7 +218,11 @@ class AuthController extends GetxController {
           .post(
             Uri.parse('$baseUrl/login/imei'),
             headers: {'Content-Type': 'application/json'},
-            body: jsonEncode({'imei': imei.value, 'pin': mpin.value}),
+            body: jsonEncode({
+              'imei': imei.value,
+              'pin': mpin.value,
+              'app_role': 'Agent',
+            }),
           )
           .timeout(const Duration(seconds: 30));
 
@@ -272,10 +288,10 @@ class AuthController extends GetxController {
       // Handle specific error codes
       switch (code) {
         case 'INVALID_IMEI':
-          displayMessage = 'Invalid IMEI or Unauthorized device.';
+          displayMessage = 'Invalid device ID or unauthorized device.';
           break;
         case 'IMEI_NOT_REGISTERED':
-          displayMessage = 'Invalid IMEI or Unauthorized device.';
+          displayMessage = 'Invalid device ID or unauthorized device.';
           break;
         case 'INVALID_MPIN':
           displayMessage = 'Invalid MPIN.';

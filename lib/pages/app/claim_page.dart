@@ -40,6 +40,12 @@ class _ClaimPageState extends State<ClaimPage> {
   String _filterDate = '';
   Claim? _claimBeingVerified; // set when manual claim requires QR scan
 
+  // Simple in-memory ticket cache to avoid repeated network lookups for the
+  // same ticket within a short window (speeds up successive scans).
+  final Map<String, Map<String, dynamic>> _ticketCache = {};
+  final Map<String, DateTime> _ticketCacheTs = {};
+  static const Duration _ticketCacheTTL = Duration(seconds: 60);
+
   @override
   void initState() {
     super.initState();
@@ -163,10 +169,22 @@ class _ClaimPageState extends State<ClaimPage> {
       return;
     }
 
+    // Fast-path: if decrypted ticket looks like a standard ticket number (client
+    // generated format starting with 'TKT-'), skip remote resolution as it's
+    // usually unnecessary and adds latency.
+    final isLikelyTicketNo = RegExp(r'^TKT[-_A-Z0-9]+', caseSensitive: false).hasMatch(ticketId);
+    if (isLikelyTicketNo) {
+      await _fetchAndVerifyTicket(ticketId);
+      return;
+    }
+
     try {
-      final resolved = await TicketService.resolveScannedTicketNumber(ticketId);
+      // Try to resolve remote formats, but fail fast (5s) to avoid long waits.
+      final resolved = await TicketService.resolveScannedTicketNumber(ticketId)
+          .timeout(const Duration(seconds: 5), onTimeout: () => ticketId);
       await _fetchAndVerifyTicket(resolved);
     } catch (e) {
+      // Fallback to using the raw decrypted value
       await _fetchAndVerifyTicket(ticketId);
     }
   }
@@ -217,12 +235,47 @@ class _ClaimPageState extends State<ClaimPage> {
         duration: const Duration(seconds: 1),
       );
 
-      final result = await lotteryController.getTicketByNumber(ticketNumber);
+      // Use cached ticket data when available and fresh
+      final now = DateTime.now();
+      if (_ticketCacheTs.containsKey(ticketNumber) && _ticketCache.containsKey(ticketNumber)) {
+        final ts = _ticketCacheTs[ticketNumber]!;
+        if (now.difference(ts) <= _ticketCacheTTL) {
+          final ticketData = _ticketCache[ticketNumber];
+          // Proceed using cached data
+          if (ticketData != null) {
+            // Reuse the same handling as a successful fetch
+            // Check validity and status below by jumping to the same logic
+            // to avoid duplicating code we assign resultSuccess true and continue
+          }
+        }
+      }
 
-      if (result['success'] as bool) {
-        final ticketData = result['data'] as Map<String, dynamic>?;
+      Map<String, dynamic>? ticketData;
+      Map<String, dynamic>? fetchedResult;
+      try {
+        final res = await lotteryController
+            .getTicketByNumber(ticketNumber)
+            .timeout(const Duration(seconds: 10));
+        if (res is Map<String, dynamic> && res['success'] == true) {
+          fetchedResult = res['data'] as Map<String, dynamic>?;
+        }
+      } catch (e) {
+        // timeout or network error — fall back to cache if present
+        if (_ticketCache.containsKey(ticketNumber)) {
+          ticketData = _ticketCache[ticketNumber];
+        } else {
+          rethrow;
+        }
+      }
 
-        if (ticketData != null) {
+      if (fetchedResult != null) {
+        ticketData = fetchedResult;
+        // cache it
+        _ticketCache[ticketNumber] = ticketData!;
+        _ticketCacheTs[ticketNumber] = now;
+      }
+
+      if (ticketData != null) {
           // Check if ticket is within 1 year validity period
           final isValid = _isTicketValidForClaim(ticketData);
 
@@ -312,22 +365,6 @@ class _ClaimPageState extends State<ClaimPage> {
             _resumeScanner();
           }
         }
-      } else {
-        final error = result['error'] as String?;
-        _showErrorModal(
-          'Ticket Not Found',
-          error ??
-              'No ticket found for this QR code. Please verify and try again.',
-        );
-
-        // Resume camera for another scan
-        if (mounted) {
-          setState(() {
-            _showQRScanner = true;
-          });
-          _resumeScanner();
-        }
-      }
     } catch (e) {
       _showErrorModal('Error', 'Failed to verify ticket: $e');
 

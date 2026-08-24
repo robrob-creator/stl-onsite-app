@@ -238,7 +238,9 @@ class _CollectionPageState extends State<CollectionPage> {
   }
 
   double _displayCollected(Collection c) {
-    if (c.isTapada) return c.paidAmount;
+    // A tapada is a settlement payout to the agent, not agent cash
+    // collected. It must not make the agent's Collection total negative.
+    if (c.isTapada) return 0.0;
     return c.remittedAmount.clamp(
       0.0,
       c.netAmount.clamp(0.0, double.infinity),
@@ -262,15 +264,7 @@ class _CollectionPageState extends State<CollectionPage> {
       gross += _displayGross(c);
       hits += c.hitsAmount;
       commission += c.commissionAmount;
-      // Tapada = collector paid agent → negative for totalCollected.
-      // Partial admin remittance: only the approved portion counts as
-      // officially collected; the unremitted portion was credited back to
-      // the agent and must be re-collected.
-      if (c.isTapada) {
-        totalCollected -= c.paidAmount;
-      } else {
-        totalCollected += _displayCollected(c);
-      }
+      totalCollected += _displayCollected(c);
       balance += c.rawBalance;
     }
 

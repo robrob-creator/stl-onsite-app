@@ -90,28 +90,112 @@ class _HomePageState extends State<HomePage> {
     }
 
     if (reachability == PrinterReachabilityStatus.unreachable) {
-      Get.snackbar(
-        'Printer Unreachable',
-        'Could not connect to "${PrinterService.savedName ?? mac}". Make sure the printer is on and in range.',
-        icon: const Icon(Icons.bluetooth_disabled, color: Colors.white),
-        backgroundColor: const Color(0xFFE53E3E),
-        colorText: Colors.white,
-        snackPosition: SnackPosition.BOTTOM,
-        duration: const Duration(seconds: 5),
-        borderRadius: 12,
-        margin: const EdgeInsets.all(16),
-        mainButton: TextButton(
-          onPressed: () {
-            Get.closeCurrentSnackbar();
-            Get.toNamed('/printer-settings');
-          },
-          child: const Text(
-            'Settings',
-            style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold),
+      _showPrinterUnreachableDialog(mac);
+    }
+  }
+
+  void _showPrinterUnreachableDialog(String mac) {
+    final name = PrinterService.savedName ?? mac;
+    Get.dialog(
+      Dialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+        backgroundColor: Colors.white,
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(24, 32, 24, 24),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Container(
+                width: 72,
+                height: 72,
+                decoration: const BoxDecoration(
+                  color: Color(0xFFFFEBEE),
+                  shape: BoxShape.circle,
+                ),
+                child: const Icon(
+                  Icons.bluetooth_disabled,
+                  color: Color(0xFFE53E3E),
+                  size: 36,
+                ),
+              ),
+              const SizedBox(height: 20),
+              const Text(
+                'Printer Not Detected',
+                style: TextStyle(
+                  fontSize: 20,
+                  fontWeight: FontWeight.bold,
+                  color: Colors.black87,
+                ),
+              ),
+              const SizedBox(height: 12),
+              Text(
+                'Could not connect to "$name". Make sure the printer is on and in range, then reconnect.',
+                textAlign: TextAlign.center,
+                style: const TextStyle(
+                  fontSize: 14,
+                  color: Colors.black54,
+                  height: 1.4,
+                ),
+              ),
+              const SizedBox(height: 24),
+              Row(
+                children: [
+                  Expanded(
+                    child: OutlinedButton(
+                      onPressed: () => Get.back(),
+                      style: OutlinedButton.styleFrom(
+                        padding: const EdgeInsets.symmetric(vertical: 14),
+                        side: const BorderSide(
+                          color: Color(0xFF3D5A99),
+                          width: 1.5,
+                        ),
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(12),
+                        ),
+                      ),
+                      child: const Text(
+                        'Later',
+                        style: TextStyle(
+                          fontSize: 15,
+                          fontWeight: FontWeight.w600,
+                          color: Color(0xFF3D5A99),
+                        ),
+                      ),
+                    ),
+                  ),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: ElevatedButton(
+                      onPressed: () {
+                        Get.back();
+                        Get.toNamed('/printer-settings');
+                      },
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: const Color(0xFF3D5A99),
+                        padding: const EdgeInsets.symmetric(vertical: 14),
+                        elevation: 0,
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(12),
+                        ),
+                      ),
+                      child: const Text(
+                        'Connect',
+                        style: TextStyle(
+                          fontSize: 15,
+                          fontWeight: FontWeight.bold,
+                          color: Colors.white,
+                        ),
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ],
           ),
         ),
-      );
-    }
+      ),
+      barrierDismissible: false,
+    );
   }
 
   void _showNoPrinterDialog() {

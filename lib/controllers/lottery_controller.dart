@@ -1,3 +1,4 @@
+import 'package:flutter/foundation.dart' show kDebugMode;
 import 'package:flutter/material.dart';
 import 'package:get/get.dart';
 import 'package:http/http.dart' as http;
@@ -153,6 +154,7 @@ class LotteryController extends GetxController {
   // Blackout time restriction (computed from selected game)
   final RxBool isBlackoutTime = false.obs;
   Timer? _blackoutTimer;
+  Timer? _locationTimer;
 
   // Draw times that already have a posted result for the currently-selected
   // game + betDate. Used to disable those chips in the bet entry selector so
@@ -179,6 +181,7 @@ class LotteryController extends GetxController {
     loadProfile();
     _subscribeToWebSocketEvents();
     _startBlackoutTimer();
+    _startLocationTimer();
     // Re-check which draw times already drew whenever the selected game or
     // bet date changes, so the selector chips disable/enable correctly.
     ever<String>(selectedGameId, (_) => refreshDrawnDrawTimes());
@@ -190,7 +193,15 @@ class LotteryController extends GetxController {
   @override
   void onClose() {
     _blackoutTimer?.cancel();
+    _locationTimer?.cancel();
     super.onClose();
+  }
+
+  void _startLocationTimer() {
+    _locationTimer?.cancel();
+    _locationTimer = Timer.periodic(const Duration(seconds: 60), (_) {
+      LocationService.updateUserLocation();
+    });
   }
 
   void _startBlackoutTimer() {
@@ -289,6 +300,19 @@ class LotteryController extends GetxController {
           loadProfile();
           collectionRefreshTick.value = collectionRefreshTick.value + 1;
         }
+        if (endpoint.contains('/api/bets/')) {
+          loadProfile();
+          drawRefreshTick.value = drawRefreshTick.value + 1;
+        }
+        // Remittance approvals update the agent's balance — refresh AppBar.
+        if (endpoint.contains('/api/request/approve-remittance') ||
+            endpoint.contains('/api/request/disapprove-remittance') ||
+            endpoint.contains('/api/users/add-fund/remittance')) {
+          loadProfile();
+          collectionRefreshTick.value = collectionRefreshTick.value + 1;
+        } else if (endpoint.contains('/api/remittance')) {
+          collectionRefreshTick.value = collectionRefreshTick.value + 1;
+        }
         // Sold-out config changed — re-check permutations if user has digits entered
         if (endpoints.any((e) =>
             e.contains('/api/soldouts') || e.contains('/api/sold-out'))) {
@@ -315,7 +339,9 @@ class LotteryController extends GetxController {
   Future<void> loadGames() async {
     try {
       isLoading.value = true;
-      final games = await GameService.fetchGames();
+      final games = (await GameService.fetchGames())
+          .where((game) => game.isActive)
+          .toList();
       availableGames.value = games;
 
       if (games.isNotEmpty) {
@@ -435,7 +461,9 @@ class LotteryController extends GetxController {
     for (int attempt = 1; attempt <= 3; attempt++) {
       try {
         final user = await ProfileService.fetchProfile();
-        balance.value = user.balance;
+        // Display available balance net of cash_from_cashier (cash held by cashier)
+        final available = (user.balance - (user.cashFromCashier ?? 0));
+        balance.value = available;
         Get.find<AuthController>().syncCurrentUser(user);
         update();
         return;
@@ -461,13 +489,15 @@ class LotteryController extends GetxController {
 
   /// Get the list of draw times for the currently selected game
   List<DrawTime> get currentDrawTimes {
-    final drawTimes = List<DrawTime>.from(currentGame?.drawTimes ?? const []);
+    final drawTimes = List<DrawTime>.from(currentGame?.drawTimes ?? const [])
+      ..removeWhere((dt) => !dt.isActive);
     drawTimes.sort(DrawTime.compareChronologically);
     return drawTimes;
   }
 
   String getFirstAvailableDrawTimeId(Game game) {
     final drawTimes = List<DrawTime>.from(game.drawTimes)
+      ..removeWhere((dt) => !dt.isActive)
       ..sort(DrawTime.compareChronologically);
     final date = betDate.value;
     return drawTimes
@@ -1396,6 +1426,7 @@ class LotteryController extends GetxController {
       // draw. Tries today's next draw first; if none available today, rolls
       // to tomorrow's first draw (advances bet_date for those drafts).
       final availableDrawTimes = List<DrawTime>.from(game.drawTimes)
+        ..removeWhere((dt) => !dt.isActive)
         ..sort(DrawTime.compareChronologically);
       // Tomorrow's first draw = earliest by draw_time (no cutoff check needed since it's future date).
       final tomorrowFirstDt = availableDrawTimes.cast<DrawTime?>().firstWhere(
@@ -1607,6 +1638,11 @@ class LotteryController extends GetxController {
         icon: const Icon(Icons.check_circle, color: Colors.white),
       );
 
+      // Submission is complete once the API accepted the bets. Do not keep
+      // the Submit button spinning while Bluetooth printing is in progress.
+      isLoading.value = false;
+      update();
+
       // Print tickets sequentially — one Bluetooth job at a time.
       for (final job in printQueue) {
         await _triggerPrint(
@@ -1642,26 +1678,29 @@ class LotteryController extends GetxController {
     required String drawTimeLabel,
     String drawDate = '',
   }) async {
-    // Verify saved printer reachability before attempting to print
-    final reach = await PrinterService.getSavedPrinterReachability();
-    if (reach != PrinterReachabilityStatus.reachable) {
-      Get.dialog(
-        _printerAlertDialog(
-          icon: Icons.bluetooth_disabled,
-          title: 'Printer Unavailable',
-          message: reach == PrinterReachabilityStatus.notConfigured
-              ? 'No printer configured. Please set up a Bluetooth printer to print tickets.'
-              : reach == PrinterReachabilityStatus.permissionDenied
-              ? 'Bluetooth permission denied. Please grant Bluetooth permissions in settings.'
-              : 'Saved printer is not reachable. Ensure Bluetooth is enabled and the printer is paired.',
-          actionLabel: 'Set Up Printer',
-          onAction: () {
-            Get.back();
-            Get.toNamed('/printer-settings');
-          },
-        ),
-      );
-      return;
+    // Verify saved printer reachability before attempting to print.
+    // Skipped in debug builds — no printer required during development.
+    if (!kDebugMode) {
+      final reach = await PrinterService.getSavedPrinterReachability();
+      if (reach != PrinterReachabilityStatus.reachable) {
+        Get.dialog(
+          _printerAlertDialog(
+            icon: Icons.bluetooth_disabled,
+            title: 'Printer Unavailable',
+            message: reach == PrinterReachabilityStatus.notConfigured
+                ? 'No printer configured. Please set up a Bluetooth printer to print tickets.'
+                : reach == PrinterReachabilityStatus.permissionDenied
+                ? 'Bluetooth permission denied. Please grant Bluetooth permissions in settings.'
+                : 'Saved printer is not reachable. Ensure Bluetooth is enabled and the printer is paired.',
+            actionLabel: 'Set Up Printer',
+            onAction: () {
+              Get.back();
+              Get.toNamed('/printer-settings');
+            },
+          ),
+        );
+        return;
+      }
     }
 
     // Show user-facing "Printing Ticket…" feedback immediately

@@ -6,6 +6,7 @@ class User {
   final DateTime createdAt;
   final String phoneNumber;
   final double balance;
+  final double cashFromCashier;
   final bool isActive;
   final bool isBlocked;
   final double winningsAmount;
@@ -22,6 +23,7 @@ class User {
     required this.createdAt,
     required this.phoneNumber,
     required this.balance,
+    required this.cashFromCashier,
     required this.isActive,
     required this.isBlocked,
     required this.winningsAmount,
@@ -42,6 +44,7 @@ class User {
       ),
       phoneNumber: json['phone_number'] ?? '',
       balance: (json['balance'] ?? 0).toDouble(),
+      cashFromCashier: (json['cash_from_cashier'] ?? 0).toDouble(),
       isActive: json['is_active'] ?? false,
       isBlocked: json['is_blocked'] ?? false,
       winningsAmount: (json['winnings_amount'] ?? 0).toDouble(),
@@ -68,6 +71,7 @@ class User {
       'area_name': areaName,
       'cluster_name': clusterName,
       'agent_no': agentNo,
+      'cash_from_cashier': cashFromCashier,
     };
   }
 }

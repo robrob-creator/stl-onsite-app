@@ -115,6 +115,16 @@ class TicketService {
     throw Exception('Failed to load tickets after retries');
   }
 
+  /// Pure local check — no network. Returns decoded value if it looks like a
+  /// valid STL ticket (starts with TKT- or is a UUID), null otherwise.
+  static String? tryDecodeValidQr(String raw) {
+    final decoded = QrCryptoService.decrypt(raw.trim());
+    if (decoded.startsWith('TKT-') || _uuidPattern.hasMatch(decoded)) {
+      return decoded;
+    }
+    return null;
+  }
+
   static Future<String> resolveScannedTicketNumber(String scannedValue) async {
     final trimmedValue = QrCryptoService.decrypt(scannedValue.trim());
     if (trimmedValue.isEmpty || !_uuidPattern.hasMatch(trimmedValue)) {
