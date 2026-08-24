@@ -1026,6 +1026,33 @@ class _BetEntryPageState extends State<BetEntryPage> {
                                             ctrl.selectedTime.value =
                                                 drawTime.id;
                                             ctrl.update();
+                                            // Re-check availability against new draw time
+                                            final digs = _lottoNumbers
+                                                .split(',')
+                                                .where((d) => d.isNotEmpty)
+                                                .toList();
+                                            if (digs.isNotEmpty) {
+                                              final cartBets = <Map<String, dynamic>>[];
+                                              for (final d in ctrl.draftBets) {
+                                                if (d.straightBetAmount > 0) {
+                                                  cartBets.add({
+                                                    'digits': d.digits,
+                                                    'amount': d.straightBetAmount.toInt(),
+                                                    'bet_type': 'straight',
+                                                  });
+                                                }
+                                                if (d.rambleBetAmount > 0) {
+                                                  cartBets.add({
+                                                    'digits': d.digits,
+                                                    'amount': d.rambleBetAmount.toInt(),
+                                                    'bet_type': 'rambol',
+                                                  });
+                                                }
+                                              }
+                                              ctrl.fetchPermutations(digs, cartBets: cartBets);
+                                            } else {
+                                              ctrl.permAvailability.value = null;
+                                            }
                                           },
                                           child: Container(
                                             padding: const EdgeInsets.symmetric(
