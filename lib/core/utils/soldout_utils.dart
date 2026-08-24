@@ -409,8 +409,10 @@ List<BetAvailabilityResult> checkAvailability({
         : null;
 
     final targetRequestAmount = requestTargetByExact[exactMapKey] ?? 0;
+    // exactRemaining == 0 means fully sold out — block regardless of entered amount
     final targetAllowed =
-        exactRemaining == null || targetRequestAmount <= exactRemaining;
+        exactRemaining == null ||
+        (exactRemaining > 0 && targetRequestAmount <= exactRemaining);
 
     final rambolAmountError = bet.betType == BetType.rambol
         ? validateRambolAmount(
@@ -518,9 +520,10 @@ bool canSkipAvailabilityCheck({
   required bool hasSoldOutEntry,
   required double? gameSoldOutAmount,
 }) {
+  // gameSoldOutAmount == 0 means fully blocked — never skip
   return cacheReady &&
       !hasSoldOutEntry &&
-      (gameSoldOutAmount == null || gameSoldOutAmount == 0);
+      gameSoldOutAmount == null;
 }
 
 // ─── Balance (Integer Cents) ──────────────────────────────────────────────────
