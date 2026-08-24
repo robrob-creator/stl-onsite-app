@@ -1372,10 +1372,17 @@ class _BetEntryPageState extends State<BetEntryPage> {
                                         child: Obx(() {
                                           final perm =
                                               ctrl.permAvailability.value;
-                                          final rambolBlocked =
-                                              perm != null &&
-                                              (perm.rambolDisabled ||
-                                                  !perm.rambol.allowed);
+                                          // Pompyang: all digits identical (e.g. 22, 333) → only 1 permutation, no rambol possible
+                                          final digs = _lottoNumbers
+                                              .split(',')
+                                              .where((d) => d.isNotEmpty)
+                                              .toList();
+                                          final isPompyang = digs.length >= 2 &&
+                                              digs.toSet().length == 1;
+                                          final rambolBlocked = isPompyang ||
+                                              (perm != null &&
+                                                  (perm.rambolDisabled ||
+                                                      !perm.rambol.allowed));
                                           return Column(
                                             crossAxisAlignment:
                                                 CrossAxisAlignment.start,
@@ -1403,7 +1410,9 @@ class _BetEntryPageState extends State<BetEntryPage> {
                                                         bottom: 6,
                                                       ),
                                                   child: Text(
-                                                    'Rambol sold out — a permutation is blocked',
+                                                    isPompyang
+                                                        ? 'Rambol not available — all digits identical (pompyang)'
+                                                        : 'Rambol sold out — a permutation is blocked',
                                                     style: TextStyle(
                                                       fontSize: 11,
                                                       color: Colors.red[400],
