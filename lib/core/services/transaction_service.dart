@@ -7,8 +7,8 @@ import '../app_constants.dart';
 import '../utils/manila_time.dart';
 
 class TransactionService {
-  static const String _baseUrl = '${AppConstants.apiBaseUrl}/transactions';
-  static const String _ticketsBaseUrl = '${AppConstants.apiBaseUrl}/tickets';
+  static String get _baseUrl => '${AppConstants.apiBaseUrl}/transactions';
+  static String get _ticketsBaseUrl => '${AppConstants.apiBaseUrl}/tickets';
 
   static String _formatDate(DateTime date) {
     final y = date.year.toString();

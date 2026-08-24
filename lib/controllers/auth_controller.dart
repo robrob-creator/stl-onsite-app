@@ -29,7 +29,7 @@ class AuthController extends GetxController {
   late DeviceInfoPlugin _deviceInfo;
   static const _androidId = AndroidId();
 
-  static const String baseUrl = '${AppConstants.apiBaseUrl}/auth';
+  static String get baseUrl => '${AppConstants.apiBaseUrl}/auth';
 
   // Secure storage keys
   static const String _tokenKey = 'auth_token';

@@ -158,7 +158,7 @@ class LiveDrawResult {
 }
 
 class DrawResultsService {
-  static const String _baseUrl = '${AppConstants.apiBaseUrl}/draw-results';
+  static String get _baseUrl => '${AppConstants.apiBaseUrl}/draw-results';
 
   static Future<List<LiveDrawResult>> getLatestResults({
     String? drawDate,

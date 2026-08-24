@@ -6,7 +6,7 @@ import '../../controllers/auth_controller.dart';
 import '../app_constants.dart';
 
 class ProfileService {
-  static const String baseUrl = '${AppConstants.apiBaseUrl}/auth/profile';
+  static String get baseUrl => '${AppConstants.apiBaseUrl}/auth/profile';
 
   /// Fetch user profile
   static Future<User> fetchProfile() async {

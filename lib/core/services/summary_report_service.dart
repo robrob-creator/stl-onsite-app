@@ -6,7 +6,7 @@ import 'package:onstite/models/summary_report.dart';
 import '../app_constants.dart';
 
 class SummaryReportService {
-  static const String baseUrl = '${AppConstants.apiBaseUrl}/reports/summary';
+  static String get baseUrl => '${AppConstants.apiBaseUrl}/reports/summary';
 
   static Future<SummaryReportModel> fetchSummaryReport({
     required String date,

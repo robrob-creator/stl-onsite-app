@@ -5,7 +5,7 @@ import '../../controllers/auth_controller.dart';
 import '../app_constants.dart';
 
 class DrawTimeService {
-  static const String baseUrl = '${AppConstants.apiBaseUrl}/draw-times';
+  static String get baseUrl => '${AppConstants.apiBaseUrl}/draw-times';
 
   /// Fetch all active draw times from the backend
   static Future<List<DrawTimeData>> fetchDrawTimes() async {

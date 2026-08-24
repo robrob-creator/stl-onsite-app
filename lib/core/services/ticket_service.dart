@@ -7,7 +7,7 @@ import '../app_constants.dart';
 import 'qr_crypto_service.dart';
 
 class TicketService {
-  static const String baseUrl = '${AppConstants.apiBaseUrl}/tickets';
+  static String get baseUrl => '${AppConstants.apiBaseUrl}/tickets';
   static final RegExp _uuidPattern = RegExp(
     r'^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-5][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}$',
   );

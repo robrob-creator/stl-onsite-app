@@ -8,7 +8,7 @@ import '../../models/claim.dart';
 import '../app_constants.dart';
 
 class ClaimsService {
-  static const String _baseUrl = '${AppConstants.apiBaseUrl}/claims';
+  static String get _baseUrl => '${AppConstants.apiBaseUrl}/claims';
 
   /// Fetch claims for the authenticated agent within a date range.
   /// Scoped to the agent's own bets via maker_id.

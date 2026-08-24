@@ -8,7 +8,7 @@ import '../../models/collection.dart';
 import '../app_constants.dart';
 
 class CollectionsService {
-  static const String _baseUrl = '${AppConstants.apiBaseUrl}/collections';
+  static String get _baseUrl => '${AppConstants.apiBaseUrl}/collections';
 
   /// Fetch collections for the authenticated agent within an optional
   /// `[startDate, endDate]` window. Backend auto-scopes results to the caller

@@ -6,7 +6,7 @@ import 'package:onstite/models/eod_report.dart';
 import '../app_constants.dart';
 
 class EodReportService {
-  static const String baseUrl = '${AppConstants.apiBaseUrl}/reports/eod';
+  static String get baseUrl => '${AppConstants.apiBaseUrl}/reports/eod';
 
   static Future<EodReportModel> fetchEodReport({
     required String makerId,

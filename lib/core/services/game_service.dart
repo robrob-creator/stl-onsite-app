@@ -4,7 +4,7 @@ import '../../models/game.dart';
 import '../app_constants.dart';
 
 class GameService {
-  static const String baseUrl = '${AppConstants.apiBaseUrl}/games';
+  static String get baseUrl => '${AppConstants.apiBaseUrl}/games';
 
   /// Fetch all available games from the backend
   static Future<List<Game>> fetchGames() async {
