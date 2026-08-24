@@ -1,12 +1,21 @@
-import 'package:flutter/foundation.dart';
+import 'package:get_storage/get_storage.dart';
 
 class AppConstants {
   AppConstants._();
 
-  static const String apiBaseUrl = 'https://juan-taya.live/stl/api';
+  static const String _storageKey = 'selected_env_url';
 
-  // A lightweight client-facing ping URL (GET) that returns 200 when the
-  // backend is reachable. Clients should use this for quick reachability checks
-  // instead of probing the base URL which can return 404 for some setups.
-  static const String apiPing = '$apiBaseUrl/ping';
+  static const String envStaging = 'https://staging.4play.com.co/api';
+  static const String envProduction = 'https://api.4play.com.co/api';
+
+  static String get apiBaseUrl {
+    final stored = GetStorage().read<String>(_storageKey);
+    return stored ?? envStaging;
+  }
+
+  static void setEnvironment(String url) {
+    GetStorage().write(_storageKey, url);
+  }
+
+  static String get apiPing => '$apiBaseUrl/ping';
 }

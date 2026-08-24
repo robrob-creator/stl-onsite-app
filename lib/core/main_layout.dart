@@ -11,6 +11,7 @@ import '../controllers/auth_controller.dart';
 import '../controllers/live_draw_controller.dart';
 import 'services/websocket_service.dart';
 import 'utils/manila_time.dart';
+import 'app_constants.dart';
 
 /// Main layout widget with AppBar and BottomNavigationBar
 class MainLayout extends StatefulWidget {
@@ -194,12 +195,15 @@ class _MainLayoutState extends State<MainLayout> {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    // Logo
+                    // Logo — long press to switch environment
                     Row(
                       children: [
-                        Image.asset(
-                          'assets/images/logos/4play-tech.png',
-                          width: MediaQuery.of(context).size.width * 0.5,
+                        GestureDetector(
+                          onLongPress: _showEnvDialog,
+                          child: Image.asset(
+                            'assets/images/logos/4play-tech.png',
+                            width: MediaQuery.of(context).size.width * 0.5,
+                          ),
                         ),
                       ],
                     ),
@@ -598,6 +602,57 @@ class _MainLayoutState extends State<MainLayout> {
     );
   }
 
+  void _showEnvDialog() {
+    String selected = AppConstants.apiBaseUrl;
+    showDialog(
+      context: context,
+      builder: (ctx) => StatefulBuilder(
+        builder: (ctx, setState) => AlertDialog(
+          title: const Text('Select Environment'),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              _EnvOption(
+                label: 'Staging',
+                subtitle: AppConstants.envStaging,
+                value: AppConstants.envStaging,
+                selected: selected,
+                onTap: () => setState(() => selected = AppConstants.envStaging),
+              ),
+              _EnvOption(
+                label: 'Production',
+                subtitle: AppConstants.envProduction,
+                value: AppConstants.envProduction,
+                selected: selected,
+                onTap: () => setState(() => selected = AppConstants.envProduction),
+              ),
+            ],
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(ctx).pop(),
+              child: const Text('Cancel'),
+            ),
+            TextButton(
+              onPressed: () {
+                AppConstants.setEnvironment(selected);
+                Navigator.of(ctx).pop();
+                Get.find<AuthController>().logout();
+                Get.snackbar(
+                  'Environment Changed',
+                  'Switched to ${selected.contains('staging') ? 'Staging' : 'Production'}. Please log in again.',
+                  snackPosition: SnackPosition.BOTTOM,
+                  duration: const Duration(seconds: 3),
+                );
+              },
+              child: const Text('Apply', style: TextStyle(color: Colors.blue)),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
   void _showLogoutDialog(AuthController authCtrl) {
     showDialog(
       context: context,
@@ -617,6 +672,53 @@ class _MainLayoutState extends State<MainLayout> {
             child: const Text('Logout', style: TextStyle(color: Colors.red)),
           ),
         ],
+      ),
+    );
+  }
+}
+
+class _EnvOption extends StatelessWidget {
+  final String label;
+  final String subtitle;
+  final String value;
+  final String selected;
+  final VoidCallback onTap;
+
+  const _EnvOption({
+    required this.label,
+    required this.subtitle,
+    required this.value,
+    required this.selected,
+    required this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final isSelected = value == selected;
+    return InkWell(
+      onTap: onTap,
+      borderRadius: BorderRadius.circular(8),
+      child: Padding(
+        padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 4),
+        child: Row(
+          children: [
+            Icon(
+              isSelected ? Icons.radio_button_checked : Icons.radio_button_off,
+              color: isSelected ? Colors.blue : Colors.grey,
+              size: 20,
+            ),
+            const SizedBox(width: 10),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(label, style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 14)),
+                  Text(subtitle, style: const TextStyle(fontSize: 11, color: Colors.grey)),
+                ],
+              ),
+            ),
+          ],
+        ),
       ),
     );
   }
