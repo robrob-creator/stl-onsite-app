@@ -78,7 +78,7 @@ class ReceiptPage extends StatelessWidget {
                 children: [
                   _buildReceiptRow(
                     'Batch ID:',
-                    batchId.substring(0, 8) + '...',
+                    '${batchId.substring(0, 8)}...',
                   ),
                   _buildReceiptRow(
                     'Transaction ID:',
@@ -289,17 +289,20 @@ class ReceiptPage extends StatelessWidget {
                           final debit =
                               (ledger['debit'] as num?)?.toStringAsFixed(2) ??
                               '0.00';
-                          final runningBalance =
-                              (ledger['running_balance'] as num?)
-                                  ?.toStringAsFixed(2) ??
-                              '0.00';
+                          final runningBalanceNum =
+                              (ledger['running_balance'] as num?)?.toDouble() ??
+                              0.0;
+                          final isNegativeBalance = runningBalanceNum < 0;
+                          final runningBalanceDisplay = isNegativeBalance
+                              ? '- ₱${runningBalanceNum.abs().toStringAsFixed(2)}'
+                              : '₱${runningBalanceNum.toStringAsFixed(2)}';
 
                           return DataRow(
                             cells: [
                               DataCell(
                                 Text(
                                   description.length > 20
-                                      ? description.substring(0, 20) + '...'
+                                      ? '${description.substring(0, 20)}...'
                                       : description,
                                   style: const TextStyle(fontSize: 11),
                                 ),
@@ -312,8 +315,12 @@ class ReceiptPage extends StatelessWidget {
                               ),
                               DataCell(
                                 Text(
-                                  '₱$runningBalance',
-                                  style: const TextStyle(fontSize: 11),
+                                  runningBalanceDisplay,
+                                  style: TextStyle(
+                                    fontSize: 11,
+                                    color: isNegativeBalance ? Colors.red : null,
+                                    fontWeight: isNegativeBalance ? FontWeight.bold : FontWeight.normal,
+                                  ),
                                 ),
                               ),
                             ],

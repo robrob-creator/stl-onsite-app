@@ -12,7 +12,7 @@ class LottoNumberInput extends StatefulWidget {
   onLastNumberEntered; // Callback when last number is entered
 
   const LottoNumberInput({
-    Key? key,
+    super.key,
     required this.gameType,
     required this.numberOfCombinations,
     required this.minNumber,
@@ -20,7 +20,7 @@ class LottoNumberInput extends StatefulWidget {
     required this.onChanged,
     this.initialValue = '',
     this.onLastNumberEntered,
-  }) : super(key: key);
+  });
 
   @override
   State<LottoNumberInput> createState() => _LottoNumberInputState();
@@ -49,15 +49,14 @@ class _LottoNumberInputState extends State<LottoNumberInput> {
     _maxValue = widget.maxNumber;
     _digitsPerCell = widget.maxNumber.toString().length;
 
+    final initParts = widget.initialValue.contains(',')
+        ? widget.initialValue.split(',')
+        : <String>[];
+
     _controllers = List.generate(
       _cellCount,
       (index) => TextEditingController(
-        text: widget.initialValue.length > index * _digitsPerCell
-            ? widget.initialValue.substring(
-                index * _digitsPerCell,
-                (index + 1) * _digitsPerCell,
-              )
-            : '',
+        text: initParts.length > index ? initParts[index] : '',
       ),
     );
 
@@ -112,14 +111,18 @@ class _LottoNumberInputState extends State<LottoNumberInput> {
       }
     }
 
-    // Auto-move to next cell when full, or trigger callback for last cell
-    if (currentLength == _digitsPerCell) {
+    // Auto-move to next cell when full, or trigger callback for last cell.
+    // Only act when the cell newly reaches full length (not when editing existing value).
+    if (currentLength == _digitsPerCell && previousLength < _digitsPerCell) {
       if (index < _cellCount - 1) {
         FocusScope.of(context).requestFocus(_focusNodes[index + 1]);
       } else if (index == _cellCount - 1) {
-        // Last cell is filled, trigger callback
+        // Last cell newly completed — unfocus then hand off to parent
         if (widget.onLastNumberEntered != null) {
-          Future.microtask(() => widget.onLastNumberEntered!());
+          Future.microtask(() {
+            _focusNodes[index].unfocus();
+            widget.onLastNumberEntered!();
+          });
         }
       }
     }
@@ -129,11 +132,7 @@ class _LottoNumberInputState extends State<LottoNumberInput> {
   }
 
   void _notifyChange() {
-    // Pad each field with leading zeros to match digitsPerCell
-    String result = _controllers
-        .map((c) => c.text.padLeft(_digitsPerCell, '0'))
-        .join();
-    widget.onChanged(result);
+    widget.onChanged(_controllers.map((c) => c.text).join(','));
   }
 
   @override
@@ -226,6 +225,9 @@ class _LottoNumberInputState extends State<LottoNumberInput> {
           fontWeight: FontWeight.bold,
           color: const Color(0xFF2563EB),
         ),
+        onTap: () {
+          FocusScope.of(context).requestFocus(_focusNodes[index]);
+        },
         inputFormatters: [
           FilteringTextInputFormatter.digitsOnly,
           LengthLimitingTextInputFormatter(_digitsPerCell),

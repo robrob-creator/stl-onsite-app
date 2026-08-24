@@ -143,16 +143,19 @@ class _ReceiptModalState extends State<ReceiptModal> {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.center,
                 children: [
-                  // Handle bar
+                  // Handle bar (compact)
                   Padding(
-                    padding: const EdgeInsets.all(24),
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 16,
+                      vertical: 12,
+                    ),
                     child: Column(
                       children: [
                         Center(
                           child: Container(
                             width: 40,
                             height: 4,
-                            margin: const EdgeInsets.only(bottom: 20),
+                            margin: const EdgeInsets.only(bottom: 8),
                             decoration: BoxDecoration(
                               color: Colors.grey[400],
                               borderRadius: BorderRadius.circular(2),
@@ -160,27 +163,27 @@ class _ReceiptModalState extends State<ReceiptModal> {
                           ),
                         ),
 
-                        // Logo
+                        // Logo (smaller)
                         Image.asset(
                           'assets/images/logos/logo.png',
-                          width: 100,
-                          height: 100,
+                          width: 64,
+                          height: 64,
                         ),
 
-                        const SizedBox(height: 16),
+                        const SizedBox(height: 8),
 
-                        // Title
+                        // Title (smaller)
                         const Text(
                           'OFFICIAL RECEIPT',
                           style: TextStyle(
-                            fontSize: 20,
+                            fontSize: 16,
                             fontWeight: FontWeight.bold,
                             color: Colors.black,
                           ),
                           textAlign: TextAlign.center,
                         ),
 
-                        const SizedBox(height: 12),
+                        const SizedBox(height: 8),
 
                         // Dashed line
                         SizedBox(
@@ -189,9 +192,9 @@ class _ReceiptModalState extends State<ReceiptModal> {
                           child: CustomPaint(painter: DashedLinePainter()),
                         ),
 
-                        const SizedBox(height: 20),
+                        const SizedBox(height: 8),
 
-                        // Receipt Info
+                        // Receipt Info (compact spacing)
                         SizedBox(
                           width: double.infinity,
                           child: Column(
@@ -210,7 +213,7 @@ class _ReceiptModalState extends State<ReceiptModal> {
                           ),
                         ),
 
-                        const SizedBox(height: 20),
+                        const SizedBox(height: 12),
 
                         // Bets Table
                         SizedBox(
@@ -273,7 +276,9 @@ class _ReceiptModalState extends State<ReceiptModal> {
                               // Bet rows
                               ...widget.submittedBets.map((bet) {
                                 final digits =
-                                    (bet.digits as List?)?.join('-') ?? '';
+                                    (bet.digits as List?)
+                                        ?.map((d) => int.tryParse(d.toString())?.toString() ?? d.toString())
+                                        .join('-') ?? '';
                                 return TableRow(
                                   children: [
                                     Padding(
@@ -308,7 +313,7 @@ class _ReceiptModalState extends State<ReceiptModal> {
                                     ),
                                   ],
                                 );
-                              }).toList(),
+                              }),
                               // Total row
                               TableRow(
                                 children: [
@@ -395,39 +400,45 @@ class _ReceiptModalState extends State<ReceiptModal> {
 
                         const SizedBox(height: 20),
 
-                        // QR Code
+                        // QR Code (compact)
                         Container(
-                          padding: const EdgeInsets.symmetric(vertical: 20),
-                          child: Column(
+                          padding: const EdgeInsets.symmetric(vertical: 4),
+                          child: Row(
+                            mainAxisAlignment: MainAxisAlignment.center,
+                            crossAxisAlignment: CrossAxisAlignment.start,
                             children: [
-                              // Batch ID QR Code
+                              // Batch ID QR Column
                               Column(
                                 children: [
                                   Text(
                                     'BATCH QR',
                                     style: TextStyle(
                                       color: Colors.grey[600],
-                                      fontSize: 12,
+                                      fontSize: 11,
                                       fontWeight: FontWeight.bold,
                                     ),
                                   ),
-                                  const SizedBox(height: 8),
+                                  const SizedBox(height: 6),
                                   Container(
-                                    padding: const EdgeInsets.all(8),
+                                    padding: const EdgeInsets.all(4),
                                     decoration: BoxDecoration(
                                       border: Border.all(color: Colors.black),
-                                      borderRadius: BorderRadius.circular(12),
+                                      borderRadius: BorderRadius.circular(6),
                                     ),
-                                    child: ClipRRect(
-                                      borderRadius: BorderRadius.circular(8),
-                                      child: PrettyQrView.data(
-                                        data: widget.batchId,
-                                        errorCorrectLevel:
-                                            QrErrorCorrectLevel.Q,
+                                    child: SizedBox(
+                                      width: 64,
+                                      height: 64,
+                                      child: ClipRRect(
+                                        borderRadius: BorderRadius.circular(4),
+                                        child: PrettyQrView.data(
+                                          data: widget.batchId,
+                                          errorCorrectLevel:
+                                              QrErrorCorrectLevel.Q,
+                                        ),
                                       ),
                                     ),
                                   ),
-                                  const SizedBox(height: 8),
+                                  const SizedBox(height: 6),
                                   Text(
                                     'Batch ID: ${widget.batchId.substring(0, 8)}...',
                                     style: TextStyle(
@@ -438,59 +449,64 @@ class _ReceiptModalState extends State<ReceiptModal> {
                                 ],
                               ),
 
-                              const SizedBox(height: 24),
+                              // Spacer between QR codes
+                              const SizedBox(width: 16),
 
-                              // Ticket ID QR Code
+                              // Ticket No QR Column (if present) — use ticket number (ticket_no)
                               if (widget.submittedBets.isNotEmpty &&
-                                  widget.submittedBets[0].ticketId != null)
+                                  widget.submittedBets[0].ticketNo != null)
                                 Column(
                                   children: [
                                     Text(
                                       'TICKET QR',
                                       style: TextStyle(
                                         color: Colors.grey[600],
-                                        fontSize: 12,
+                                        fontSize: 11,
                                         fontWeight: FontWeight.bold,
                                       ),
                                     ),
-                                    const SizedBox(height: 8),
+                                    const SizedBox(height: 6),
                                     GestureDetector(
                                       onTap: () => _createClaimForTicket(
-                                        widget.submittedBets[0].ticketId!,
+                                        widget.submittedBets[0].ticketNo!,
                                       ),
                                       child: Container(
-                                        padding: const EdgeInsets.all(8),
+                                        padding: const EdgeInsets.all(4),
                                         decoration: BoxDecoration(
                                           border: Border.all(
                                             color: Colors.green,
                                           ),
                                           borderRadius: BorderRadius.circular(
-                                            12,
+                                            6,
                                           ),
                                         ),
-                                        child: ClipRRect(
-                                          borderRadius: BorderRadius.circular(
-                                            8,
-                                          ),
-                                          child: PrettyQrView.data(
-                                            data: widget
-                                                .submittedBets[0]
-                                                .ticketId!,
-                                            errorCorrectLevel:
-                                                QrErrorCorrectLevel.Q,
+                                        child: SizedBox(
+                                          width: 64,
+                                          height: 64,
+                                          child: ClipRRect(
+                                            borderRadius: BorderRadius.circular(
+                                              4,
+                                            ),
+                                            child: PrettyQrView.data(
+                                              data: widget
+                                                  .submittedBets[0]
+                                                  .ticketNo!,
+                                              errorCorrectLevel:
+                                                  QrErrorCorrectLevel.Q,
+                                            ),
                                           ),
                                         ),
                                       ),
                                     ),
-                                    const SizedBox(height: 8),
+                                    const SizedBox(height: 6),
                                     Text(
-                                      'Ticket ID: ${widget.submittedBets[0].ticketId!.substring(0, 8)}...',
+                                      'Ticket No: ${widget.submittedBets[0].ticketNo!.substring(0, 8)}...',
                                       style: TextStyle(
                                         color: Colors.grey[600],
                                         fontSize: 10,
                                       ),
                                     ),
-                                    const SizedBox(height: 8),
+                                    const SizedBox(height: 4),
                                     Text(
                                       'Tap QR to create claim',
                                       style: TextStyle(
@@ -508,7 +524,7 @@ class _ReceiptModalState extends State<ReceiptModal> {
                     ),
                   ),
 
-                  const SizedBox(height: 20),
+                  const SizedBox(height: 12),
 
                   // Action Buttons
                   Row(

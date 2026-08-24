@@ -2,15 +2,16 @@ import 'package:flutter/material.dart';
 import 'package:get/get.dart';
 import 'package:onstite/core/design_system.dart';
 import 'package:permission_handler/permission_handler.dart';
+import 'package:print_bluetooth_thermal/print_bluetooth_thermal.dart';
 import '../../../core/main_layout.dart';
 import '../../../controllers/lottery_controller.dart';
 import '../../../core/services/printer_service.dart';
+import '../../../controllers/live_draw_controller.dart';
 import 'bet_entry_page.dart';
 import 'transaction_page.dart';
 import 'dashboard_page.dart';
 import 'ticket_page.dart';
 import 'claim_page.dart';
-import 'live_page.dart';
 
 class HomePage extends StatefulWidget {
   const HomePage({super.key});
@@ -28,10 +29,32 @@ class _HomePageState extends State<HomePage> {
     if (!Get.isRegistered<LotteryController>()) {
       Get.put(LotteryController());
     }
+    if (!Get.isRegistered<LiveDrawController>()) {
+      Get.put(LiveDrawController());
+    }
     WidgetsBinding.instance.addPostFrameCallback((_) => _checkPrinter());
   }
 
   Future<void> _checkPrinter() async {
+    // Verify Bluetooth service is enabled before printer checks
+    try {
+      final btEnabled = await PrintBluetoothThermal.bluetoothEnabled;
+      if (!btEnabled) {
+        Get.snackbar(
+          'Bluetooth Required',
+          'Bluetooth must be enabled for printer connectivity and ticket printing. Please enable Bluetooth.',
+          icon: const Icon(Icons.bluetooth_disabled, color: Colors.white),
+          backgroundColor: const Color(0xFFE53E3E),
+          colorText: Colors.white,
+          snackPosition: SnackPosition.BOTTOM,
+          duration: const Duration(seconds: 5),
+          borderRadius: 12,
+          margin: const EdgeInsets.all(16),
+        );
+        return;
+      }
+    } catch (_) {}
+
     final mac = PrinterService.savedMac;
 
     if (mac == null) {
@@ -67,28 +90,112 @@ class _HomePageState extends State<HomePage> {
     }
 
     if (reachability == PrinterReachabilityStatus.unreachable) {
-      Get.snackbar(
-        'Printer Unreachable',
-        'Could not connect to "${PrinterService.savedName ?? mac}". Make sure the printer is on and in range.',
-        icon: const Icon(Icons.bluetooth_disabled, color: Colors.white),
-        backgroundColor: const Color(0xFFE53E3E),
-        colorText: Colors.white,
-        snackPosition: SnackPosition.BOTTOM,
-        duration: const Duration(seconds: 5),
-        borderRadius: 12,
-        margin: const EdgeInsets.all(16),
-        mainButton: TextButton(
-          onPressed: () {
-            Get.closeCurrentSnackbar();
-            Get.toNamed('/printer-settings');
-          },
-          child: const Text(
-            'Settings',
-            style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold),
+      _showPrinterUnreachableDialog(mac);
+    }
+  }
+
+  void _showPrinterUnreachableDialog(String mac) {
+    final name = PrinterService.savedName ?? mac;
+    Get.dialog(
+      Dialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+        backgroundColor: Colors.white,
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(24, 32, 24, 24),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Container(
+                width: 72,
+                height: 72,
+                decoration: const BoxDecoration(
+                  color: Color(0xFFFFEBEE),
+                  shape: BoxShape.circle,
+                ),
+                child: const Icon(
+                  Icons.bluetooth_disabled,
+                  color: Color(0xFFE53E3E),
+                  size: 36,
+                ),
+              ),
+              const SizedBox(height: 20),
+              const Text(
+                'Printer Not Detected',
+                style: TextStyle(
+                  fontSize: 20,
+                  fontWeight: FontWeight.bold,
+                  color: Colors.black87,
+                ),
+              ),
+              const SizedBox(height: 12),
+              Text(
+                'Could not connect to "$name". Make sure the printer is on and in range, then reconnect.',
+                textAlign: TextAlign.center,
+                style: const TextStyle(
+                  fontSize: 14,
+                  color: Colors.black54,
+                  height: 1.4,
+                ),
+              ),
+              const SizedBox(height: 24),
+              Row(
+                children: [
+                  Expanded(
+                    child: OutlinedButton(
+                      onPressed: () => Get.back(),
+                      style: OutlinedButton.styleFrom(
+                        padding: const EdgeInsets.symmetric(vertical: 14),
+                        side: const BorderSide(
+                          color: Color(0xFF3D5A99),
+                          width: 1.5,
+                        ),
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(12),
+                        ),
+                      ),
+                      child: const Text(
+                        'Later',
+                        style: TextStyle(
+                          fontSize: 15,
+                          fontWeight: FontWeight.w600,
+                          color: Color(0xFF3D5A99),
+                        ),
+                      ),
+                    ),
+                  ),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: ElevatedButton(
+                      onPressed: () {
+                        Get.back();
+                        Get.toNamed('/printer-settings');
+                      },
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: const Color(0xFF3D5A99),
+                        padding: const EdgeInsets.symmetric(vertical: 14),
+                        elevation: 0,
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(12),
+                        ),
+                      ),
+                      child: const Text(
+                        'Connect',
+                        style: TextStyle(
+                          fontSize: 15,
+                          fontWeight: FontWeight.bold,
+                          color: Colors.white,
+                        ),
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ],
           ),
         ),
-      );
-    }
+      ),
+      barrierDismissible: false,
+    );
   }
 
   void _showNoPrinterDialog() {
@@ -195,14 +302,14 @@ class _HomePageState extends State<HomePage> {
   }
 
   String _formatAmount(double value) {
-    final intVal = value.toInt();
-    final str = intVal.toString();
+    final isNeg = value < 0;
+    final str = value.abs().toInt().toString();
     final buffer = StringBuffer();
     for (int i = 0; i < str.length; i++) {
       if (i > 0 && (str.length - i) % 3 == 0) buffer.write(',');
       buffer.write(str[i]);
     }
-    return '₱ ${buffer.toString()}';
+    return '${isNeg ? '₱ -' : '₱ '}${buffer.toString()}';
   }
 
   @override
@@ -210,11 +317,14 @@ class _HomePageState extends State<HomePage> {
     return MainLayout(
       onMenuPressed: () {},
       title: _currentIndex == 0 ? 'Dashboard' : null,
-      appBarTrailing: GetBuilder<LotteryController>(
-        builder: (ctrl) => Container(
+      appBarTrailing: Obx(() {
+        final balance = Get.find<LotteryController>().balance.value;
+        final isNegative = balance < 0;
+        final accent = isNegative ? const Color(0xFFDC2626) : AppColors.primary;
+        return Container(
           padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
           decoration: BoxDecoration(
-            color: AppColors.primary.withOpacity(0.1),
+            color: accent.withOpacity(0.1),
             borderRadius: BorderRadius.circular(10),
           ),
           child: Row(
@@ -224,21 +334,21 @@ class _HomePageState extends State<HomePage> {
                 'assets/images/icons/moneys.png',
                 width: 16,
                 height: 16,
-                color: AppColors.primary,
+                color: accent,
               ),
               const SizedBox(width: 8),
               Text(
-                _formatAmount(ctrl.balance.value),
+                _formatAmount(balance),
                 style: TextStyle(
-                  color: AppColors.primary.withOpacity(0.9),
+                  color: accent.withOpacity(0.9),
                   fontWeight: FontWeight.bold,
                   fontSize: 14,
                 ),
               ),
             ],
           ),
-        ),
-      ),
+        );
+      }),
       body: _buildBody(),
       onBottomNavTap: (index) {
         setState(() {

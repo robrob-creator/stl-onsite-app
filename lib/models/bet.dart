@@ -2,6 +2,7 @@ class Bet {
   final String? id;
   final String? agentId;
   final String drawId;
+  final String? drawTimeId;
   final String gameId;
   final String number;
   final double straightBetAmount;
@@ -34,6 +35,7 @@ class Bet {
     this.id,
     this.agentId,
     required this.drawId,
+    this.drawTimeId,
     required this.gameId,
     required this.number,
     this.straightBetAmount = 0.0,
@@ -83,6 +85,7 @@ class Bet {
       id: json['id'],
       agentId: json['agent_id'],
       drawId: json['draw_id'] ?? '',
+      drawTimeId: json['draw_time_id'] as String?,
       gameId: json['game_id'] ?? '',
       number: json['number'] ?? '',
       straightBetAmount: (json['straight_bet_amount'] ?? 0).toDouble(),
@@ -118,6 +121,7 @@ class Bet {
       'id': id,
       'agent_id': agentId,
       'draw_id': drawId,
+      'draw_time_id': drawTimeId,
       'game_id': gameId,
       'number': number,
       'straight_bet_amount': straightBetAmount,

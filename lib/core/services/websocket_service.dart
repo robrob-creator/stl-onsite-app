@@ -9,10 +9,11 @@ import '../app_constants.dart';
 ///
 /// Connect with [connect] after login. Disconnect with [disconnect] on logout.
 /// Subscribe to typed events via [on].
-class WebSocketService extends GetxController {
+class WebSocketService extends GetxController with WidgetsBindingObserver {
   WebSocket? _socket;
   Timer? _reconnectTimer;
   bool _intentionalDisconnect = false;
+  String? _token;
 
   // Minimum delay before first reconnect attempt; doubles each retry up to [_maxReconnectDelay].
   static const Duration _initialReconnectDelay = Duration(seconds: 3);
@@ -45,8 +46,36 @@ class WebSocketService extends GetxController {
 
   // ── Public API ────────────────────────────────────────────────────────────
 
+  @override
+  void onInit() {
+    super.onInit();
+    WidgetsBinding.instance.addObserver(this);
+  }
+
+  @override
+  void onClose() {
+    WidgetsBinding.instance.removeObserver(this);
+    _reconnectTimer?.cancel();
+    _socket?.close();
+    super.onClose();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed) {
+      final t = _token;
+      if (t != null && !_intentionalDisconnect && !isConnected.value) {
+        print('✓ WebSocket app resumed — reconnecting immediately');
+        _reconnectDelay = _initialReconnectDelay;
+        _reconnectTimer?.cancel();
+        _connect(t);
+      }
+    }
+  }
+
   /// Open the WebSocket connection using [token] for authentication.
   Future<void> connect(String token) async {
+    _token = token;
     _intentionalDisconnect = false;
     _reconnectTimer?.cancel();
     await _connect(token);
@@ -59,10 +88,15 @@ class WebSocketService extends GetxController {
     await _socket?.close();
     _socket = null;
     isConnected.value = false;
+    _listeners.clear();
     print('✓ WebSocket disconnected');
   }
 
   /// Register a listener for a specific event type.
+  ///
+  /// Use '*' to receive all events (wildcard). Wildcard listeners will receive
+  /// the original payload with an additional key `_eventType` containing the
+  /// event type string.
   ///
   /// Returns a function that removes the listener when called.
   VoidCallback on(
@@ -110,10 +144,32 @@ class WebSocketService extends GetxController {
       if (type == null) return;
 
       print('✓ WebSocket event: $type');
+
+      // Exact-match listeners
       final callbacks = _listeners[type];
       if (callbacks != null) {
         for (final cb in List.of(callbacks)) {
-          cb(payload);
+          try {
+            cb(payload);
+          } catch (e) {
+            print('✗ WebSocket listener error for $type: $e');
+          }
+        }
+      }
+
+      // Wildcard listeners registered under '*' receive every event and are
+      // given the payload augmented with `_eventType` to allow listeners to
+      // inspect the original event type.
+      final wildcard = _listeners['*'];
+      if (wildcard != null) {
+        final augmented = Map<String, dynamic>.from(payload);
+        augmented['_eventType'] = type;
+        for (final cb in List.of(wildcard)) {
+          try {
+            cb(augmented);
+          } catch (e) {
+            print('✗ WebSocket wildcard listener error for $type: $e');
+          }
         }
       }
     } catch (e) {
@@ -148,10 +204,4 @@ class WebSocketService extends GetxController {
     });
   }
 
-  @override
-  void onClose() {
-    _reconnectTimer?.cancel();
-    _socket?.close();
-    super.onClose();
-  }
 }

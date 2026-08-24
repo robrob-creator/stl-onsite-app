@@ -1,8 +1,12 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
+import 'package:get/get.dart';
+import 'package:intl/intl.dart';
 import 'package:webview_flutter/webview_flutter.dart';
 import '../../core/design_system.dart';
 import '../../core/services/draw_time_service.dart';
+import '../../core/services/game_service.dart';
+import '../../core/services/websocket_service.dart';
 
 class LivePage extends StatefulWidget {
   const LivePage({super.key});
@@ -14,20 +18,127 @@ class LivePage extends StatefulWidget {
 class _LivePageState extends State<LivePage> {
   static const _preWindow = Duration(minutes: 10);
   static const _postWindow = Duration(hours: 1);
+  static const _manilaOffset = Duration(hours: 8);
 
-  // Draw schedule fetched from API
-  List<Map<String, int>> _schedule = [];
-
+  List<DrawTimeData> _schedule = [];
   DateTime? _nextDraw;
+  int? _liveScheduleIndex;
+  int? _nextScheduleIndex;
   String _timeLeft = '';
   bool _isLive = false;
   Timer? _timer;
-  WebViewController? _webViewController;
+
+  late final WebViewController _webController;
+  bool _videoError = false;
+
+  // Load the channel's live page directly — YouTube's own mobile page picks
+  // the current live video and renders it in its native player. Avoids the
+  // deprecated `/embed/live_stream?channel=X` endpoint that returned 152-4
+  // and the fragile runtime video-ID lookup that CORS-blocked in the webview.
+  static const _pcsoLiveUrl =
+      'https://www.youtube.com/channel/UCpOm2kv1upnIFoOT7rSp6hg/live';
+
+  // Hides YouTube's mobile page chrome so only the video player is visible.
+  // Removes topbar, bottom pivot bar, comments, related videos, metadata rows,
+  // and forces the video container to fill the viewport. Re-applied on every
+  // navigation via a MutationObserver so YouTube's SPA re-renders don't
+  // reveal the hidden UI.
+  static const _hideChromeJs = r'''
+(function() {
+  if (window.__pcsoChromeHidden) return;
+  window.__pcsoChromeHidden = true;
+  var style = document.createElement('style');
+  style.id = 'pcso-hide-chrome';
+  style.textContent = `
+    html, body { background: #000 !important; margin: 0 !important; padding: 0 !important; overflow: hidden !important; }
+    ytm-mobile-topbar-renderer,
+    ytm-pivot-bar-renderer,
+    ytm-slim-video-metadata-section-renderer,
+    ytm-item-section-renderer,
+    ytm-single-column-watch-next-results-renderer,
+    ytm-video-with-context-renderer,
+    ytm-comments-entry-point-header-renderer,
+    ytm-engagement-panel-section-list-renderer,
+    ytm-reel-shelf-renderer,
+    ytm-notification-topbar-button-renderer,
+    ytm-search-box-entry-point-renderer,
+    ytm-fullscreen-heading-renderer,
+    ytm-related-chips-slot-wrapper,
+    ytm-account-header-renderer,
+    ytm-app-header,
+    header, footer,
+    .mobile-topbar-header,
+    .app-drawer,
+    #masthead,
+    #related, #comments,
+    #below, #meta {
+      display: none !important;
+      height: 0 !important;
+    }
+    ytd-player, #player, #player-container, #movie_player,
+    .html5-video-container, .html5-main-video, video {
+      position: fixed !important;
+      top: 0 !important; left: 0 !important;
+      width: 100vw !important; height: 100vh !important;
+      max-width: 100vw !important; max-height: 100vh !important;
+      z-index: 999999 !important;
+    }
+  `;
+  document.documentElement.appendChild(style);
+})();
+''';
 
   @override
   void initState() {
     super.initState();
+    // Load the channel's live page directly. This bypasses the deprecated
+    // /embed/live_stream endpoint that was returning Error 152-4 and lets
+    // YouTube's own mobile page render the current live video with its
+    // native player.
+    _webController = WebViewController()
+      ..setJavaScriptMode(JavaScriptMode.unrestricted)
+      ..setUserAgent(
+        'Mozilla/5.0 (Linux; Android 10) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Mobile Safari/537.36',
+      )
+      ..addJavaScriptChannel(
+        'VideoStatus',
+        onMessageReceived: (msg) {
+          if (!mounted) return;
+          final m = msg.message;
+          if (m.startsWith('error:')) {
+            setState(() => _videoError = true);
+          } else if (m == 'ready') {
+            setState(() => _videoError = false);
+          }
+        },
+      )
+      ..setNavigationDelegate(
+        NavigationDelegate(
+          onPageFinished: (_) async {
+            if (mounted) setState(() => _videoError = false);
+            // Strip YouTube's mobile page chrome so only the video player
+            // stays visible. Runs on every navigation because YouTube
+            // rehydrates the DOM on route changes.
+            try {
+              await _webController.runJavaScript(_hideChromeJs);
+            } catch (_) {}
+          },
+          onWebResourceError: (err) {
+            if (err.isForMainFrame == true && mounted) {
+              setState(() => _videoError = true);
+            }
+          },
+        ),
+      )
+      ..loadRequest(Uri.parse(_pcsoLiveUrl));
+
     _loadSchedule();
+    try {
+      final ws = Get.find<WebSocketService>();
+      ws.on('draw.started', (_) => _tick());
+      ws.on('draw.streaming', (_) => _tick());
+    } catch (_) {}
+
     _timer = Timer.periodic(const Duration(seconds: 1), (_) => _tick());
   }
 
@@ -37,180 +148,144 @@ class _LivePageState extends State<LivePage> {
     super.dispose();
   }
 
+
   Future<void> _loadSchedule() async {
     try {
-      final drawTimes = await DrawTimeService.fetchDrawTimes();
-      final schedule = <Map<String, int>>[];
+      // First, attempt to fetch games and extract draw times for games
+      // explicitly configured as National. This is authoritative and avoids
+      // showing multiple local draw times.
+      List<DrawTimeData> scheduleToUse = [];
+      try {
+        final games = await GameService.fetchGames();
+        final nationalGames = games.where((g) => (g.drawType).toLowerCase() == 'national' && g.isActive).toList();
 
-      for (final drawTime in drawTimes) {
-        final timeMap = drawTime.extractTime();
-        schedule.add(timeMap);
+        // Collect draw times from national games and deduplicate by id
+        final seen = <String>{};
+        for (final game in nationalGames) {
+          for (final dt in game.drawTimes) {
+            if (dt.id.isEmpty) continue;
+            if (seen.contains(dt.id)) continue;
+            seen.add(dt.id);
+            scheduleToUse.add(DrawTimeData(
+              id: dt.id,
+              drawTime: dt.drawTime,
+              cutoffMinutes: dt.cutoffMinutes,
+              isActive: dt.isActive,
+              createdAt: dt.createdAt,
+              deletedAt: dt.deletedAt,
+              drawType: 'national',
+              gameId: game.id,
+              isNational: true,
+            ));
+          }
+        }
+
+        // If we found national draw times via games, use them (sorted)
+        if (scheduleToUse.isNotEmpty) {
+          scheduleToUse.sort((a, b) {
+            final aTime = a.extractTime();
+            final bTime = b.extractTime();
+            final aMinutes = (aTime['hour'] ?? 0) * 60 + (aTime['minute'] ?? 0);
+            final bMinutes = (bTime['hour'] ?? 0) * 60 + (bTime['minute'] ?? 0);
+            return aMinutes.compareTo(bMinutes);
+          });
+        } else {
+          // Fallback: use draw times endpoint and filter by isNational flag
+          final drawTimes = await DrawTimeService.fetchDrawTimes();
+          final nationalOnly = drawTimes.where((dt) => dt.isNational).toList();
+          if (nationalOnly.isNotEmpty) {
+            scheduleToUse = nationalOnly;
+          } else {
+            // Last resort: no strong national metadata — show nothing to avoid
+            // clutter. The UI will show an empty schedule.
+            scheduleToUse = [];
+          }
+        }
+      } catch (e) {
+        debugPrint('Failed to fetch games/draw-times for national filtering: $e');
+        // On error, keep schedule empty to avoid showing incorrect local times
+        scheduleToUse = [];
       }
 
       if (mounted) {
         setState(() {
-          _schedule = schedule;
+          _schedule = scheduleToUse;
         });
-        // Trigger initial tick with updated schedule
         _tick();
       }
     } catch (e) {
       debugPrint('Error loading schedule: $e');
-      // Fall back to empty schedule or default values
     }
   }
 
   void _tick() {
-    if (_schedule.isEmpty) return;
+    if (_schedule.isEmpty || !mounted) {
+      return;
+    }
 
-    final now = DateTime.now().toUtc();
-    final nowMs = now.millisecondsSinceEpoch;
+    final manilaNow = DateTime.now().toUtc().add(_manilaOffset);
+    DateTime? liveDraw;
+    DateTime? nextDraw;
+    int? liveIndex;
+    int? nextIndex;
 
-    DateTime? found;
-
-    // First: find any draw currently within the live window
-    outer:
-    for (int dayOffset = 0; dayOffset < 7; dayOffset++) {
-      for (final s in _schedule) {
+    for (int dayOffset = 0; dayOffset < 2; dayOffset++) {
+      for (var i = 0; i < _schedule.length; i++) {
+        final timeMap = _schedule[i].extractTime();
+        // Use DateTime.utc so target and manilaNow are both UTC — avoids phone
+        // timezone offset corrupting the difference calculation.
         final target = DateTime.utc(
-          now.year,
-          now.month,
-          now.day + dayOffset,
-          s['hour']! - 8, // convert UTC+8 → UTC
-          s['minute']!,
+          manilaNow.year,
+          manilaNow.month,
+          manilaNow.day + dayOffset,
+          timeMap['hour'] ?? 0,
+          timeMap['minute'] ?? 0,
         );
-        final diff = target.millisecondsSinceEpoch - nowMs;
-        if (diff <= _preWindow.inMilliseconds &&
-            diff >= -_postWindow.inMilliseconds) {
-          found = target;
-          break outer;
+        final diff = target.difference(manilaNow);
+
+        if (liveDraw == null && diff <= _preWindow && diff >= -_postWindow) {
+          liveDraw = target;
+          liveIndex = i;
+        }
+
+        if (nextDraw == null && diff > Duration.zero) {
+          nextDraw = target;
+          nextIndex = i;
         }
       }
     }
 
-    // If not within live window, find next upcoming draw
-    if (found == null) {
-      outer:
-      for (int dayOffset = 0; dayOffset < 7; dayOffset++) {
-        for (final s in _schedule) {
-          final target = DateTime.utc(
-            now.year,
-            now.month,
-            now.day + dayOffset,
-            s['hour']! - 8,
-            s['minute']!,
-          );
-          if (target.millisecondsSinceEpoch > nowMs) {
-            found = target;
-            break outer;
-          }
-        }
-      }
-    }
-
-    if (!mounted) return;
-
-    final diff = found != null ? found.millisecondsSinceEpoch - nowMs : null;
-    final isLive =
-        diff != null &&
-        diff <= _preWindow.inMilliseconds &&
-        diff >= -_postWindow.inMilliseconds;
-
-    String timeLeft = '';
-    if (!isLive && diff != null) {
-      final total = Duration(
-        milliseconds: diff.clamp(0, double.maxFinite.toInt()),
-      );
-      final days = total.inDays;
-      final hours = total.inHours % 24;
-      final mins = total.inMinutes % 60;
-      final secs = total.inSeconds % 60;
-      final parts = <String>[];
-      if (days > 0) parts.add('${days}d');
-      if (hours > 0) parts.add('${hours}h');
-      parts.add('${mins.toString().padLeft(2, '0')}m');
-      parts.add('${secs.toString().padLeft(2, '0')}s');
-      timeLeft = parts.join(' ');
-    } else if (isLive) {
-      timeLeft = 'Live';
-    }
+    final activeDraw = liveDraw ?? nextDraw;
+    final diff = activeDraw?.difference(manilaNow);
 
     setState(() {
-      _nextDraw = found;
-      _isLive = isLive;
-      _timeLeft = timeLeft;
+      _isLive = liveDraw != null;
+      _nextDraw = activeDraw;
+      _liveScheduleIndex = liveIndex;
+      _nextScheduleIndex = nextIndex;
+      _timeLeft = liveDraw != null
+          ? 'Live now'
+          : diff == null
+          ? '—'
+          : _formatDuration(diff);
     });
-
-    // Initialize or clear webview based on live status
-    if (isLive && _webViewController == null) {
-      _initWebView();
-    } else if (!isLive && _webViewController != null) {
-      setState(() {
-        _webViewController = null;
-      });
-    }
   }
 
-  void _initWebView() {
-    const channelId = 'UCpOm2kv1upnIFoOT7rSp6hg';
-    const htmlContent =
-        '''
-<!DOCTYPE html>
-<html>
-<head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <meta name="referrer" content="origin">
-  <style>
-    * { margin: 0; padding: 0; }
-    body { width: 100%; height: 100vh; background: #000; }
-    iframe { width: 100%; height: 100%; }
-  </style>
-</head>
-<body>
-  <iframe 
-    src="https://www.youtube.com/embed/live_stream?channel=$channelId&autoplay=1&mute=1"
-    frameborder="0"
-    allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
-    allowfullscreen>
-  </iframe>
-</body>
-</html>
-    ''';
+  String _formatDuration(Duration duration) {
+    final normalized = duration.isNegative ? Duration.zero : duration;
+    final hours = normalized.inHours;
+    final minutes = normalized.inMinutes.remainder(60);
+    final seconds = normalized.inSeconds.remainder(60);
 
-    final controller = WebViewController();
-    controller
-      ..setJavaScriptMode(JavaScriptMode.unrestricted)
-      ..setBackgroundColor(Colors.black)
-      ..loadHtmlString(htmlContent, baseUrl: 'https://www.onstite.app/');
-
-    setState(() {
-      _webViewController = controller;
-    });
+    if (hours > 0) {
+      return '${hours}h ${minutes.toString().padLeft(2, '0')}m';
+    }
+    return '${minutes.toString().padLeft(2, '0')}m ${seconds.toString().padLeft(2, '0')}s';
   }
 
   String _formatNextDraw() {
     if (_nextDraw == null) return '—';
-    // Display in Asia/Manila (UTC+8); convert manually: UTC+8 = UTC + 8h
-    final pst = _nextDraw!.add(const Duration(hours: 8));
-    final months = [
-      'Jan',
-      'Feb',
-      'Mar',
-      'Apr',
-      'May',
-      'Jun',
-      'Jul',
-      'Aug',
-      'Sep',
-      'Oct',
-      'Nov',
-      'Dec',
-    ];
-    final hour = pst.hour % 12 == 0 ? 12 : pst.hour % 12;
-    final ampm = pst.hour >= 12 ? 'PM' : 'AM';
-    final mins = pst.minute.toString().padLeft(2, '0');
-    return '${months[pst.month - 1]} ${pst.day}, $hour:$mins $ampm';
+    return DateFormat('MMM d, h:mm a').format(_nextDraw!);
   }
 
   @override
@@ -298,48 +373,132 @@ class _LivePageState extends State<LivePage> {
   }
 
   Widget _buildVideoArea() {
-    return AspectRatio(
-      aspectRatio: 16 / 9,
-      child: ClipRRect(
-        borderRadius: BorderRadius.circular(12),
-        child: _isLive && _webViewController != null
-            ? WebViewWidget(controller: _webViewController!)
-            : _buildPlaceholder(),
-      ),
-    );
-  }
-
-  Widget _buildPlaceholder() {
-    return Container(
-      decoration: const BoxDecoration(
-        gradient: LinearGradient(
-          begin: Alignment.topLeft,
-          end: Alignment.bottomRight,
-          colors: [Color(0xFF111827), Color(0xFF1F2937), Color(0xFF374151)],
-        ),
-      ),
-      child: Center(
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
+    return ClipRRect(
+      borderRadius: BorderRadius.circular(12),
+      child: AspectRatio(
+        aspectRatio: 16 / 9,
+        child: Stack(
           children: [
-            _AnimatedPlayButton(),
-            const SizedBox(height: 16),
-            Text(
-              _isLive ? 'Streaming now' : 'Please stay tuned',
-              style: const TextStyle(
-                fontSize: 18,
-                fontWeight: FontWeight.w600,
-                color: Colors.white,
-              ),
+            // WebView always in tree so it loads in background
+            Opacity(
+              opacity: _videoError ? 0 : 1,
+              child: WebViewWidget(controller: _webController),
             ),
-            const SizedBox(height: 6),
-            Text(
-              _isLive
-                  ? 'Live draw is currently streaming'
-                  : 'Live draw will start shortly',
-              style: TextStyle(
-                fontSize: 13,
-                color: Colors.white.withOpacity(0.7),
+            // Placeholder when stream not live / error
+            if (_videoError)
+              Container(
+                decoration: const BoxDecoration(
+                  gradient: LinearGradient(
+                    begin: Alignment.topCenter,
+                    end: Alignment.bottomCenter,
+                    colors: [Color(0xFF1E293B), Color(0xFF0F172A)],
+                  ),
+                ),
+                child: Center(
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Container(
+                        width: 56,
+                        height: 56,
+                        decoration: BoxDecoration(
+                          color: Colors.white.withValues(alpha: 0.08),
+                          shape: BoxShape.circle,
+                        ),
+                        child: const Icon(Icons.signal_cellular_alt_rounded, color: Colors.white38, size: 28),
+                      ),
+                      const SizedBox(height: 12),
+                      const Text(
+                        'Stream Offline',
+                        style: TextStyle(color: Colors.white, fontSize: 14, fontWeight: FontWeight.w700),
+                      ),
+                      const SizedBox(height: 4),
+                      const Text(
+                        'PCSO live draw will appear here\nwhen the stream goes live.',
+                        textAlign: TextAlign.center,
+                        style: TextStyle(color: Colors.white38, fontSize: 11, height: 1.5),
+                      ),
+                      const SizedBox(height: 14),
+                      Row(
+                        mainAxisAlignment: MainAxisAlignment.center,
+                        children: [
+                          GestureDetector(
+                            onTap: () {
+                              setState(() => _videoError = false);
+                              _webController.loadRequest(Uri.parse(_pcsoLiveUrl));
+                            },
+                            child: Container(
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 20,
+                                vertical: 8,
+                              ),
+                              decoration: BoxDecoration(
+                                color: Colors.white.withValues(alpha: 0.1),
+                                borderRadius: BorderRadius.circular(8),
+                                border: Border.all(color: Colors.white24),
+                              ),
+                              child: const Text(
+                                'Retry',
+                                style: TextStyle(
+                                  color: Colors.white70,
+                                  fontSize: 12,
+                                  fontWeight: FontWeight.w600,
+                                ),
+                              ),
+                            ),
+                          ),
+                          const SizedBox(width: 10),
+                          GestureDetector(
+                            onTap: () {
+                              setState(() => _videoError = false);
+                              _webController.loadRequest(Uri.parse(_pcsoLiveUrl));
+                            },
+                            child: Container(
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 20,
+                                vertical: 8,
+                              ),
+                              decoration: BoxDecoration(
+                                color: const Color(0xFFDC2626),
+                                borderRadius: BorderRadius.circular(8),
+                              ),
+                              child: const Text(
+                                'Watch on YouTube',
+                                style: TextStyle(
+                                  color: Colors.white,
+                                  fontSize: 12,
+                                  fontWeight: FontWeight.w600,
+                                ),
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            // Live badge
+            Positioned(
+              top: 12,
+              right: 12,
+              child: Container(
+                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                decoration: BoxDecoration(
+                  color: _isLive
+                      ? const Color(0xFFDC2626)
+                      : const Color(0xFF111827).withValues(alpha: 0.82),
+                  borderRadius: BorderRadius.circular(999),
+                ),
+                child: Text(
+                  _isLive ? 'LIVE NOW' : 'STANDBY',
+                  style: const TextStyle(
+                    color: Colors.white,
+                    fontSize: 11,
+                    fontWeight: FontWeight.w700,
+                    letterSpacing: 0.4,
+                  ),
+                ),
               ),
             ),
           ],
@@ -357,7 +516,7 @@ class _LivePageState extends State<LivePage> {
         border: Border.all(color: const Color(0xFFE5E7EB)),
         boxShadow: [
           BoxShadow(
-            color: Colors.black.withOpacity(0.04),
+            color: Colors.black.withValues(alpha: 0.04),
             blurRadius: 8,
             offset: const Offset(0, 2),
           ),
@@ -370,7 +529,9 @@ class _LivePageState extends State<LivePage> {
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Text(
-                  'Next scheduled draw (PST)',
+                  _isLive
+                      ? 'Current draw (Philippines)'
+                      : 'Next draw (Philippines)',
                   style: TextStyle(fontSize: 12, color: Colors.grey[600]),
                 ),
                 const SizedBox(height: 4),
@@ -389,7 +550,7 @@ class _LivePageState extends State<LivePage> {
             crossAxisAlignment: CrossAxisAlignment.end,
             children: [
               Text(
-                'Starts in',
+                _isLive ? 'Status' : 'Starts in',
                 style: TextStyle(fontSize: 12, color: Colors.grey[600]),
               ),
               const SizedBox(height: 4),
@@ -412,8 +573,9 @@ class _LivePageState extends State<LivePage> {
   Widget _buildScheduleList() {
     // Format schedule times for display
     final formattedTimes = _schedule.map((s) {
-      final hour = s['hour']!;
-      final minute = s['minute']!;
+      final time = s.extractTime();
+      final hour = time['hour'] ?? 0;
+      final minute = time['minute'] ?? 0;
       final displayHour = hour % 12 == 0 ? 12 : hour % 12;
       final ampm = hour >= 12 ? 'PM' : 'AM';
       final minStr = minute.toString().padLeft(2, '0');
@@ -441,8 +603,8 @@ class _LivePageState extends State<LivePage> {
             ),
           )
         else
-          ...formattedTimes.map(
-            (time) => Padding(
+          ...formattedTimes.asMap().entries.map(
+            (entry) => Padding(
               padding: const EdgeInsets.only(bottom: 8),
               child: Row(
                 children: [
@@ -450,22 +612,57 @@ class _LivePageState extends State<LivePage> {
                     width: 8,
                     height: 8,
                     decoration: BoxDecoration(
-                      color: AppColors.primary,
+                      color: entry.key == _liveScheduleIndex
+                          ? const Color(0xFFDC2626)
+                          : entry.key == _nextScheduleIndex
+                          ? AppColors.primary
+                          : const Color(0xFFD1D5DB),
                       shape: BoxShape.circle,
                     ),
                   ),
                   const SizedBox(width: 10),
                   Text(
-                    time,
-                    style: const TextStyle(
+                    entry.value,
+                    style: TextStyle(
                       fontSize: 14,
-                      color: Color(0xFF4B5563),
+                      color: entry.key == _liveScheduleIndex
+                          ? const Color(0xFF111827)
+                          : const Color(0xFF4B5563),
+                      fontWeight: entry.key == _liveScheduleIndex
+                          ? FontWeight.w700
+                          : FontWeight.w500,
                     ),
                   ),
                   const Spacer(),
-                  Text(
-                    'Philippine Standard Time',
-                    style: TextStyle(fontSize: 12, color: Colors.grey[500]),
+                  Container(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 10,
+                      vertical: 4,
+                    ),
+                    decoration: BoxDecoration(
+                      color: entry.key == _liveScheduleIndex
+                          ? const Color(0xFFFEE2E2)
+                          : entry.key == _nextScheduleIndex
+                          ? const Color(0xFFDBEAFE)
+                          : const Color(0xFFF3F4F6),
+                      borderRadius: BorderRadius.circular(999),
+                    ),
+                    child: Text(
+                      entry.key == _liveScheduleIndex
+                          ? 'LIVE'
+                          : entry.key == _nextScheduleIndex
+                          ? 'NEXT'
+                          : 'SCHEDULED',
+                      style: TextStyle(
+                        fontSize: 11,
+                        fontWeight: FontWeight.w700,
+                        color: entry.key == _liveScheduleIndex
+                            ? const Color(0xFFDC2626)
+                            : entry.key == _nextScheduleIndex
+                            ? const Color(0xFF2563EB)
+                            : const Color(0xFF6B7280),
+                      ),
+                    ),
                   ),
                 ],
               ),
@@ -522,53 +719,3 @@ class _PulsingDotState extends State<_PulsingDot>
   }
 }
 
-// Animated play button for the placeholder
-class _AnimatedPlayButton extends StatefulWidget {
-  @override
-  State<_AnimatedPlayButton> createState() => _AnimatedPlayButtonState();
-}
-
-class _AnimatedPlayButtonState extends State<_AnimatedPlayButton>
-    with SingleTickerProviderStateMixin {
-  late AnimationController _controller;
-  late Animation<double> _opacity;
-
-  @override
-  void initState() {
-    super.initState();
-    _controller = AnimationController(
-      vsync: this,
-      duration: const Duration(milliseconds: 1200),
-    )..repeat(reverse: true);
-    _opacity = Tween<double>(
-      begin: 0.4,
-      end: 1.0,
-    ).animate(CurvedAnimation(parent: _controller, curve: Curves.easeInOut));
-  }
-
-  @override
-  void dispose() {
-    _controller.dispose();
-    super.dispose();
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    return FadeTransition(
-      opacity: _opacity,
-      child: Container(
-        width: 72,
-        height: 72,
-        decoration: BoxDecoration(
-          color: Colors.white.withOpacity(0.12),
-          shape: BoxShape.circle,
-        ),
-        child: const Icon(
-          Icons.play_arrow_rounded,
-          size: 40,
-          color: Colors.white,
-        ),
-      ),
-    );
-  }
-}

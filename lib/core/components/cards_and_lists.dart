@@ -19,7 +19,7 @@ class AppChip extends StatelessWidget {
   final Border? border;
 
   const AppChip({
-    Key? key,
+    super.key,
     required this.label,
     this.selected = false,
     this.onTap,
@@ -34,7 +34,7 @@ class AppChip extends StatelessWidget {
       vertical: AppSpacing.sm,
     ),
     this.border,
-  }) : super(key: key);
+  });
 
   @override
   Widget build(BuildContext context) {
@@ -88,14 +88,14 @@ class InfoCard extends StatelessWidget {
   final Widget? trailing;
 
   const InfoCard({
-    Key? key,
+    super.key,
     required this.title,
     required this.subtitle,
     required this.icon,
     this.color = AppColors.primary,
     this.onTap,
     this.trailing,
-  }) : super(key: key);
+  });
 
   @override
   Widget build(BuildContext context) {
@@ -159,7 +159,7 @@ class AppListTile extends StatelessWidget {
   final double borderRadius;
 
   const AppListTile({
-    Key? key,
+    super.key,
     this.leading,
     required this.title,
     this.subtitle,
@@ -172,7 +172,7 @@ class AppListTile extends StatelessWidget {
       vertical: AppSpacing.md,
     ),
     this.borderRadius = 8,
-  }) : super(key: key);
+  });
 
   @override
   Widget build(BuildContext context) {
@@ -234,7 +234,7 @@ class ProgressBar extends StatelessWidget {
   final bool showPercentage;
 
   const ProgressBar({
-    Key? key,
+    super.key,
     required this.value,
     this.backgroundColor = AppColors.backgroundSecondary,
     this.valueColor = AppColors.primary,
@@ -243,7 +243,7 @@ class ProgressBar extends StatelessWidget {
     this.label,
     this.labelStyle,
     this.showPercentage = true,
-  }) : super(key: key);
+  });
 
   @override
   Widget build(BuildContext context) {
@@ -292,7 +292,7 @@ class SummaryCard extends StatelessWidget {
   final bool isLoading;
 
   const SummaryCard({
-    Key? key,
+    super.key,
     required this.value,
     required this.label,
     this.valueColor,
@@ -300,7 +300,7 @@ class SummaryCard extends StatelessWidget {
     this.backgroundColor,
     this.onTap,
     this.isLoading = false,
-  }) : super(key: key);
+  });
 
   @override
   Widget build(BuildContext context) {
@@ -361,7 +361,7 @@ class AppNetworkImage extends StatelessWidget {
   final Color? backgroundColor;
 
   const AppNetworkImage({
-    Key? key,
+    super.key,
     required this.imageUrl,
     this.width,
     this.height,
@@ -370,7 +370,7 @@ class AppNetworkImage extends StatelessWidget {
     this.placeholder,
     this.errorWidget,
     this.backgroundColor,
-  }) : super(key: key);
+  });
 
   @override
   Widget build(BuildContext context) {

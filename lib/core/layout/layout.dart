@@ -45,8 +45,7 @@ class CustomSpacer extends StatelessWidget {
   final double height;
   final double width;
 
-  const CustomSpacer({Key? key, this.height = AppSpacing.lg, this.width = 0})
-    : super(key: key);
+  const CustomSpacer({super.key, this.height = AppSpacing.lg, this.width = 0});
 
   @override
   Widget build(BuildContext context) {
@@ -58,7 +57,7 @@ class CustomSpacer extends StatelessWidget {
 class HSpacer extends StatelessWidget {
   final double width;
 
-  const HSpacer({Key? key, this.width = AppSpacing.lg}) : super(key: key);
+  const HSpacer({super.key, this.width = AppSpacing.lg});
 
   @override
   Widget build(BuildContext context) {
@@ -70,7 +69,7 @@ class HSpacer extends StatelessWidget {
 class VSpacer extends StatelessWidget {
   final double height;
 
-  const VSpacer({Key? key, this.height = AppSpacing.lg}) : super(key: key);
+  const VSpacer({super.key, this.height = AppSpacing.lg});
 
   @override
   Widget build(BuildContext context) {
@@ -82,7 +81,7 @@ class VSpacer extends StatelessWidget {
 class FlexSpacer extends StatelessWidget {
   final int flex;
 
-  const FlexSpacer({Key? key, this.flex = 1}) : super(key: key);
+  const FlexSpacer({super.key, this.flex = 1});
 
   @override
   Widget build(BuildContext context) {
@@ -98,12 +97,12 @@ class CustomDivider extends StatelessWidget {
   final EdgeInsets padding;
 
   const CustomDivider({
-    Key? key,
+    super.key,
     this.height = 1,
     this.thickness = 1,
     this.color = const Color(0xFFE5E7EB),
     this.padding = const EdgeInsets.symmetric(vertical: AppSpacing.lg),
-  }) : super(key: key);
+  });
 
   @override
   Widget build(BuildContext context) {
@@ -125,7 +124,7 @@ class ResponsiveGrid extends StatelessWidget {
   final WrapCrossAlignment crossAxisAlignment;
 
   const ResponsiveGrid({
-    Key? key,
+    super.key,
     required this.children,
     this.columnsOnMobile = 1,
     this.columnsOnTablet = 2,
@@ -133,7 +132,7 @@ class ResponsiveGrid extends StatelessWidget {
     this.spacing = AppSpacing.lg,
     this.runSpacing = AppSpacing.lg,
     this.crossAxisAlignment = WrapCrossAlignment.start,
-  }) : super(key: key);
+  });
 
   @override
   Widget build(BuildContext context) {
@@ -175,14 +174,14 @@ class Section extends StatelessWidget {
   final BoxShadow? boxShadow;
 
   const Section({
-    Key? key,
+    super.key,
     required this.child,
     this.padding = AppLayout.cardPadding,
     this.backgroundColor,
     this.borderRadius = AppLayout.largeBorderRadius,
     this.border,
     this.boxShadow,
-  }) : super(key: key);
+  });
 
   @override
   Widget build(BuildContext context) {
@@ -211,7 +210,7 @@ class AppCard extends StatelessWidget {
   final VoidCallback? onTap;
 
   const AppCard({
-    Key? key,
+    super.key,
     required this.child,
     this.padding = AppLayout.cardPadding,
     this.backgroundColor = Colors.white,
@@ -220,7 +219,7 @@ class AppCard extends StatelessWidget {
     this.borderWidth = 1,
     this.elevation = 0,
     this.onTap,
-  }) : super(key: key);
+  });
 
   @override
   Widget build(BuildContext context) {

@@ -59,6 +59,13 @@ class DrawTimeData {
   final bool isActive;
   final String createdAt;
   final String? deletedAt;
+  // Optional draw type coming from backend (e.g., 'National', 'Regional')
+  final String? drawType;
+  // Optional association to a game (game_id) when provided by the backend.
+  final String? gameId;
+  // Convenience flag derived from available backend fields. True when this
+  // draw time represents the National draw (preferred for the Live page).
+  final bool isNational;
 
   DrawTimeData({
     required this.id,
@@ -67,9 +74,19 @@ class DrawTimeData {
     required this.isActive,
     required this.createdAt,
     this.deletedAt,
+    this.drawType,
+    this.gameId,
+    this.isNational = false,
   });
 
   factory DrawTimeData.fromJson(Map<String, dynamic> json) {
+    final drawType = json['draw_type'] as String?;
+    // Backwards-compatible detection: some APIs may send explicit boolean
+    // 'is_national' or a 'scope' string. Derive a best-effort flag here.
+    final isNationalFlag = (json['is_national'] == true) ||
+        (json['scope'] is String && (json['scope'] as String).toLowerCase() == 'national') ||
+        (drawType != null && drawType.toLowerCase() == 'national');
+
     return DrawTimeData(
       id: json['id'] as String,
       drawTime: json['draw_time'] as String,
@@ -77,15 +94,25 @@ class DrawTimeData {
       isActive: json['is_active'] as bool,
       createdAt: json['created_at'] as String,
       deletedAt: json['deleted_at'] as String?,
+      drawType: drawType,
+      gameId: json['game_id'] as String? ?? json['gameId'] as String?,
+      isNational: isNationalFlag,
     );
   }
 
-  /// Extract hour and minute from ISO format time string
-  /// e.g., "0000-01-01T10:30:00Z" -> {'hour': 10, 'minute': 30}
+  /// Extract hour and minute — handles both "HH:MM:SS" and "0000-01-01THH:MM:SSZ"
   Map<String, int> extractTime() {
     try {
-      final dateTime = DateTime.parse(drawTime);
-      return {'hour': dateTime.hour, 'minute': dateTime.minute};
+      String timeStr = drawTime;
+      if (drawTime.contains('T')) {
+        timeStr = drawTime.split('T')[1].replaceAll('Z', '');
+      }
+      final timeParts = timeStr.split(':');
+      if (timeParts.length < 2) return {'hour': 0, 'minute': 0};
+      return {
+        'hour': int.tryParse(timeParts[0]) ?? 0,
+        'minute': int.tryParse(timeParts[1]) ?? 0,
+      };
     } catch (e) {
       return {'hour': 0, 'minute': 0};
     }

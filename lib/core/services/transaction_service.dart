@@ -4,6 +4,7 @@ import 'package:get/get.dart';
 import '../../models/transaction.dart';
 import '../../controllers/auth_controller.dart';
 import '../app_constants.dart';
+import '../utils/manila_time.dart';
 
 class TransactionService {
   static const String _baseUrl = '${AppConstants.apiBaseUrl}/transactions';
@@ -23,7 +24,7 @@ class TransactionService {
     try {
       final authCtrl = Get.find<AuthController>();
       final token = authCtrl.token.value;
-      final dateStr = _formatDate(date ?? DateTime.now());
+      final dateStr = _formatDate(date ?? ManilaTime.now());
 
       final uri = Uri.parse('$_baseUrl/grouped-by-draw-time?date=$dateStr');
 
@@ -74,7 +75,7 @@ class TransactionService {
     try {
       final authCtrl = Get.find<AuthController>();
       final token = authCtrl.token.value;
-      final dateStr = _formatDate(date ?? DateTime.now());
+      final dateStr = _formatDate(date ?? ManilaTime.now());
 
       final uri = Uri.parse(
         '$_ticketsBaseUrl/grouped-by-draw-time?date=$dateStr',
@@ -113,9 +114,7 @@ class TransactionService {
           );
         }).toList();
       } else {
-        throw Exception(
-          'Failed to load tickets: ${response.statusCode}',
-        );
+        throw Exception('Failed to load tickets: ${response.statusCode}');
       }
     } catch (e) {
       throw Exception('Error fetching tickets: $e');

@@ -1,5 +1,4 @@
 import 'package:flutter/material.dart';
-import 'package:onstite/core/layout/layout.dart';
 import '../core/design_system.dart';
 import '../core/utils/app_utils.dart';
 
@@ -14,7 +13,7 @@ class DesignSystemShowcasePage extends StatefulWidget {
 }
 
 class _DesignSystemShowcasePageState extends State<DesignSystemShowcasePage> {
-  bool _expandedSection = false;
+  final bool _expandedSection = false;
 
   @override
   Widget build(BuildContext context) {

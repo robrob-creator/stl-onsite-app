@@ -2,7 +2,6 @@ import 'package:flutter/material.dart';
 import '../theme/colors.dart';
 import '../theme/text_styles.dart';
 import '../theme/spacing.dart';
-import '../layout/layout.dart';
 
 /// Snackbar helper class
 class AppSnackBar {
@@ -220,7 +219,7 @@ class AppBadge extends StatelessWidget {
   final EdgeInsets padding;
 
   const AppBadge({
-    Key? key,
+    super.key,
     required this.label,
     this.backgroundColor = AppColors.primary,
     this.textColor = Colors.white,
@@ -229,7 +228,7 @@ class AppBadge extends StatelessWidget {
       horizontal: AppSpacing.sm,
       vertical: 2,
     ),
-  }) : super(key: key);
+  });
 
   @override
   Widget build(BuildContext context) {
@@ -261,14 +260,14 @@ class ExpandableSection extends StatefulWidget {
   final TextStyle? titleStyle;
 
   const ExpandableSection({
-    Key? key,
+    super.key,
     required this.title,
     required this.child,
     this.initiallyExpanded = false,
     this.backgroundColor = Colors.white,
     this.borderColor = AppColors.border,
     this.titleStyle,
-  }) : super(key: key);
+  });
 
   @override
   State<ExpandableSection> createState() => _ExpandableSectionState();
@@ -365,8 +364,7 @@ class ShimmerLoading extends StatefulWidget {
   final Widget child;
   final bool isLoading;
 
-  const ShimmerLoading({Key? key, required this.child, this.isLoading = true})
-    : super(key: key);
+  const ShimmerLoading({super.key, required this.child, this.isLoading = true});
 
   @override
   State<ShimmerLoading> createState() => _ShimmerLoadingState();

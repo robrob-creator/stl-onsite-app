@@ -16,13 +16,15 @@ class EodReportService {
       final authCtrl = Get.find<AuthController>();
       final token = authCtrl.token.value;
       final uri = Uri.parse('$baseUrl?maker_id=$makerId&date=$date');
-      final response = await http.get(
-        uri,
-        headers: {
-          'Authorization': 'Bearer $token',
-          'Content-Type': 'application/json',
-        },
-      );
+      final response = await http
+          .get(
+            uri,
+            headers: {
+              'Authorization': 'Bearer $token',
+              'Content-Type': 'application/json',
+            },
+          )
+          .timeout(const Duration(seconds: 30));
       if (response.statusCode == 200) {
         final jsonResponse = jsonDecode(response.body);
         return EodReportModel.fromJson(jsonResponse['data']);

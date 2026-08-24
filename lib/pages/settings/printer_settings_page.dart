@@ -15,12 +15,14 @@ class _PrinterSettingsPageState extends State<PrinterSettingsPage> {
   bool _scanning = false;
   String? _savedMac;
   String? _savedName;
+  PrinterProfile _savedProfile = PrinterProfile.gsV0;
 
   @override
   void initState() {
     super.initState();
     _savedMac = PrinterService.savedMac;
     _savedName = PrinterService.savedName;
+    _savedProfile = PrinterService.savedProfile;
     _scan();
   }
 
@@ -50,6 +52,7 @@ class _PrinterSettingsPageState extends State<PrinterSettingsPage> {
     setState(() {
       _savedMac = device.macAdress;
       _savedName = device.name;
+      _savedProfile = PrinterService.savedProfile;
     });
     Get.snackbar(
       'Printer Saved',
@@ -93,50 +96,94 @@ class _PrinterSettingsPageState extends State<PrinterSettingsPage> {
                   color: const Color(0xFF2563EB).withOpacity(0.3),
                 ),
               ),
-              child: Row(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  const Icon(Icons.print, color: Color(0xFF2563EB)),
-                  const SizedBox(width: 12),
-                  Expanded(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        const Text(
-                          'Active Printer',
-                          style: TextStyle(
-                            fontSize: 12,
-                            color: Color(0xFF2563EB),
-                          ),
+                  Row(
+                    children: [
+                      const Icon(Icons.print, color: Color(0xFF2563EB)),
+                      const SizedBox(width: 12),
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            const Text(
+                              'Active Printer',
+                              style: TextStyle(
+                                fontSize: 12,
+                                color: Color(0xFF2563EB),
+                              ),
+                            ),
+                            Text(
+                              _savedName ?? _savedMac!,
+                              style: const TextStyle(
+                                fontWeight: FontWeight.bold,
+                                fontSize: 14,
+                              ),
+                            ),
+                            Text(
+                              _savedMac!,
+                              style: const TextStyle(
+                                fontSize: 12,
+                                color: Colors.grey,
+                              ),
+                            ),
+                          ],
                         ),
-                        Text(
-                          _savedName ?? _savedMac!,
-                          style: const TextStyle(
-                            fontWeight: FontWeight.bold,
-                            fontSize: 14,
-                          ),
+                      ),
+                      TextButton(
+                        onPressed: () {
+                          PrinterService.clearPrinter();
+                          setState(() {
+                            _savedMac = null;
+                            _savedName = null;
+                            _savedProfile = PrinterProfile.gsV0;
+                          });
+                        },
+                        child: const Text(
+                          'Remove',
+                          style: TextStyle(color: Colors.red),
                         ),
-                        Text(
-                          _savedMac!,
-                          style: const TextStyle(
-                            fontSize: 12,
-                            color: Colors.grey,
-                          ),
-                        ),
-                      ],
-                    ),
+                      ),
+                    ],
                   ),
-                  TextButton(
-                    onPressed: () {
-                      PrinterService.clearPrinter();
-                      setState(() {
-                        _savedMac = null;
-                        _savedName = null;
-                      });
-                    },
-                    child: const Text(
-                      'Remove',
-                      style: TextStyle(color: Colors.red),
-                    ),
+                  const Divider(height: 20),
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    children: [
+                      Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          const Text(
+                            'Goojprt / MTP-2 Mode',
+                            style: TextStyle(
+                              fontSize: 13,
+                              fontWeight: FontWeight.w500,
+                            ),
+                          ),
+                          Text(
+                            _savedProfile == PrinterProfile.escStar
+                                ? 'ESC * (PT-210, MTP-2)'
+                                : 'GS v 0 (standard)',
+                            style: const TextStyle(
+                              fontSize: 11,
+                              color: Colors.grey,
+                            ),
+                          ),
+                        ],
+                      ),
+                      Switch(
+                        value: _savedProfile == PrinterProfile.escStar,
+                        activeThumbColor: const Color(0xFF2563EB),
+                        onChanged: (val) {
+                          final profile = val
+                              ? PrinterProfile.escStar
+                              : PrinterProfile.gsV0;
+                          PrinterService.setProfile(profile);
+                          setState(() => _savedProfile = profile);
+                        },
+                      ),
+                    ],
                   ),
                 ],
               ),

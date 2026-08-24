@@ -6,10 +6,14 @@ class User {
   final DateTime createdAt;
   final String phoneNumber;
   final double balance;
+  final double cashFromCashier;
   final bool isActive;
   final bool isBlocked;
   final double winningsAmount;
   final double shareAmount;
+  final String areaName;
+  final String clusterName;
+  final String agentNo;
 
   User({
     required this.id,
@@ -19,10 +23,14 @@ class User {
     required this.createdAt,
     required this.phoneNumber,
     required this.balance,
+    required this.cashFromCashier,
     required this.isActive,
     required this.isBlocked,
     required this.winningsAmount,
     required this.shareAmount,
+    this.areaName = '',
+    this.clusterName = '',
+    this.agentNo = '',
   });
 
   factory User.fromJson(Map<String, dynamic> json) {
@@ -36,10 +44,14 @@ class User {
       ),
       phoneNumber: json['phone_number'] ?? '',
       balance: (json['balance'] ?? 0).toDouble(),
+      cashFromCashier: (json['cash_from_cashier'] ?? 0).toDouble(),
       isActive: json['is_active'] ?? false,
       isBlocked: json['is_blocked'] ?? false,
       winningsAmount: (json['winnings_amount'] ?? 0).toDouble(),
       shareAmount: (json['share_amount'] ?? 0).toDouble(),
+      areaName: json['area_name'] as String? ?? '',
+      clusterName: json['cluster_name'] as String? ?? '',
+      agentNo: json['agent_no'] as String? ?? '',
     );
   }
 
@@ -56,6 +68,10 @@ class User {
       'is_blocked': isBlocked,
       'winnings_amount': winningsAmount,
       'share_amount': shareAmount,
+      'area_name': areaName,
+      'cluster_name': clusterName,
+      'agent_no': agentNo,
+      'cash_from_cashier': cashFromCashier,
     };
   }
 }

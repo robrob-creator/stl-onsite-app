@@ -91,46 +91,6 @@ dynamic _normalizeBetNumbersInput(dynamic input) {
   return input;
 }
 
-bool soldOutCoversGroupKey(dynamic betNumbers, String groupKey) {
-  final normalized = _normalizeBetNumbersInput(betNumbers);
-
-  if (normalized is List) {
-    for (final bn in normalized) {
-      if (bn is List) {
-        final s = (bn.map((e) => '$e').toList()..sort()).join();
-        if (s == groupKey) return true;
-      } else {
-        final sorted = '$bn'.split('').toList()..sort();
-        if (sorted.join() == groupKey) return true;
-      }
-    }
-    return false;
-  }
-
-  if (normalized is Map) {
-    for (final v in normalized.values) {
-      if (v is List) {
-        final s = (v.map((e) => '$e').toList()..sort()).join();
-        if (s == groupKey) return true;
-      } else {
-        final sorted = '$v'.split('').toList()..sort();
-        if (sorted.join() == groupKey) return true;
-      }
-    }
-    return false;
-  }
-
-  if (normalized is String) {
-    for (final s in normalized.split(',')) {
-      final sorted = s.trim().split('').toList()..sort();
-      if (sorted.join() == groupKey) return true;
-    }
-    return false;
-  }
-
-  return false;
-}
-
 bool exactOrderInSoldOut(String exactNumber, dynamic betNumbers) {
   final normalized = _normalizeBetNumbersInput(betNumbers);
   final exactStr = exactNumber.trim();
@@ -171,39 +131,6 @@ bool _inDateRange(DateTime? drawTs, DateTime? start, DateTime? end) {
   if (start != null && drawTs.isBefore(start)) return false;
   if (end != null && drawTs.isAfter(end)) return false;
   return true;
-}
-
-double? resolveGroupLimit({
-  required String gameId,
-  required String drawTimeId,
-  required String drawDate,
-  required String groupKey,
-  required Map<String, double> gameSoldOutAmounts,
-  required Map<String, List<SoldOutRow>> soldOutByGame,
-}) {
-  final rows = soldOutByGame[gameId] ?? [];
-  final drawTs = DateTime.tryParse(drawDate);
-  final drawDateKey = drawDate.length >= 10 ? drawDate.substring(0, 10) : null;
-
-  for (final so in rows) {
-    if (so.type == 'per schedule' || so.drawTimeId != null) {
-      if (so.drawTimeId == null || so.drawTimeId != drawTimeId) continue;
-    }
-    if (!soldOutCoversGroupKey(so.betNumbers, groupKey)) continue;
-
-    if (so.type == 'per schedule') {
-      final startKey = so.dateStarted?.toIso8601String().substring(0, 10);
-      if (drawDateKey == null || startKey == null || drawDateKey != startKey) {
-        continue;
-      }
-      return so.maxAmount;
-    }
-
-    if (!_inDateRange(drawTs, so.dateStarted, so.dateEnded)) continue;
-    return so.maxAmount;
-  }
-
-  return gameSoldOutAmounts[gameId];
 }
 
 double? resolveTargetLimit({
@@ -370,15 +297,8 @@ List<BetAvailabilityResult> checkAvailability({
         '${bet.gameId}::${bet.groupKey}::${bet.drawId}::${bet.drawDate}';
     if (groupAnalyses.containsKey(gk)) continue;
 
-    final limit = resolveGroupLimit(
-      gameId: bet.gameId,
-      drawTimeId: bet.drawTimeId,
-      drawDate: bet.drawDate,
-      groupKey: bet.groupKey,
-      gameSoldOutAmounts: gameSoldOutAmounts,
-      soldOutByGame: soldOutByGame,
-    );
-
+    // PM rule: each perm resolves its OWN limit (explicit sold_out row for
+    // that exact digit order, else game default). Sold-out is per-exact.
     final refExactKey = groupRepresentativeExact[gk] ??
         '${bet.gameId}::${bet.number}::${bet.drawId}::${bet.drawDate}';
 
@@ -390,9 +310,6 @@ List<BetAvailabilityResult> checkAvailability({
     );
     final perPermRambolExp =
         (db.perPermRambolExposure[gk] ?? 0) + cartRambolPerPerm;
-    final currentPermExp = exactTargetExp + perPermRambolExp;
-    final permRemaining =
-        limit != null ? math.max(0.0, limit - currentPermExp) : null;
 
     final targetAmount = requestTargetByExact[refExactKey] ?? 0;
     final permCount = countPermutations(bet.digits);
@@ -400,20 +317,49 @@ List<BetAvailabilityResult> checkAvailability({
     final incomingRambolPerPerm = incomingRambolPerPermByGroup[gk] ?? 0;
     final rambolTotalAmount = rambolPerPerm * permCount;
 
+    // Iterate each permutation with its own limit; a perm is sold out only
+    // when its own bucket (target on that exact + rambol share) reaches its
+    // own limit. Rambol on the group is disabled when any perm is sold.
+    final permValues = generatePermutationValues(bet.digits);
+    bool anyPermSoldOut = false;
+    double minHeadroom = double.infinity;
+    bool haveAnyLimit = false;
+    double? queriedExactLimit;
+    for (final pv in permValues) {
+      final permDigits = pv.split('|');
+      final permExact = permDigits.join();
+      final permKey =
+          '${bet.gameId}::$permExact::${bet.drawId}::${bet.drawDate}';
+      final permLimit = resolveTargetLimit(
+        gameId: bet.gameId,
+        drawTimeId: bet.drawTimeId,
+        drawDate: bet.drawDate,
+        exactNumber: permExact,
+        gameSoldOutAmounts: gameSoldOutAmounts,
+        soldOutByGame: soldOutByGame,
+      );
+      if (permExact == bet.number) queriedExactLimit = permLimit;
+      if (permLimit == null) continue;
+      haveAnyLimit = true;
+      final permBucket =
+          (db.exactTargetExposure[permKey] ?? 0) + perPermRambolExp;
+      if (permBucket >= permLimit) anyPermSoldOut = true;
+      final headroom = permLimit - permBucket;
+      if (headroom < minHeadroom) minHeadroom = headroom;
+    }
+
+    final limit = queriedExactLimit; // queried perm's own limit, for display
+    final currentPermExp = exactTargetExp + perPermRambolExp;
+    final permRemaining =
+        limit != null ? math.max(0.0, limit - currentPermExp) : null;
     final targetFits = permRemaining == null || targetAmount <= permRemaining;
 
+    final rambolRemaining =
+        haveAnyLimit ? math.max(0.0, minHeadroom) : null;
+    final rambolFitsOwnRules = !haveAnyLimit ||
+        (!anyPermSoldOut && incomingRambolPerPerm <= rambolRemaining!);
+
     final existingMaxTarget = db.maxTargetExposureByGroup[gk] ?? 0;
-    final worstPermBeforeTarget = existingMaxTarget + perPermRambolExp;
-    final rambolRemaining = limit != null
-        ? math.max(0.0, limit - worstPermBeforeTarget)
-        : null;
-
-    final anyPermSoldOut =
-        limit != null && existingMaxTarget + perPermRambolExp >= limit;
-
-    final rambolFitsOwnRules = rambolRemaining == null ||
-        (!anyPermSoldOut && incomingRambolPerPerm <= rambolRemaining);
-
     final newTargetPermExp = exactTargetExp + targetAmount;
     final worstPermAfterTarget =
         math.max(existingMaxTarget, newTargetPermExp) + perPermRambolExp;

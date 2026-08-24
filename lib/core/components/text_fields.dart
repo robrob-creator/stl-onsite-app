@@ -3,7 +3,6 @@ import 'package:flutter/services.dart';
 import '../theme/colors.dart';
 import '../theme/text_styles.dart';
 import '../theme/spacing.dart';
-import '../layout/layout.dart';
 
 /// Custom text input field
 class AppTextField extends StatefulWidget {
@@ -41,7 +40,7 @@ class AppTextField extends StatefulWidget {
   final bool isDense;
 
   const AppTextField({
-    Key? key,
+    super.key,
     this.controller,
     required this.label,
     this.hint,
@@ -77,7 +76,7 @@ class AppTextField extends StatefulWidget {
     this.errorText,
     this.showCounter = false,
     this.isDense = false,
-  }) : super(key: key);
+  });
 
   @override
   State<AppTextField> createState() => _AppTextFieldState();
@@ -222,7 +221,7 @@ class NumericInputField extends StatefulWidget {
   final String? Function(String?)? validator;
 
   const NumericInputField({
-    Key? key,
+    super.key,
     this.controller,
     required this.label,
     this.hint,
@@ -230,7 +229,7 @@ class NumericInputField extends StatefulWidget {
     required this.maxValue,
     this.onChanged,
     this.validator,
-  }) : super(key: key);
+  });
 
   @override
   State<NumericInputField> createState() => _NumericInputFieldState();
@@ -289,13 +288,13 @@ class PasswordTextField extends StatefulWidget {
   final Function(String)? onChanged;
 
   const PasswordTextField({
-    Key? key,
+    super.key,
     this.controller,
     required this.label,
     this.hint,
     this.validator,
     this.onChanged,
-  }) : super(key: key);
+  });
 
   @override
   State<PasswordTextField> createState() => _PasswordTextFieldState();
@@ -303,7 +302,7 @@ class PasswordTextField extends StatefulWidget {
 
 class _PasswordTextFieldState extends State<PasswordTextField> {
   late TextEditingController _controller;
-  bool _showPassword = false;
+  final bool _showPassword = false;
 
   @override
   void initState() {
@@ -341,13 +340,13 @@ class SearchField extends StatefulWidget {
   final VoidCallback? onClear;
 
   const SearchField({
-    Key? key,
+    super.key,
     this.controller,
     this.hint = 'Search...',
     this.onChanged,
     this.onSubmitted,
     this.onClear,
-  }) : super(key: key);
+  });
 
   @override
   State<SearchField> createState() => _SearchFieldState();

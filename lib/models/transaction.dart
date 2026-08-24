@@ -61,9 +61,12 @@ class Transaction {
           : null,
       status: json['status'] as String,
       type: json['type'] as String,
-      user: json['user'] is Map<String, dynamic>
+      // Accept either 'user' or 'agent' payload keys for backward/forward compatibility
+      user: (json['user'] is Map<String, dynamic>)
           ? UserData.fromJson(json['user'] as Map<String, dynamic>)
-          : null,
+          : (json['agent'] is Map<String, dynamic>)
+              ? UserData.fromJson(json['agent'] as Map<String, dynamic>)
+              : null,
       drawTime: drawTime,
       drawTimeId: drawTimeId,
     );
@@ -236,9 +239,11 @@ class TransactionGroup {
   int get count => transactions.length;
 
   String get overallStatus {
-    if (transactions.every((t) => t.status == 'completed')) return 'completed';
-    if (transactions.any((t) => t.status == 'failed')) return 'failed';
-    return 'pending';
+    // Treat 'printed' as completed (printed tickets imply transaction completed
+    // from a printing perspective). Consider any of these as completed-like.
+    final completedLike = (String s) => s.toLowerCase() == 'completed' || s.toLowerCase() == 'printed';
+    if (transactions.any((t) => t.status.toLowerCase() == 'failed')) return 'failed';
+    return 'completed';
   }
 
   String get createdAt =>
@@ -315,9 +320,12 @@ class Ticket {
       accountNumber: json['account_number'] as String? ?? '',
       createdAt: json['created_at'] as String? ?? '',
       deletedAt: json['deleted_at'] as String?,
-      customer: json['customer'] is Map<String, dynamic>
+      // Support either 'customer' or 'agent' keys depending on API response
+      customer: (json['customer'] is Map<String, dynamic>)
           ? TicketCustomer.fromJson(json['customer'] as Map<String, dynamic>)
-          : null,
+          : (json['agent'] is Map<String, dynamic>)
+              ? TicketCustomer.fromJson(json['agent'] as Map<String, dynamic>)
+              : null,
       paymentMethod: json['payment_method'] as String? ?? '',
       status: json['status'] as String? ?? '',
       ticketNo: json['ticket_no'] as String? ?? '',
@@ -347,9 +355,9 @@ class TicketGroup {
   int get count => tickets.length;
 
   String get overallStatus {
-    if (tickets.every((t) => t.status == 'completed')) return 'completed';
-    if (tickets.any((t) => t.status == 'failed')) return 'failed';
-    return 'pending';
+    final completedLike = (String s) => s.toLowerCase() == 'completed' || s.toLowerCase() == 'printed';
+    if (tickets.any((t) => t.status.toLowerCase() == 'failed')) return 'failed';
+    return 'completed';
   }
 
   String get createdAt => tickets.isNotEmpty ? tickets.first.createdAt : '';
@@ -359,6 +367,7 @@ class TicketBet {
   final String id;
   final String drawId;
   final String gameId;
+  final String gameName; // optional readable name when provided
   final double straightBetAmount;
   final double rambleBetAmount;
   final double totalBetAmount;
@@ -373,6 +382,7 @@ class TicketBet {
     required this.id,
     required this.drawId,
     required this.gameId,
+    required this.gameName,
     required this.straightBetAmount,
     required this.rambleBetAmount,
     required this.totalBetAmount,
@@ -391,6 +401,7 @@ class TicketBet {
       id: json['id'] as String? ?? '',
       drawId: json['draw_id'] as String? ?? '',
       gameId: json['game_id'] as String? ?? '',
+      gameName: json['game_name'] as String? ?? '',
       straightBetAmount:
           (json['straight_bet_amount'] as num?)?.toDouble() ?? 0.0,
       rambleBetAmount: (json['ramble_bet_amount'] as num?)?.toDouble() ?? 0.0,

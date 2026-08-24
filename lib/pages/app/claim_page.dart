@@ -2,6 +2,8 @@ import 'package:flutter/material.dart';
 import 'package:flutter/foundation.dart';
 import 'package:get/get.dart';
 import 'package:http/http.dart' as http;
+import 'package:onstite/core/services/ticket_service.dart';
+import 'package:onstite/core/services/qr_crypto_service.dart';
 import 'dart:convert';
 import 'dart:async';
 import 'package:qr_code_scanner_plus/qr_code_scanner_plus.dart';
@@ -32,14 +34,45 @@ class _ClaimPageState extends State<ClaimPage> {
   bool _isProcessingClaim = false;
   String? _errorMessage;
   StreamSubscription? _qrSubscription;
-  Map<String, dynamic>? _scannedTicketData; // Store scanned ticket data
+  bool _isScanning = false;
+  Map<String, dynamic>? _scannedTicketData;
+  final Map<String, String> _drawTimeMap = {}; // id → formatted time
+  String _filterDate = '';
+  Claim? _claimBeingVerified; // set when manual claim requires QR scan
+
+  // Simple in-memory ticket cache to avoid repeated network lookups for the
+  // same ticket within a short window (speeds up successive scans).
+  final Map<String, Map<String, dynamic>> _ticketCache = {};
+  final Map<String, DateTime> _ticketCacheTs = {};
+  static const Duration _ticketCacheTTL = Duration(seconds: 60);
 
   @override
   void initState() {
     super.initState();
     lotteryController = Get.find<LotteryController>();
     authController = Get.find<AuthController>();
-    _fetchClaims();
+    _filterDate = DateTime.now().toIso8601String().substring(0, 10);
+    _fetchClaims(drawDate: _filterDate);
+    _buildDrawTimeMap();
+  }
+
+  void _buildDrawTimeMap() {
+    for (final game in lotteryController.availableGames) {
+      for (final dt in game.drawTimes) {
+        if (_drawTimeMap.containsKey(dt.id)) continue;
+        try {
+          String timeStr = dt.drawTime;
+          if (timeStr.contains('T'))
+            timeStr = timeStr.split('T')[1].replaceAll('Z', '');
+          final parts = timeStr.split(':');
+          int h = int.parse(parts[0]);
+          final m = parts[1].padLeft(2, '0');
+          final period = h >= 12 ? 'PM' : 'AM';
+          h = h > 12 ? h - 12 : (h == 0 ? 12 : h);
+          _drawTimeMap[dt.id] = '$h:$m $period';
+        } catch (_) {}
+      }
+    }
   }
 
   @override
@@ -62,13 +95,21 @@ class _ClaimPageState extends State<ClaimPage> {
     super.dispose();
   }
 
+  void _resumeScanner() {
+    _isScanning = false;
+    controller?.resumeCamera();
+  }
+
   void _onQRViewCreated(QRViewController controller) {
     this.controller = controller;
     // Cancel any existing subscription before creating a new one
     _qrSubscription?.cancel();
     _qrSubscription = controller.scannedDataStream.listen((scanData) {
       final qrCode = scanData.code;
-      if (qrCode != null) {
+      // Debounce with _isScanning flag instead of cancelling subscription,
+      // so subsequent scans still trigger after resumeCamera().
+      if (qrCode != null && !_isScanning) {
+        _isScanning = true;
         controller.pauseCamera();
         _handleScannedQRCode(qrCode);
       }
@@ -119,16 +160,71 @@ class _ClaimPageState extends State<ClaimPage> {
     }
   }
 
-  void _handleScannedQRCode(String qrCode) {
-    // Parse the QR code to extract ticket ID
-    String ticketId = qrCode.trim();
+  void _handleScannedQRCode(String qrCode) async {
+    String ticketId = QrCryptoService.decrypt(qrCode.trim());
 
-    // Cancel the subscription before closing the scanner
-    _qrSubscription?.cancel();
-    _qrSubscription = null;
+    // Manual claim verification path: validate scanned ticket matches the claim.
+    if (_claimBeingVerified != null) {
+      await _verifyScannedTicketForClaim(ticketId, _claimBeingVerified!);
+      return;
+    }
 
-    // Fetch ticket details and verify validity
-    _fetchAndVerifyTicket(ticketId);
+    // Fast-path: if decrypted ticket looks like a standard ticket number (client
+    // generated format starting with 'TKT-'), skip remote resolution as it's
+    // usually unnecessary and adds latency.
+    final isLikelyTicketNo = RegExp(r'^TKT[-_A-Z0-9]+', caseSensitive: false).hasMatch(ticketId);
+    if (isLikelyTicketNo) {
+      await _fetchAndVerifyTicket(ticketId);
+      return;
+    }
+
+    try {
+      // Try to resolve remote formats, but fail fast (5s) to avoid long waits.
+      final resolved = await TicketService.resolveScannedTicketNumber(ticketId)
+          .timeout(const Duration(seconds: 5), onTimeout: () => ticketId);
+      await _fetchAndVerifyTicket(resolved);
+    } catch (e) {
+      // Fallback to using the raw decrypted value
+      await _fetchAndVerifyTicket(ticketId);
+    }
+  }
+
+  Future<void> _verifyScannedTicketForClaim(String scanned, Claim claim) async {
+    try {
+      Get.snackbar('Verifying', 'Checking ticket…', duration: const Duration(seconds: 1));
+      String resolved = scanned;
+      try {
+        resolved = await TicketService.resolveScannedTicketNumber(scanned);
+      } catch (_) {}
+
+      final expectedTicketNo = claim.ticket?.ticketNo ?? '';
+      if (resolved.trim() != expectedTicketNo.trim()) {
+        _showErrorModal(
+          'Wrong Ticket',
+          'Scanned ticket does not match the selected winning ticket.\n\nExpected: $expectedTicketNo\nScanned: $resolved',
+        );
+        if (mounted) {
+          setState(() => _showQRScanner = true);
+          _resumeScanner();
+        }
+        return;
+      }
+
+      // Ticket matches — prompt user to confirm before finalizing the claim.
+      if (mounted) {
+        setState(() {
+          _showQRScanner = false;
+          _claimBeingVerified = null;
+        });
+      }
+      _showClaimConfirmationDialog(claim);
+    } catch (e) {
+      _showErrorModal('Error', 'Failed to verify ticket: $e');
+      if (mounted) {
+        setState(() => _showQRScanner = true);
+        _resumeScanner();
+      }
+    }
   }
 
   Future<void> _fetchAndVerifyTicket(String ticketNumber) async {
@@ -139,37 +235,120 @@ class _ClaimPageState extends State<ClaimPage> {
         duration: const Duration(seconds: 1),
       );
 
-      final result = await lotteryController.getTicketByNumber(ticketNumber);
+      // Use cached ticket data when available and fresh
+      final now = DateTime.now();
+      if (_ticketCacheTs.containsKey(ticketNumber) && _ticketCache.containsKey(ticketNumber)) {
+        final ts = _ticketCacheTs[ticketNumber]!;
+        if (now.difference(ts) <= _ticketCacheTTL) {
+          final ticketData = _ticketCache[ticketNumber];
+          // Proceed using cached data
+          if (ticketData != null) {
+            // Reuse the same handling as a successful fetch
+            // Check validity and status below by jumping to the same logic
+            // to avoid duplicating code we assign resultSuccess true and continue
+          }
+        }
+      }
 
-      if (result['success'] as bool) {
-        final ticketData = result['data'] as Map<String, dynamic>?;
+      Map<String, dynamic>? ticketData;
+      Map<String, dynamic>? fetchedResult;
+      try {
+        final res = await lotteryController
+            .getTicketByNumber(ticketNumber)
+            .timeout(const Duration(seconds: 10));
+        if (res is Map<String, dynamic> && res['success'] == true) {
+          fetchedResult = res['data'] as Map<String, dynamic>?;
+        }
+      } catch (e) {
+        // timeout or network error — fall back to cache if present
+        if (_ticketCache.containsKey(ticketNumber)) {
+          ticketData = _ticketCache[ticketNumber];
+        } else {
+          rethrow;
+        }
+      }
 
-        if (ticketData != null) {
+      if (fetchedResult != null) {
+        ticketData = fetchedResult;
+        // cache it
+        _ticketCache[ticketNumber] = ticketData!;
+        _ticketCacheTs[ticketNumber] = now;
+      }
+
+      if (ticketData != null) {
           // Check if ticket is within 1 year validity period
           final isValid = _isTicketValidForClaim(ticketData);
 
-          if (isValid) {
-            // Store ticket data and show details dialog
-            setState(() {
-              _scannedTicketData = ticketData;
-              _showQRScanner = false;
-            });
-
-            // Show ticket details for verification
-            _showTicketDetailsForVerification(ticketData);
-          } else {
-            // Show error - ticket expired
+          if (!isValid) {
             _showErrorModal(
               'Ticket Expired',
               'This ticket is no longer valid for claiming. Tickets can only be claimed within one (1) year from the date of issuance.',
             );
-
-            // Resume camera for another scan
             if (mounted) {
+              setState(() => _showQRScanner = true);
+              _resumeScanner();
+            }
+          } else {
+            // Gate on draw status before allowing claim
+            final ticketStatus = (ticketData['status'] as String? ?? '')
+                .toLowerCase();
+            final isVoided = ticketStatus == 'voided' || ticketStatus == 'void';
+            final isLost = ticketStatus == 'lost';
+            final isWon = ticketStatus == 'won';
+            final isPending =
+                ticketStatus == 'pending' || ticketStatus == 'pending_void';
+
+            if (isVoided) {
+              _showErrorModal(
+                'Ticket Voided',
+                'This ticket has been voided and cannot be claimed.',
+              );
+              if (mounted) {
+                setState(() => _showQRScanner = true);
+                _resumeScanner();
+              }
+            } else if (isLost) {
+              _showErrorModal(
+                'Not a Winner',
+                'This ticket did not win in the draw.',
+              );
+              if (mounted) {
+                setState(() => _showQRScanner = true);
+                _resumeScanner();
+              }
+            } else if (isPending) {
+              _showErrorModal(
+                'Draw Not Yet Completed',
+                'The draw for this ticket has not yet taken place or results are not yet available. Please try again after the draw.',
+              );
+              if (mounted) {
+                setState(() => _showQRScanner = true);
+                _resumeScanner();
+              }
+            } else if (isWon) {
               setState(() {
-                _showQRScanner = true;
+                _scannedTicketData = ticketData;
+                _showQRScanner = false;
               });
-              controller?.resumeCamera();
+              _showTicketDetailsForVerification(ticketData);
+            } else if (ticketStatus == 'claimed') {
+              final claimedAt = ticketData['claimed_at'] as String?;
+              final dateStr = claimedAt != null ? _formatTransactionDate(claimedAt) : 'a previous date';
+              _showErrorModal(
+                'Already Claimed',
+                'This winning ticket has already been claimed on $dateStr.',
+              );
+              if (mounted) {
+                setState(() => _showQRScanner = true);
+                _resumeScanner();
+              }
+            } else {
+              // Unknown status — fall through to verification, backend will validate
+              setState(() {
+                _scannedTicketData = ticketData;
+                _showQRScanner = false;
+              });
+              _showTicketDetailsForVerification(ticketData);
             }
           }
         } else {
@@ -183,25 +362,9 @@ class _ClaimPageState extends State<ClaimPage> {
             setState(() {
               _showQRScanner = true;
             });
-            controller?.resumeCamera();
+            _resumeScanner();
           }
         }
-      } else {
-        final error = result['error'] as String?;
-        _showErrorModal(
-          'Ticket Not Found',
-          error ??
-              'No ticket found for this QR code. Please verify and try again.',
-        );
-
-        // Resume camera for another scan
-        if (mounted) {
-          setState(() {
-            _showQRScanner = true;
-          });
-          controller?.resumeCamera();
-        }
-      }
     } catch (e) {
       _showErrorModal('Error', 'Failed to verify ticket: $e');
 
@@ -210,7 +373,7 @@ class _ClaimPageState extends State<ClaimPage> {
         setState(() {
           _showQRScanner = true;
         });
-        controller?.resumeCamera();
+        _resumeScanner();
       }
     }
   }
@@ -243,11 +406,6 @@ class _ClaimPageState extends State<ClaimPage> {
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Text(
-              'Ticket: ${ticketData['ticket_no'] ?? 'N/A'}',
-              style: Theme.of(context).textTheme.bodyMedium,
-            ),
-            const SizedBox(height: 8),
             if (ticketData['created_at'] != null)
               Text(
                 'Issued: ${_formatDate(ticketData['created_at'])}',
@@ -277,7 +435,7 @@ class _ClaimPageState extends State<ClaimPage> {
               setState(() {
                 _showQRScanner = true;
               });
-              controller?.resumeCamera();
+              _resumeScanner();
             },
             child: const Text('Cancel'),
           ),
@@ -290,7 +448,7 @@ class _ClaimPageState extends State<ClaimPage> {
                 _createClaimFromQRCode(_scannedTicketData!['ticket_no']);
               }
             },
-            child: const Text('Claim Winnings'),
+            child: const Text('Confirm'),
           ),
         ],
       ),
@@ -379,10 +537,46 @@ class _ClaimPageState extends State<ClaimPage> {
     );
   }
 
+  String _fmtShort(String iso) {
+    try {
+      final d = DateTime.parse('${iso}T00:00:00');
+      const months = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+      return '${months[d.month - 1]} ${d.day}';
+    } catch (_) { return iso; }
+  }
+
+  Future<void> _pickFilterDate() async {
+    final initial = _filterDate.isNotEmpty
+        ? DateTime.tryParse(_filterDate) ?? DateTime.now()
+        : DateTime.now();
+    final picked = await showDatePicker(
+      context: context,
+      initialDate: initial,
+      firstDate: DateTime(2020),
+      lastDate: DateTime(2030),
+      builder: (ctx, child) => Theme(
+        data: Theme.of(ctx).copyWith(
+          colorScheme: const ColorScheme.light(primary: AppColors.primary),
+        ),
+        child: child!,
+      ),
+    );
+    if (picked == null || !mounted) return;
+    final iso = picked.toIso8601String().substring(0, 10);
+    setState(() => _filterDate = iso);
+    _fetchClaims(drawDate: iso);
+  }
+
+  void _clearDateFilter() {
+    setState(() => _filterDate = '');
+    _fetchClaims();
+  }
+
   Future<void> _fetchClaims({
     String? status,
     String? ticketId,
     String? customerId,
+    String? drawDate,
   }) async {
     setState(() {
       _isLoadingClaims = true;
@@ -404,6 +598,15 @@ class _ClaimPageState extends State<ClaimPage> {
       if (customerId != null && customerId.isNotEmpty) {
         queryParams['customer_id'] = customerId;
       }
+      final d = drawDate ?? (_filterDate.isNotEmpty ? _filterDate : null);
+      if (d != null && d.isNotEmpty) {
+        queryParams['draw_date'] = d;
+      }
+      // Scope claims to current logged-in agent — bets they placed (maker_id).
+      final currentUserId = authController.currentUser.value?.id;
+      if (currentUserId != null && currentUserId.isNotEmpty) {
+        queryParams['maker_id'] = currentUserId;
+      }
 
       final uri = Uri.parse(baseUrl).replace(queryParameters: queryParams);
 
@@ -424,6 +627,7 @@ class _ClaimPageState extends State<ClaimPage> {
               .map((claim) => Claim.fromJson(claim as Map<String, dynamic>))
               .toList();
 
+          _buildDrawTimeMap();
           setState(() {
             _claims = claims;
             _errorMessage = null;
@@ -470,16 +674,16 @@ class _ClaimPageState extends State<ClaimPage> {
           ),
         ),
         actions: [
-          if (!_showQRScanner)
-            TextButton(
-              onPressed: () {
-                setState(() {
-                  _showQRScanner = true;
-                  _scannedTicketData = null;
-                });
-              },
-              child: const Text('Scan QR'),
-            ),
+          // if (!_showQRScanner)
+          //   TextButton(
+          //     onPressed: () {
+          //       setState(() {
+          //         _showQRScanner = true;
+          //         _scannedTicketData = null;
+          //       });
+          //     },
+          //     child: const Text('Scan QR'),
+          //   ),
         ],
       ),
       body: _showQRScanner ? _buildQRScanner() : _buildClaimsList(),
@@ -511,6 +715,7 @@ class _ClaimPageState extends State<ClaimPage> {
                   _qrSubscription = null;
                   setState(() {
                     _showQRScanner = false;
+                    _claimBeingVerified = null;
                   });
                 },
                 child: Container(
@@ -534,7 +739,7 @@ class _ClaimPageState extends State<ClaimPage> {
                 mainAxisSize: MainAxisSize.min,
                 children: [
                   Text(
-                    'Scan Qr Code',
+                    _claimBeingVerified != null ? 'Scan Winning Ticket' : 'Scan QR Code',
                     style: Theme.of(context).textTheme.headlineSmall?.copyWith(
                       color: Colors.white,
                       fontWeight: FontWeight.w600,
@@ -542,7 +747,9 @@ class _ClaimPageState extends State<ClaimPage> {
                   ),
                   const SizedBox(height: 12),
                   Text(
-                    'Place an QR at the center of your\n camera and the QR will be automatically scanned',
+                    _claimBeingVerified != null
+                        ? 'Scan the QR code on the physical ticket\n(${_claimBeingVerified!.ticket?.ticketNo ?? ''}) to confirm the claim'
+                        : 'Place the QR at the center of your\ncamera and it will be automatically scanned',
                     textAlign: TextAlign.center,
                     style: Theme.of(
                       context,
@@ -577,92 +784,138 @@ class _ClaimPageState extends State<ClaimPage> {
   }
 
   Widget _buildClaimsList() {
+    // Deduplicate by ticket_id — keep the claim with the highest winning_amount
+    // (handles legacy duplicate records from manual claim creation)
+    final byTicket = <String, Claim>{};
+    final noKeyList = <Claim>[];
+    for (final c in _claims) {
+      final key = c.ticketId ?? c.ticket?.id ?? '';
+      if (key.isEmpty) {
+        noKeyList.add(c);
+      } else {
+        final existing = byTicket[key];
+        if (existing == null || c.winningAmount > existing.winningAmount) {
+          byTicket[key] = c;
+        }
+      }
+    }
+    final dedupedClaims = [...byTicket.values, ...noKeyList];
+
     // Filter claims based on search query
-    List<Claim> filteredClaims = _claims;
+    List<Claim> filteredClaims = dedupedClaims;
     if (_searchQuery.isNotEmpty) {
-      filteredClaims = _claims
+      final q = _searchQuery.toLowerCase();
+      filteredClaims = dedupedClaims
           .where(
             (claim) =>
-                (claim.ticket?.ticketNo?.toLowerCase().contains(
-                      _searchQuery.toLowerCase(),
-                    ) ??
-                    false) ||
-                (claim.ticketId?.toLowerCase().contains(
-                      _searchQuery.toLowerCase(),
-                    ) ??
-                    false),
+                (claim.ticket?.ticketNo?.toLowerCase().contains(q) ?? false) ||
+                (claim.ticketId?.toLowerCase().contains(q) ?? false),
           )
           .toList();
     }
+
+    const double toolbarH = 48.0;
 
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 16.0, vertical: 16.0),
       child: Column(
         children: [
-          // Search bar and button
-          Row(
-            children: [
-              Expanded(
-                child: TextField(
-                  controller: _searchController,
-                  onChanged: (value) {
-                    setState(() {
-                      _searchQuery = value;
-                    });
+          // Search bar + date filter + QR scan — all 48 px tall
+          SizedBox(
+            height: toolbarH,
+            child: Row(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                // Search field
+                Expanded(
+                  child: TextField(
+                    controller: _searchController,
+                    onChanged: (value) => setState(() => _searchQuery = value),
+                    decoration: InputDecoration(
+                      hintText: 'Search',
+                      hintStyle: TextStyle(color: Colors.grey[400]),
+                      prefixIcon: const Icon(
+                        Icons.search,
+                        color: Color(0xFF6B7280),
+                      ),
+                      border: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(8),
+                        borderSide: const BorderSide(color: Color(0xFFE5E7EB)),
+                      ),
+                      enabledBorder: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(8),
+                        borderSide: const BorderSide(color: Color(0xFFE5E7EB)),
+                      ),
+                      focusedBorder: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(8),
+                        borderSide: const BorderSide(color: AppColors.primary),
+                      ),
+                      contentPadding: const EdgeInsets.symmetric(
+                        horizontal: 12,
+                        vertical: 0,
+                      ),
+                      isDense: true,
+                    ),
+                  ),
+                ),
+                const SizedBox(width: 8),
+                // Date filter button
+                GestureDetector(
+                  onTap: _pickFilterDate,
+                  child: Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 10),
+                    decoration: BoxDecoration(
+                      color: AppColors.primary,
+                      border: Border.all(color: AppColors.primary),
+                      borderRadius: BorderRadius.circular(8),
+                    ),
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        const Icon(
+                          Icons.calendar_today_rounded,
+                          size: 14,
+                          color: Colors.white,
+                        ),
+                        const SizedBox(width: 5),
+                        Text(
+                          _filterDate.isNotEmpty ? _fmtShort(_filterDate) : _fmtShort(DateTime.now().toIso8601String().substring(0, 10)),
+                          style: const TextStyle(
+                            fontSize: 12,
+                            fontWeight: FontWeight.w600,
+                            color: Colors.white,
+                          ),
+                        ),
+                        const SizedBox(width: 4),
+                        GestureDetector(
+                          onTap: _clearDateFilter,
+                          child: const Icon(Icons.close_rounded, size: 14, color: Colors.white),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+                const SizedBox(width: 8),
+                // QR scan button
+                GestureDetector(
+                  onTap: () async {
+                    await _requestCameraPermission();
+                    final status = await Permission.camera.status;
+                    if (status.isGranted) {
+                      setState(() => _showQRScanner = true);
+                    }
                   },
-                  decoration: InputDecoration(
-                    hintText: 'Search',
-                    hintStyle: TextStyle(color: Colors.grey[400]),
-                    prefixIcon: const Icon(
-                      Icons.search,
-                      color: Color(0xFF6B7280),
-                    ),
-                    border: OutlineInputBorder(
+                  child: Container(
+                    width: toolbarH,
+                    decoration: BoxDecoration(
+                      border: Border.all(color: const Color(0xFFE5E7EB)),
                       borderRadius: BorderRadius.circular(8),
-                      borderSide: const BorderSide(color: Color(0xFFE5E7EB)),
                     ),
-                    enabledBorder: OutlineInputBorder(
-                      borderRadius: BorderRadius.circular(8),
-                      borderSide: const BorderSide(color: Color(0xFFE5E7EB)),
-                    ),
-                    focusedBorder: OutlineInputBorder(
-                      borderRadius: BorderRadius.circular(8),
-                      borderSide: const BorderSide(color: AppColors.primary),
-                    ),
-                    contentPadding: const EdgeInsets.symmetric(
-                      horizontal: 12,
-                      vertical: 12,
-                    ),
+                    child: const Icon(Icons.qr_code_2, color: Color(0xFF6B7280)),
                   ),
                 ),
-              ),
-              const SizedBox(width: 12),
-              Container(
-                decoration: BoxDecoration(
-                  border: Border.all(color: const Color(0xFFE5E7EB)),
-                  borderRadius: BorderRadius.circular(8),
-                ),
-                child: Material(
-                  color: Colors.transparent,
-                  child: InkWell(
-                    onTap: () async {
-                      await _requestCameraPermission();
-                      final status = await Permission.camera.status;
-                      if (status.isGranted) {
-                        setState(() {
-                          _showQRScanner = true;
-                        });
-                      }
-                    },
-                    borderRadius: BorderRadius.circular(8),
-                    child: const Padding(
-                      padding: EdgeInsets.all(12.0),
-                      child: Icon(Icons.qr_code_2, color: Color(0xFF6B7280)),
-                    ),
-                  ),
-                ),
-              ),
-            ],
+              ],
+            ),
           ),
           const SizedBox(height: 16),
 
@@ -758,9 +1011,12 @@ class _ClaimPageState extends State<ClaimPage> {
                         'Draw Time:',
                         style: TextStyle(fontSize: 12, color: Colors.grey[600]),
                       ),
-                      const Text(
-                        '3PM',
-                        style: TextStyle(
+                      Text(
+                        _fmtDrawTime(
+                          claim.drawTimeId ?? claim.bet?.drawTimeId,
+                          rawDrawTime: claim.drawTime,
+                        ),
+                        style: const TextStyle(
                           fontSize: 14,
                           fontWeight: FontWeight.w500,
                         ),
@@ -868,14 +1124,33 @@ class _ClaimPageState extends State<ClaimPage> {
                       ),
                       Expanded(
                         child: Text(
-                          '${bet.straightBetAmount.toInt()}',
+                          () {
+                            // Prefer ticket-level totals (covers case where
+                            // ticket has separate target + rambol bets and
+                            // this claim only ties to one of them).
+                            final t = claim.ticketTargetTotal > 0
+                                ? claim.ticketTargetTotal
+                                : bet.straightBetAmount;
+                            final r = claim.ticketRambolTotal > 0
+                                ? claim.ticketRambolTotal
+                                : bet.rambleBetAmount;
+                            if (t > 0 && r > 0) return 'T:${t.toInt()} R:${r.toInt()}';
+                            if (t > 0) return '${t.toInt()}';
+                            return '${r.toInt()}';
+                          }(),
                           style: const TextStyle(fontSize: 12),
                           textAlign: TextAlign.center,
                         ),
                       ),
                       Expanded(
                         child: Text(
-                          bet.straightBetAmount > 0 ? 'Target' : 'Rambol',
+                          () {
+                            final t = claim.ticketTargetTotal > 0 || bet.straightBetAmount > 0;
+                            final r = claim.ticketRambolTotal > 0 || bet.rambleBetAmount > 0;
+                            if (t && r) return 'T & R';
+                            if (t) return 'Target';
+                            return 'Rambol';
+                          }(),
                           style: const TextStyle(fontSize: 12),
                           textAlign: TextAlign.center,
                         ),
@@ -910,7 +1185,9 @@ class _ClaimPageState extends State<ClaimPage> {
                         style: TextStyle(fontSize: 12, color: Colors.grey[600]),
                       ),
                       Text(
-                        claim.amount.toStringAsFixed(0),
+                        (bet?.totalBetAmount ?? claim.amount).toStringAsFixed(
+                          0,
+                        ),
                         style: const TextStyle(
                           fontSize: 16,
                           fontWeight: FontWeight.w600,
@@ -954,49 +1231,6 @@ class _ClaimPageState extends State<ClaimPage> {
                   ),
                 ],
               ),
-
-              const SizedBox(height: 16),
-
-              // Claim button
-              SizedBox(
-                width: double.infinity,
-                child: ElevatedButton(
-                  style: ElevatedButton.styleFrom(
-                    backgroundColor: (isClaimable && !_isProcessingClaim)
-                        ? AppColors.primary
-                        : Colors.grey[300],
-                    foregroundColor: (isClaimable && !_isProcessingClaim)
-                        ? Colors.white
-                        : Colors.grey[600],
-                    padding: const EdgeInsets.symmetric(vertical: 12),
-                    shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(8),
-                    ),
-                  ),
-                  onPressed: (isClaimable && !_isProcessingClaim)
-                      ? () {
-                          _showClaimConfirmation(context, claim);
-                        }
-                      : null,
-                  child: _isProcessingClaim
-                      ? const SizedBox(
-                          height: 18,
-                          width: 18,
-                          child: CircularProgressIndicator(
-                            strokeWidth: 2,
-                            valueColor:
-                                AlwaysStoppedAnimation<Color>(Colors.white),
-                          ),
-                        )
-                      : Text(
-                          isClaimable ? 'Claim Winnings' : 'Claimed',
-                          style: const TextStyle(
-                            fontWeight: FontWeight.w600,
-                            fontSize: 14,
-                          ),
-                        ),
-                ),
-              ),
             ],
           ),
         ),
@@ -1004,11 +1238,32 @@ class _ClaimPageState extends State<ClaimPage> {
     );
   }
 
+  String _fmtDrawTime(String? drawTimeId, {String? rawDrawTime}) {
+    if (drawTimeId != null && drawTimeId.isNotEmpty) {
+      final mapped = _drawTimeMap[drawTimeId];
+      if (mapped != null) return mapped;
+    }
+    if (rawDrawTime != null && rawDrawTime.isNotEmpty) {
+      try {
+        String timeStr = rawDrawTime;
+        if (timeStr.contains('T'))
+          timeStr = timeStr.split('T')[1].replaceAll('Z', '');
+        final parts = timeStr.split(':');
+        int h = int.parse(parts[0]);
+        final m = parts[1].padLeft(2, '0');
+        final period = h >= 12 ? 'PM' : 'AM';
+        h = h > 12 ? h - 12 : (h == 0 ? 12 : h);
+        return '$h:$m $period';
+      } catch (_) {}
+    }
+    return '—';
+  }
+
   String _formatTransactionDate(String? dateStr) {
     if (dateStr == null || dateStr.isEmpty) return 'N/A';
     try {
-      final date = DateTime.parse(dateStr);
-      final months = [
+      final date = DateTime.parse(dateStr).toLocal();
+      const months = [
         'Jan',
         'Feb',
         'Mar',
@@ -1022,7 +1277,11 @@ class _ClaimPageState extends State<ClaimPage> {
         'Nov',
         'Dec',
       ];
-      return '${months[date.month - 1]} ${date.day.toString().padLeft(2, '0')}, ${date.year} @ ${date.hour.toString().padLeft(2, '0')}:${date.minute.toString().padLeft(2, '0')} ${date.hour >= 12 ? 'PM' : 'AM'}';
+      int h = date.hour;
+      final m = date.minute.toString().padLeft(2, '0');
+      final period = h >= 12 ? 'PM' : 'AM';
+      h = h > 12 ? h - 12 : (h == 0 ? 12 : h);
+      return '${months[date.month - 1]} ${date.day.toString().padLeft(2, '0')}, ${date.year} @ ${h.toString().padLeft(2, '0')}:$m $period';
     } catch (e) {
       return dateStr;
     }
@@ -1116,7 +1375,10 @@ class _ClaimPageState extends State<ClaimPage> {
                   onPressed: (isClaimable && !_isProcessingClaim)
                       ? () {
                           Get.back();
-                          _showClaimConfirmation(context, claim);
+                          setState(() {
+                            _claimBeingVerified = claim;
+                            _showQRScanner = true;
+                          });
                         }
                       : null,
                   child: Text(
@@ -1155,37 +1417,52 @@ class _ClaimPageState extends State<ClaimPage> {
     );
   }
 
-  void _showClaimConfirmation(BuildContext context, Claim claim) {
-    showDialog(
-      context: context,
-      builder: (context) => AlertDialog(
+  void _showClaimConfirmationDialog(Claim claim) {
+    final bet = claim.bet;
+    final ticketNo = claim.ticket?.ticketNo ?? claim.ticketId ?? 'N/A';
+    Get.dialog(
+      barrierDismissible: false,
+      AlertDialog(
+        backgroundColor: Colors.white,
+        surfaceTintColor: Colors.transparent,
         title: const Text('Confirm Claim'),
         content: Column(
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Text(
-              'Ticket: ${claim.ticket?.ticketNo ?? 'N/A'}',
-              style: Theme.of(context).textTheme.bodyMedium,
+            _buildDetailRow('Ticket No:', ticketNo),
+            _buildDetailRow(
+              'Winning Amount:',
+              'PHP ${claim.winningAmount.toStringAsFixed(2)}',
             ),
-            const SizedBox(height: 8),
-            Text(
-              'Winning Amount: PHP ${claim.winningAmount.toStringAsFixed(2)}',
-              style: Theme.of(
-                context,
-              ).textTheme.bodyMedium?.copyWith(fontWeight: FontWeight.w600),
-            ),
+            if (bet != null) ...[
+              _buildDetailRow('Digits:', bet.digits?.join('-') ?? '-'),
+              _buildDetailRow('Draw Date:', _formatDate(bet.drawDate)),
+            ],
             const SizedBox(height: 12),
-            Text(
-              'Are you sure you want to claim this winning ticket?',
-              style: Theme.of(context).textTheme.bodySmall,
+            Container(
+              padding: const EdgeInsets.all(12),
+              decoration: BoxDecoration(
+                color: Colors.blue[50],
+                borderRadius: BorderRadius.circular(8),
+              ),
+              child: const Text(
+                'Please verify the details above. Confirm to proceed with the claim.',
+                style: TextStyle(fontSize: 12),
+              ),
             ),
           ],
         ),
         actions: [
-          TextButton(onPressed: () => Get.back(), child: const Text('Cancel')),
+          TextButton(
+            onPressed: () => Get.back(),
+            child: const Text('Cancel'),
+          ),
           ElevatedButton(
-            style: ElevatedButton.styleFrom(backgroundColor: AppColors.primary),
+            style: ElevatedButton.styleFrom(
+              backgroundColor: AppColors.primary,
+              foregroundColor: Colors.white,
+            ),
             onPressed: () {
               Get.back();
               _processClaim(claim);

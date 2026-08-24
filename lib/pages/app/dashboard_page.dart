@@ -1,5 +1,7 @@
+import 'dart:math' as math;
 import 'package:flutter/material.dart';
 import 'package:get/get.dart';
+import 'package:get_storage/get_storage.dart';
 import '../../core/design_system.dart';
 import '../../core/services/draw_results_service.dart';
 import '../../controllers/lottery_controller.dart';
@@ -12,37 +14,87 @@ class DashboardPage extends StatefulWidget {
 }
 
 class _DashboardPageState extends State<DashboardPage> {
-  int selectedTab = 0; // 0 = 2D Lotto, 1 = 3D Lotto
+  int selectedTab = 0; // index within filtered group
+  String _selectedGroup = 'Local';
+  String _selectedGameId = '';
   DateTime selectedDate = DateTime.now();
   late LotteryController lotteryController;
   DrawResultsResponse? drawResults;
   bool isLoadingResults = false;
   bool _hasError = false;
+  Worker? _refreshWorker;
+
+  static const _kChartStyleKey = 'dashboard_chart_style';
+  final _storage = GetStorage();
+  String _chartStyle = '1a'; // '1a' | '1b' | '1c'
 
   @override
   void initState() {
     super.initState();
     lotteryController = Get.find<LotteryController>();
+    _chartStyle = _storage.read(_kChartStyleKey) ?? '1a';
+
+    // Seed selected game from first game in default group
+    final games = lotteryController.availableGames;
+    if (games.isNotEmpty) {
+      final groups = games.map((g) => g.drawType).toSet().toList()
+        ..sort((a, b) => a == 'Local' ? -1 : 1);
+      if (groups.isNotEmpty) _selectedGroup = groups.first;
+      final first = games.firstWhereOrNull((g) => g.drawType == _selectedGroup)
+          ?? games.first;
+      _selectedGameId = first.id;
+    }
+
+    _refreshWorker = ever(lotteryController.drawRefreshTick, (_) {
+      if (mounted) _fetchDrawResults();
+    });
+
     _fetchDrawResults();
   }
 
+  @override
+  void dispose() {
+    _refreshWorker?.dispose();
+    super.dispose();
+  }
+
+  Widget _gameLogo(String? imageUrl, String gameName, double size) {
+    final fallback = gameName.contains('2D')
+        ? 'assets/images/logos/lotto2d.png'
+        : 'assets/images/logos/lotto3d.png';
+    return ClipRRect(
+      borderRadius: BorderRadius.circular(6),
+      child: SizedBox(
+        width: size,
+        height: size,
+        child: (imageUrl?.isNotEmpty == true)
+            ? Image.network(
+                imageUrl!,
+                fit: BoxFit.cover,
+                errorBuilder: (_, __, ___) =>
+                    Image.asset(fallback, fit: BoxFit.cover),
+              )
+            : Image.asset(fallback, fit: BoxFit.cover),
+      ),
+    );
+  }
+
   Future<void> _fetchDrawResults() async {
+    if (!mounted) return;
     setState(() {
       isLoadingResults = true;
       _hasError = false;
     });
 
     try {
-      // Get the game ID based on selected tab
       final games = lotteryController.availableGames;
       if (games.isEmpty) {
-        setState(() {
-          isLoadingResults = false;
-        });
+        if (mounted) setState(() { isLoadingResults = false; });
         return;
       }
 
-      final selectedGame = games[selectedTab];
+      final selectedGame = games.firstWhereOrNull((g) => g.id == _selectedGameId)
+          ?? games[selectedTab];
       final drawDate =
           '${selectedDate.year}-${selectedDate.month.toString().padLeft(2, '0')}-${selectedDate.day.toString().padLeft(2, '0')}';
 
@@ -51,11 +103,13 @@ class _DashboardPageState extends State<DashboardPage> {
         drawDate: drawDate,
       );
 
+      if (!mounted) return;
       setState(() {
         drawResults = results;
         isLoadingResults = false;
       });
     } catch (e) {
+      if (!mounted) return;
       setState(() {
         isLoadingResults = false;
         _hasError = true;
@@ -69,125 +123,152 @@ class _DashboardPageState extends State<DashboardPage> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          // Lottery type tabs
-          Container(
-            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-            decoration: BoxDecoration(color: Colors.grey[100]),
-            child: Row(
-              children: [
-                Expanded(
-                  child: GestureDetector(
-                    onTap: () {
-                      setState(() {
-                        selectedTab = 0;
-                      });
-                      _fetchDrawResults();
-                    },
-                    child: Container(
-                      padding: const EdgeInsets.symmetric(
-                        horizontal: 16,
-                        vertical: 12,
-                      ),
-                      decoration: BoxDecoration(
-                        color: selectedTab == 0
-                            ? Colors.white
-                            : Colors.grey[50],
-                        borderRadius: BorderRadius.circular(12),
-                      ),
-                      child: Row(
-                        mainAxisAlignment: MainAxisAlignment.center,
-                        children: [
-                          Container(
-                            width: 32,
-                            height: 32,
-                            decoration: BoxDecoration(
-                              borderRadius: BorderRadius.circular(6),
-                              image: const DecorationImage(
-                                image: AssetImage(
-                                  'assets/images/logos/lotto2d.png',
+          // Group + game tabs
+          Builder(builder: (context) {
+            final allGames = lotteryController.availableGames;
+            final groups = allGames.map((g) => g.drawType).toSet().toList()
+              ..sort((a, b) => a == 'Local' ? -1 : 1);
+            final effectiveGroup = groups.contains(_selectedGroup)
+                ? _selectedGroup
+                : (groups.isNotEmpty ? groups.first : '');
+            final filteredGames =
+                allGames.where((g) => g.drawType == effectiveGroup).toList();
+
+            return Container(
+              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+              decoration: BoxDecoration(color: Colors.grey[100]),
+              child: Column(
+                children: [
+                  // Group tabs — only when multiple groups exist
+                  if (groups.length > 1) ...[
+                    Row(
+                      children: [
+                        for (int i = 0; i < groups.length; i++) ...[
+                          if (i > 0) const SizedBox(width: 8),
+                          Expanded(
+                            child: GestureDetector(
+                              onTap: () {
+                                final group = groups[i];
+                                final firstInGroup = allGames
+                                    .firstWhereOrNull(
+                                      (g) => g.drawType == group,
+                                    );
+                                setState(() {
+                                  _selectedGroup = group;
+                                  if (firstInGroup != null) {
+                                    _selectedGameId = firstInGroup.id;
+                                    selectedTab = 0;
+                                  }
+                                });
+                                _fetchDrawResults();
+                              },
+                              child: Container(
+                                padding: const EdgeInsets.symmetric(
+                                  vertical: 10,
                                 ),
-                                fit: BoxFit.cover,
+                                decoration: BoxDecoration(
+                                  color: effectiveGroup == groups[i]
+                                      ? const Color(0xFF2563EB)
+                                      : Colors.grey[200],
+                                  borderRadius: BorderRadius.circular(10),
+                                ),
+                                child: Text(
+                                  '${groups[i]} Games',
+                                  textAlign: TextAlign.center,
+                                  style: TextStyle(
+                                    fontWeight: FontWeight.w600,
+                                    fontSize: 13,
+                                    color: effectiveGroup == groups[i]
+                                        ? Colors.white
+                                        : Colors.grey[600],
+                                  ),
+                                ),
                               ),
                             ),
                           ),
-                          const SizedBox(width: 12),
-                          const Text(
-                            '2D Lotto',
-                            style: TextStyle(
-                              fontWeight: FontWeight.w600,
-                              fontSize: 14,
-                            ),
-                          ),
                         ],
-                      ),
+                      ],
                     ),
-                  ),
-                ),
-                const SizedBox(width: 12),
-                Expanded(
-                  child: GestureDetector(
-                    onTap: () {
-                      setState(() {
-                        selectedTab = 1;
-                      });
-                      _fetchDrawResults();
-                    },
-                    child: Container(
-                      padding: const EdgeInsets.symmetric(
-                        horizontal: 16,
-                        vertical: 12,
-                      ),
-                      decoration: BoxDecoration(
-                        color: selectedTab == 1
-                            ? Colors.white
-                            : Colors.grey[50],
-                        borderRadius: BorderRadius.circular(12),
-                      ),
-                      child: Row(
-                        mainAxisAlignment: MainAxisAlignment.center,
-                        children: [
-                          Container(
-                            width: 32,
-                            height: 32,
-                            decoration: BoxDecoration(
-                              borderRadius: BorderRadius.circular(6),
-                              image: const DecorationImage(
-                                image: AssetImage(
-                                  'assets/images/logos/lotto3d.png',
+                    const SizedBox(height: 10),
+                  ],
+
+                  // Game chips for selected group
+                  if (filteredGames.isNotEmpty)
+                    Row(
+                      children: [
+                        for (int i = 0; i < filteredGames.length; i++) ...[
+                          if (i > 0) const SizedBox(width: 8),
+                          Expanded(
+                            child: GestureDetector(
+                              onTap: () {
+                                setState(() {
+                                  selectedTab = i;
+                                  _selectedGameId = filteredGames[i].id;
+                                });
+                                _fetchDrawResults();
+                              },
+                              child: Container(
+                                padding: const EdgeInsets.symmetric(
+                                  horizontal: 16,
+                                  vertical: 12,
                                 ),
-                                fit: BoxFit.cover,
+                                decoration: BoxDecoration(
+                                  color: selectedTab == i
+                                      ? Colors.white
+                                      : Colors.grey[50],
+                                  borderRadius: BorderRadius.circular(12),
+                                ),
+                                child: Row(
+                                  mainAxisAlignment: MainAxisAlignment.center,
+                                  children: [
+                                    _gameLogo(
+                                      filteredGames[i].imageUrl,
+                                      filteredGames[i].name,
+                                      28,
+                                    ),
+                                    const SizedBox(width: 8),
+                                    Flexible(
+                                      child: Text(
+                                        filteredGames[i].name,
+                                        overflow: TextOverflow.ellipsis,
+                                        style: TextStyle(
+                                          fontWeight: FontWeight.w600,
+                                          fontSize: 13,
+                                          color: selectedTab == i
+                                              ? Colors.black87
+                                              : Colors.grey[400],
+                                        ),
+                                      ),
+                                    ),
+                                  ],
+                                ),
                               ),
                             ),
                           ),
-                          const SizedBox(width: 12),
-                          Text(
-                            '3D Lotto',
-                            style: TextStyle(
-                              fontWeight: FontWeight.w600,
-                              fontSize: 14,
-                              color: selectedTab == 1
-                                  ? Colors.black87
-                                  : Colors.grey[400],
-                            ),
-                          ),
                         ],
-                      ),
+                      ],
                     ),
-                  ),
-                ),
-              ],
-            ),
-          ),
+                ],
+              ),
+            );
+          }),
 
           Padding(
             padding: const EdgeInsets.symmetric(horizontal: 16),
             child: Column(
               children: [
                 const SizedBox(height: 20),
-                // Date picker
+                // Date picker + chart switcher on same row
                 Row(
-                  mainAxisAlignment: MainAxisAlignment.end,
                   children: [
+                    _ChartStyleSwitcher(
+                      selected: _chartStyle,
+                      onChanged: (v) {
+                        setState(() => _chartStyle = v);
+                        _storage.write(_kChartStyleKey, v);
+                      },
+                    ),
+                    const Spacer(),
                     GestureDetector(
                       onTap: () => _selectDate(context),
                       child: Container(
@@ -267,22 +348,24 @@ class _DashboardPageState extends State<DashboardPage> {
 
   List<Widget> _buildDrawCards() {
     if (drawResults == null || drawResults!.drawTimes.isEmpty) return [];
-    final allAmounts = drawResults!.drawTimes
-        .map((dt) => dt.latestResult?.winAmount ?? 0)
-        .toList();
-    return drawResults!.drawTimes.asMap().entries.map((entry) {
-      final i = entry.key;
-      final drawTime = entry.value;
+    return drawResults!.drawTimes.map((drawTime) {
       final formattedTime = _formatDrawTime(drawTime.drawTime ?? '');
       final resultText = _parseResultString(drawTime.latestResult?.result);
+      final b = drawTime.betSummary?.totalBet ?? 0;
+      final w = drawTime.betSummary?.totalWon ?? 0;
+      // Per-card scale: normalize against the larger of gross vs hits FOR
+      // THIS draw only. A shared global scale hides small bars when another
+      // draw has a huge winning payout dominating the range.
+      final perCardMax = b > w ? b : w;
       return _buildDrawCard(
         time: formattedTime,
         result: resultText,
         winningAmnt: drawTime.latestResult?.winAmount?.toString(),
-        chartData: allAmounts,
-        highlightIndex: i,
-        totalBet: drawTime.betSummary?.totalBet ?? 0,
-        totalWon: drawTime.betSummary?.totalWon ?? 0,
+        totalBet: b,
+        totalWon: w,
+        winningBetsCount: drawTime.betSummary?.winningBetsCount ?? 0,
+        maxTotalBet: perCardMax,
+        chartStyle: _chartStyle,
       );
     }).toList();
   }
@@ -291,80 +374,251 @@ class _DashboardPageState extends State<DashboardPage> {
     required String time,
     required String result,
     required String? winningAmnt,
-    required List<int> chartData,
-    required int highlightIndex,
     required int totalBet,
     required int totalWon,
+    required int winningBetsCount,
+    required int maxTotalBet,
+    required String chartStyle,
   }) {
+    final hasResult = result != '----';
+    final hasActivity = totalBet > 0;
+
     return Container(
-      margin: const EdgeInsets.only(bottom: 12),
-      padding: const EdgeInsets.all(16),
+      margin: const EdgeInsets.only(bottom: 14),
       decoration: BoxDecoration(
         color: Colors.white,
-        borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: Colors.grey[200]!),
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: const Color(0xFFE8EEFB), width: 1),
         boxShadow: [
           BoxShadow(
-            color: Colors.grey[100]!,
+            color: const Color(0xFF2563EB).withValues(alpha: 0.06),
+            blurRadius: 16,
+            offset: const Offset(0, 4),
+          ),
+          BoxShadow(
+            color: Colors.black.withValues(alpha: 0.03),
             blurRadius: 4,
-            offset: const Offset(0, 2),
+            offset: const Offset(0, 1),
           ),
         ],
       ),
       child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Row(
-            mainAxisAlignment: MainAxisAlignment.spaceBetween,
-            children: [
-              Text(
-                time,
-                style: const TextStyle(
-                  fontSize: 14,
-                  fontWeight: FontWeight.w600,
-                  color: Colors.black87,
+          // ── Header strip ────────────────────────────────────────
+          Container(
+            padding: const EdgeInsets.fromLTRB(16, 12, 12, 12),
+            decoration: const BoxDecoration(
+              color: Color(0xFFF8FAFF),
+              borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
+              border: Border(
+                bottom: BorderSide(color: Color(0xFFEEF2FB), width: 1),
+              ),
+            ),
+            child: Row(
+              children: [
+                Container(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 10,
+                    vertical: 4,
+                  ),
+                  decoration: BoxDecoration(
+                    color: const Color(0xFF2563EB),
+                    borderRadius: BorderRadius.circular(20),
+                  ),
+                  child: Text(
+                    time,
+                    style: const TextStyle(
+                      fontSize: 12,
+                      fontWeight: FontWeight.w700,
+                      color: Colors.white,
+                      letterSpacing: 0.3,
+                    ),
+                  ),
                 ),
-              ),
-              IconButton(
-                icon: const Icon(Icons.more_vert),
-                iconSize: 20,
-                padding: EdgeInsets.zero,
-                constraints: const BoxConstraints(),
-                onPressed: () {},
-              ),
-            ],
+                const Spacer(),
+                if (hasResult)
+                  Container(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 8,
+                      vertical: 4,
+                    ),
+                    decoration: BoxDecoration(
+                      color: const Color(0xFFECFDF5),
+                      borderRadius: BorderRadius.circular(20),
+                    ),
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Container(
+                          width: 6,
+                          height: 6,
+                          decoration: const BoxDecoration(
+                            color: Color(0xFF10B981),
+                            shape: BoxShape.circle,
+                          ),
+                        ),
+                        const SizedBox(width: 5),
+                        const Text(
+                          'Result Posted',
+                          style: TextStyle(
+                            fontSize: 11,
+                            fontWeight: FontWeight.w600,
+                            color: Color(0xFF059669),
+                          ),
+                        ),
+                      ],
+                    ),
+                  )
+                else
+                  Container(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 8,
+                      vertical: 4,
+                    ),
+                    decoration: BoxDecoration(
+                      color: const Color(0xFFFEF3C7),
+                      borderRadius: BorderRadius.circular(20),
+                    ),
+                    child: const Text(
+                      'Pending',
+                      style: TextStyle(
+                        fontSize: 11,
+                        fontWeight: FontWeight.w600,
+                        color: Color(0xFFD97706),
+                      ),
+                    ),
+                  ),
+              ],
+            ),
           ),
-          const SizedBox(height: 12),
-          // Result number + mini bar chart
-          Row(
-            crossAxisAlignment: CrossAxisAlignment.center,
-            children: [
-              Text(
-                result,
-                style: TextStyle(
-                  fontSize: 36,
-                  fontWeight: FontWeight.bold,
-                  color: result == "----" ? Colors.grey : Colors.black,
-                  letterSpacing: 2,
+
+          // ── Body ────────────────────────────────────────────────
+          Padding(
+            padding: const EdgeInsets.fromLTRB(16, 16, 16, 16),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                // Gross Amount — HERO element
+                Row(
+                  crossAxisAlignment: CrossAxisAlignment.end,
+                  children: [
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          const Text(
+                            'GROSS SALES',
+                            style: TextStyle(
+                              fontSize: 10,
+                              fontWeight: FontWeight.w800,
+                              color: Color(0xFF94A3B8),
+                              letterSpacing: 1.2,
+                            ),
+                          ),
+                          const SizedBox(height: 4),
+                          Text(
+                            hasActivity
+                                ? _formatAmount(totalBet.toString())
+                                : '₱ —',
+                            style: TextStyle(
+                              fontSize: 30,
+                              fontWeight: FontWeight.w800,
+                              color: hasActivity
+                                  ? const Color(0xFF1E40AF)
+                                  : const Color(0xFFCBD5E1),
+                              letterSpacing: -0.5,
+                              height: 1.1,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                    // Result numbers — secondary, right-aligned
+                    Column(
+                      crossAxisAlignment: CrossAxisAlignment.end,
+                      children: [
+                        const Text(
+                          'RESULT',
+                          style: TextStyle(
+                            fontSize: 10,
+                            fontWeight: FontWeight.w800,
+                            color: Color(0xFF94A3B8),
+                            letterSpacing: 1.2,
+                          ),
+                        ),
+                        const SizedBox(height: 4),
+                        Text(
+                          result,
+                          style: TextStyle(
+                            fontSize: 26,
+                            fontWeight: FontWeight.w900,
+                            color: hasResult
+                                ? const Color(0xFF0F172A)
+                                : const Color(0xFFCBD5E1),
+                            letterSpacing: 3,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ],
                 ),
-              ),
-              const Spacer(),
-              _MiniLineChart(
-                values: chartData,
-                highlightIndex: highlightIndex,
-                isGreen: totalBet > totalWon,
-                isFlat: totalBet == totalWon,
-              ),
-            ],
-          ),
-          const SizedBox(height: 12),
-          // Status badge
-          Text(
-            _formatAmount(winningAmnt),
-            style: TextStyle(
-              fontSize: 12,
-              color: Colors.grey[700],
-              fontWeight: FontWeight.w500,
+
+                const SizedBox(height: 16),
+
+                // ── Gross vs Hits chart ────────────────────────────
+                if (chartStyle == '1b')
+                  _GrossHitsBar(totalBet: totalBet, totalWon: totalWon, maxTotalBet: maxTotalBet)
+                else if (chartStyle == '1c')
+                  _GrossHitsChips(totalBet: totalBet, totalWon: totalWon)
+                else
+                  _GrossHitsRing(totalBet: totalBet, totalWon: totalWon),
+
+                // ── No of ticket wins ──────────────────────────────
+                if (winningBetsCount > 0) ...[
+                  const SizedBox(height: 12),
+                  Container(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 12,
+                      vertical: 8,
+                    ),
+                    decoration: BoxDecoration(
+                      color: const Color(0xFFF0FDF4),
+                      borderRadius: BorderRadius.circular(10),
+                      border: Border.all(
+                        color: const Color(0xFFBBF7D0),
+                        width: 1,
+                      ),
+                    ),
+                    child: Row(
+                      children: [
+                        const Icon(
+                          Icons.emoji_events_rounded,
+                          size: 14,
+                          color: Color(0xFF059669),
+                        ),
+                        const SizedBox(width: 6),
+                        const Text(
+                          'No of Ticket wins',
+                          style: TextStyle(
+                            fontSize: 12,
+                            fontWeight: FontWeight.w600,
+                            color: Color(0xFF047857),
+                          ),
+                        ),
+                        const Spacer(),
+                        Text(
+                          '$winningBetsCount',
+                          style: const TextStyle(
+                            fontSize: 14,
+                            fontWeight: FontWeight.w800,
+                            color: Color(0xFF059669),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
+              ],
             ),
           ),
         ],
@@ -408,19 +662,30 @@ class _DashboardPageState extends State<DashboardPage> {
     return '$weekday, $month.$day, ${date.year}';
   }
 
-  String _formatDrawTime(String isoTime) {
+  String _formatDrawTime(String raw) {
+    if (raw.isEmpty) return raw;
     try {
-      // Parse ISO 8601 format: "0000-01-01T10:30:00Z"
-      final time = DateTime.parse(isoTime);
-      final hour = time.hour;
-      final minute = time.minute;
+      int hour;
+      int minute;
+      // Backend may send either an ISO 8601 timestamp
+      // ("0000-01-01T14:00:00Z") or a bare Postgres time ("14:00:00").
+      if (raw.contains('T')) {
+        final time = DateTime.parse(raw);
+        hour = time.hour;
+        minute = time.minute;
+      } else {
+        final parts = raw.split(':');
+        if (parts.length < 2) return raw;
+        hour = int.parse(parts[0]);
+        minute = int.parse(parts[1]);
+      }
 
       final period = hour >= 12 ? 'PM' : 'AM';
       final displayHour = hour > 12 ? hour - 12 : (hour == 0 ? 12 : hour);
 
       return '${displayHour.toString().padLeft(2, '0')}:${minute.toString().padLeft(2, '0')} $period';
-    } catch (e) {
-      return isoTime; // Return original if parsing fails
+    } catch (_) {
+      return raw;
     }
   }
 
@@ -444,7 +709,7 @@ class _DashboardPageState extends State<DashboardPage> {
       context: context,
       initialDate: selectedDate,
       firstDate: DateTime(2020),
-      lastDate: DateTime.now(),
+      lastDate: DateTime(2030),
       builder: (context, child) {
         return Theme(
           data: Theme.of(context).copyWith(
@@ -466,108 +731,488 @@ class _DashboardPageState extends State<DashboardPage> {
   }
 }
 
-class _MiniLineChart extends StatelessWidget {
-  final List<int> values;
-  final int highlightIndex;
-  final bool isGreen;
-  final bool isFlat;
+class _GrossHitsRing extends StatelessWidget {
+  final int totalBet;
+  final int totalWon;
 
-  const _MiniLineChart({
-    required this.values,
-    required this.highlightIndex,
-    required this.isGreen,
-    this.isFlat = false,
+  const _GrossHitsRing({required this.totalBet, required this.totalWon});
+
+  String _fmt(int v) {
+    if (v == 0) return '₱ 0';
+    final s = v.toString();
+    final buf = StringBuffer();
+    for (int i = 0; i < s.length; i++) {
+      if (i > 0 && (s.length - i) % 3 == 0) buf.write(',');
+      buf.write(s[i]);
+    }
+    return '₱ ${buf.toString()}';
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final netAmount = totalBet - totalWon;
+    final isProfit = netAmount >= 0;
+    // Stacked ring: blue arc for sales + red arc for hits, together fill the
+    // full circle in proportion to their share of the (sales + hits) total.
+    // Both arcs are on the same ring so they connect visually.
+    final total = totalBet + totalWon;
+    final salesFraction = total > 0 ? totalBet / total : 0.0;
+    final hitsFraction = total > 0 ? totalWon / total : 0.0;
+
+    return Row(
+      crossAxisAlignment: CrossAxisAlignment.center,
+      children: [
+        // Ring chart
+        SizedBox(
+          width: 84,
+          height: 84,
+          child: Stack(
+            alignment: Alignment.center,
+            children: [
+              CustomPaint(
+                size: const Size(84, 84),
+                painter: _RingPainter(
+                  salesFraction: salesFraction,
+                  hitsFraction: hitsFraction,
+                  isOverPayout: totalWon > totalBet,
+                ),
+              ),
+              Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Text(
+                    _fmt(totalBet),
+                    style: TextStyle(
+                      fontSize: 10,
+                      fontWeight: FontWeight.w800,
+                      color: isProfit ? const Color(0xFF1D3A8A) : const Color(0xFF9A2C24),
+                      height: 1.2,
+                    ),
+                  ),
+                  const Text(
+                    'Sales',
+                    style: TextStyle(fontSize: 7, fontWeight: FontWeight.w600, color: Color(0xFF9AA3B2)),
+                  ),
+                  Container(height: 1, width: 20, color: Color(0xFFE2E8F0), margin: EdgeInsets.symmetric(vertical: 2)),
+                  Text(
+                    _fmt(totalWon),
+                    style: const TextStyle(
+                      fontSize: 10,
+                      fontWeight: FontWeight.w800,
+                      color: Color(0xFF9A2C24),
+                      height: 1.2,
+                    ),
+                  ),
+                  const Text(
+                    'Hits',
+                    style: TextStyle(fontSize: 7, fontWeight: FontWeight.w600, color: Color(0xFF9AA3B2)),
+                  ),
+                ],
+              ),
+            ],
+          ),
+        ),
+        const SizedBox(width: 16),
+        // Stats column
+        Expanded(
+          child: Column(
+            children: [
+              // Hits row
+              Row(
+                children: [
+                  Container(
+                    width: 7,
+                    height: 7,
+                    decoration: const BoxDecoration(
+                      color: Color(0xFFDC2626),
+                      shape: BoxShape.circle,
+                    ),
+                  ),
+                  const SizedBox(width: 6),
+                  const Text(
+                    'Hits',
+                    style: TextStyle(fontSize: 12, fontWeight: FontWeight.w700, color: Color(0xFFB4453F)),
+                  ),
+                  const Spacer(),
+                  Text(
+                    _fmt(totalWon),
+                    style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w800, color: Color(0xFF9A2C24)),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 8),
+              const Divider(height: 1, color: Color(0xFFEEF1F6)),
+              const SizedBox(height: 8),
+              // Net Result row
+              Row(
+                children: [
+                  Text(
+                    'Net Result',
+                    style: TextStyle(
+                      fontSize: 12,
+                      fontWeight: FontWeight.w700,
+                      color: isProfit ? const Color(0xFF1D3A8A) : const Color(0xFFB91C1C),
+                    ),
+                  ),
+                  const Spacer(),
+                  Text(
+                    isProfit ? '+${_fmt(netAmount)}' : '-${_fmt(netAmount.abs())}',
+                    style: TextStyle(
+                      fontSize: 13,
+                      fontWeight: FontWeight.w800,
+                      color: isProfit ? const Color(0xFF1D3A8A) : const Color(0xFFB91C1C),
+                    ),
+                  ),
+                ],
+              ),
+            ],
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+class _RingPainter extends CustomPainter {
+  final double salesFraction;
+  final double hitsFraction;
+  final bool isOverPayout;
+
+  _RingPainter({
+    required this.salesFraction,
+    required this.hitsFraction,
+    required this.isOverPayout,
+  });
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final center = Offset(size.width / 2, size.height / 2);
+    final radius = (size.width / 2) - 6;
+    const strokeWidth = 10.0;
+    const twoPi = 2 * math.pi;
+    const startAngle = -math.pi / 2;
+
+    // Background track
+    final trackPaint = Paint()
+      ..color = const Color(0xFFEEF1F6)
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = strokeWidth
+      ..strokeCap = StrokeCap.butt;
+    canvas.drawCircle(center, radius, trackPaint);
+
+    final rect = Rect.fromCircle(center: center, radius: radius);
+    final salesSweep = twoPi * salesFraction;
+    final hitsSweep = twoPi * hitsFraction;
+
+    // Sales arc — blue, starts at top
+    if (salesSweep > 0) {
+      final salesPaint = Paint()
+        ..color = const Color(0xFF2563EB)
+        ..style = PaintingStyle.stroke
+        ..strokeWidth = strokeWidth
+        ..strokeCap = StrokeCap.butt;
+      canvas.drawArc(rect, startAngle, salesSweep, false, salesPaint);
+    }
+
+    // Hits arc — continues from where sales ended. Red when over-payout,
+    // green otherwise so the profit/loss state is instantly readable.
+    if (hitsSweep > 0) {
+      final hitsPaint = Paint()
+        ..color = isOverPayout
+            ? const Color(0xFFDC2626)
+            : const Color(0xFF10B981)
+        ..style = PaintingStyle.stroke
+        ..strokeWidth = strokeWidth
+        ..strokeCap = StrokeCap.butt;
+      canvas.drawArc(rect, startAngle + salesSweep, hitsSweep, false, hitsPaint);
+    }
+  }
+
+  @override
+  bool shouldRepaint(_RingPainter old) =>
+      old.salesFraction != salesFraction ||
+      old.hitsFraction != hitsFraction ||
+      old.isOverPayout != isOverPayout;
+}
+
+// ── 1b: Single Hits bar relative to Gross + Net Result callout ──────────────
+class _GrossHitsBar extends StatelessWidget {
+  final int totalBet;
+  final int totalWon;
+  final int maxTotalBet;
+  const _GrossHitsBar({required this.totalBet, required this.totalWon, required this.maxTotalBet});
+
+  String _fmt(int v) {
+    if (v == 0) return '₱ 0';
+    final s = v.toString();
+    final buf = StringBuffer();
+    for (int i = 0; i < s.length; i++) {
+      if (i > 0 && (s.length - i) % 3 == 0) buf.write(',');
+      buf.write(s[i]);
+    }
+    return '₱ ${buf.toString()}';
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final grossFactor = maxTotalBet > 0 ? (totalBet / maxTotalBet).clamp(0.0, 1.0) : 0.0;
+    final hitsAbsoluteFactor = maxTotalBet > 0 ? (totalWon / maxTotalBet).clamp(0.0, 1.0) : 0.0;
+    final netAmount = totalBet - totalWon;
+    final isProfit = netAmount >= 0;
+    final isOverPayout = totalWon > totalBet;
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Row(
+          crossAxisAlignment: CrossAxisAlignment.end,
+          children: [
+            // Gross bar (proportional to max across all draw times)
+            _Bar(
+              value: _fmt(totalBet),
+              heightFactor: grossFactor,
+              color: const Color(0xFF2563EB),
+              gradientTop: const Color(0xFF3B7BF0),
+              label: 'Gross',
+              labelColor: const Color(0xFF3B5DAA),
+              valueColor: const Color(0xFF1D3A8A),
+            ),
+            const SizedBox(width: 18),
+            // Hits bar (proportional to max gross)
+            _Bar(
+              value: _fmt(totalWon),
+              heightFactor: hitsAbsoluteFactor,
+              color: isOverPayout ? const Color(0xFFDC2626) : const Color(0xFF10B981),
+              gradientTop: isOverPayout ? const Color(0xFFEC5A50) : const Color(0xFF34D399),
+              label: 'Hits',
+              labelColor: isOverPayout ? const Color(0xFFB4453F) : const Color(0xFF047857),
+              valueColor: isOverPayout ? const Color(0xFF9A2C24) : const Color(0xFF065F46),
+            ),
+          ],
+        ),
+        const SizedBox(height: 10),
+        Container(
+          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 9),
+          decoration: BoxDecoration(
+            color: isProfit ? const Color(0xFFEFF4FE) : const Color(0xFFFDEBEC),
+            borderRadius: BorderRadius.circular(10),
+          ),
+          child: Row(
+            children: [
+              Icon(
+                isProfit ? Icons.trending_up_rounded : Icons.trending_down_rounded,
+                size: 15,
+                color: isProfit ? const Color(0xFF2563EB) : const Color(0xFFB91C1C),
+              ),
+              const SizedBox(width: 6),
+              Text(
+                'Net Result',
+                style: TextStyle(
+                  fontSize: 12,
+                  fontWeight: FontWeight.w700,
+                  color: isProfit ? const Color(0xFF1D3A8A) : const Color(0xFFB91C1C),
+                ),
+              ),
+              const Spacer(),
+              Text(
+                isProfit ? '+${_fmt(netAmount)}' : '-${_fmt(netAmount.abs())}',
+                style: TextStyle(
+                  fontSize: 13,
+                  fontWeight: FontWeight.w800,
+                  color: isProfit ? const Color(0xFF1D3A8A) : const Color(0xFFB91C1C),
+                ),
+              ),
+            ],
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+class _Bar extends StatelessWidget {
+  final String value;
+  final double heightFactor;
+  final Color color;
+  final Color gradientTop;
+  final String label;
+  final Color labelColor;
+  final Color valueColor;
+
+  const _Bar({
+    required this.value,
+    required this.heightFactor,
+    required this.color,
+    required this.gradientTop,
+    required this.label,
+    required this.labelColor,
+    required this.valueColor,
   });
 
   @override
   Widget build(BuildContext context) {
-    final color = isFlat
-        ? const Color(0xFFB0B0B0)
-        : isGreen
-        ? const Color(0xFF22C55E)
-        : const Color(0xFFEF4444);
+    const maxH = 72.0;
+    final barH = (maxH * heightFactor).clamp(4.0, maxH);
 
-    return SizedBox(
-      width: 100,
-      height: 60,
-      child: CustomPaint(
-        painter: _LineChartPainter(values: values, color: color),
+    return Expanded(
+      child: Column(
+        children: [
+          Text(
+            value,
+            style: TextStyle(fontSize: 12, fontWeight: FontWeight.w800, color: valueColor),
+          ),
+          const SizedBox(height: 6),
+          Align(
+            alignment: Alignment.bottomCenter,
+            child: Container(
+              height: barH,
+              decoration: BoxDecoration(
+                gradient: LinearGradient(
+                  begin: Alignment.topCenter,
+                  end: Alignment.bottomCenter,
+                  colors: [gradientTop, color],
+                ),
+                borderRadius: const BorderRadius.vertical(top: Radius.circular(8), bottom: Radius.circular(4)),
+              ),
+            ),
+          ),
+          const SizedBox(height: 6),
+          Text(label, style: TextStyle(fontSize: 11, fontWeight: FontWeight.w700, color: labelColor)),
+        ],
       ),
     );
   }
 }
 
-class _LineChartPainter extends CustomPainter {
-  final List<int> values;
-  final Color color;
+// ── 1c: Net Result hero + Hits chip only (Gross already shown above) ─────────
+class _GrossHitsChips extends StatelessWidget {
+  final int totalBet;
+  final int totalWon;
+  const _GrossHitsChips({required this.totalBet, required this.totalWon});
 
-  _LineChartPainter({required this.values, required this.color});
-
-  @override
-  void paint(Canvas canvas, Size size) {
-    if (values.length < 2) return;
-
-    final maxVal = values.reduce((a, b) => a > b ? a : b).toDouble();
-    final minVal = values.reduce((a, b) => a < b ? a : b).toDouble();
-    final range = (maxVal - minVal).clamp(1.0, double.infinity);
-
-    // Map values to canvas points
-    final points = List.generate(values.length, (i) {
-      final x = i / (values.length - 1) * size.width;
-      final y =
-          size.height -
-          ((values[i] - minVal) / range) * (size.height * 0.7) -
-          size.height * 0.1;
-      return Offset(x, y);
-    });
-
-    // Build smooth bezier path
-    final linePath = Path();
-    linePath.moveTo(points[0].dx, points[0].dy);
-    for (int i = 0; i < points.length - 1; i++) {
-      final cp1 = Offset(
-        points[i].dx + (points[i + 1].dx - points[i].dx) / 2,
-        points[i].dy,
-      );
-      final cp2 = Offset(
-        points[i].dx + (points[i + 1].dx - points[i].dx) / 2,
-        points[i + 1].dy,
-      );
-      linePath.cubicTo(
-        cp1.dx,
-        cp1.dy,
-        cp2.dx,
-        cp2.dy,
-        points[i + 1].dx,
-        points[i + 1].dy,
-      );
+  String _fmt(int v) {
+    if (v == 0) return '₱ 0';
+    final s = v.toString();
+    final buf = StringBuffer();
+    for (int i = 0; i < s.length; i++) {
+      if (i > 0 && (s.length - i) % 3 == 0) buf.write(',');
+      buf.write(s[i]);
     }
-
-    // Filled area path
-    final fillPath = Path.from(linePath)
-      ..lineTo(size.width, size.height)
-      ..lineTo(0, size.height)
-      ..close();
-
-    canvas.drawPath(
-      fillPath,
-      Paint()
-        ..color = color.withOpacity(0.12)
-        ..style = PaintingStyle.fill,
-    );
-
-    canvas.drawPath(
-      linePath,
-      Paint()
-        ..color = color
-        ..style = PaintingStyle.stroke
-        ..strokeWidth = 2.2
-        ..strokeCap = StrokeCap.round
-        ..strokeJoin = StrokeJoin.round,
-    );
+    return '₱ ${buf.toString()}';
   }
 
   @override
-  bool shouldRepaint(_LineChartPainter old) =>
-      old.values != values || old.color != color;
+  Widget build(BuildContext context) {
+    final netAmount = totalBet - totalWon;
+    final isProfit = netAmount >= 0;
+
+    return Row(
+      children: [
+        // Net Result
+        Expanded(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              const Text(
+                'NET RESULT',
+                style: TextStyle(
+                  fontSize: 10,
+                  fontWeight: FontWeight.w800,
+                  color: Color(0xFF94A3B8),
+                  letterSpacing: 1.0,
+                ),
+              ),
+              const SizedBox(height: 3),
+              Text(
+                isProfit ? '+${_fmt(netAmount)}' : '-${_fmt(netAmount.abs())}',
+                style: TextStyle(
+                  fontSize: 22,
+                  fontWeight: FontWeight.w800,
+                  color: isProfit ? const Color(0xFF1D3A8A) : const Color(0xFFB91C1C),
+                  letterSpacing: -0.3,
+                  height: 1.1,
+                ),
+              ),
+            ],
+          ),
+        ),
+        const SizedBox(width: 10),
+        // Hits chip
+        Container(
+          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+          decoration: BoxDecoration(
+            color: const Color(0xFFFDEEEE),
+            borderRadius: BorderRadius.circular(9999),
+          ),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Container(
+                width: 7,
+                height: 7,
+                decoration: const BoxDecoration(color: Color(0xFFDC2626), shape: BoxShape.circle),
+              ),
+              const SizedBox(width: 5),
+              const Text('Hits', style: TextStyle(fontSize: 12, fontWeight: FontWeight.w700, color: Color(0xFFB4453F))),
+              const SizedBox(width: 6),
+              Text(
+                _fmt(totalWon),
+                style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w800, color: Color(0xFF9A2C24)),
+              ),
+            ],
+          ),
+        ),
+      ],
+    );
+  }
 }
+
+// ── Chart style switcher ─────────────────────────────────────────────────────
+class _ChartStyleSwitcher extends StatelessWidget {
+  final String selected;
+  final ValueChanged<String> onChanged;
+
+  const _ChartStyleSwitcher({required this.selected, required this.onChanged});
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      decoration: BoxDecoration(
+        color: Colors.grey[100],
+        borderRadius: BorderRadius.circular(8),
+      ),
+      padding: const EdgeInsets.all(3),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [('1a', 'Ring'), ('1b', 'Bars'), ('1c', 'Net')].map((opt) {
+          final id = opt.$1;
+          final label = opt.$2;
+          final isSelected = selected == id;
+          return GestureDetector(
+            onTap: () => onChanged(id),
+            child: AnimatedContainer(
+              duration: const Duration(milliseconds: 150),
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 5),
+              decoration: BoxDecoration(
+                color: isSelected ? Colors.white : Colors.transparent,
+                borderRadius: BorderRadius.circular(6),
+                boxShadow: isSelected
+                    ? [BoxShadow(color: Colors.black.withValues(alpha: 0.08), blurRadius: 4, offset: const Offset(0, 1))]
+                    : null,
+              ),
+              child: Text(
+                label,
+                style: TextStyle(
+                  fontSize: 12,
+                  fontWeight: FontWeight.w600,
+                  color: isSelected ? AppColors.primary : const Color(0xFF9CA3AF),
+                ),
+              ),
+            ),
+          );
+        }).toList(),
+      ),
+    );
+  }
+}
+
