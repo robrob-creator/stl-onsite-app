@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:get/get.dart';
+import 'package:package_info_plus/package_info_plus.dart';
 import '../../controllers/auth_controller.dart';
 import '../../widgets/custom_pin_input.dart';
 
@@ -13,11 +14,15 @@ class LoginPage extends StatefulWidget {
 
 class _LoginPageState extends State<LoginPage> {
   late AuthController authController;
+  String _appVersion = '';
 
   @override
   void initState() {
     super.initState();
     authController = Get.find<AuthController>();
+    PackageInfo.fromPlatform().then((info) {
+      if (mounted) setState(() => _appVersion = 'v${info.version}+${info.buildNumber}');
+    });
   }
 
   void _showImeiDialog(BuildContext context, AuthController ctrl) {
@@ -374,6 +379,23 @@ class _LoginPageState extends State<LoginPage> {
           ),
         ],
       ),
+      bottomNavigationBar: _appVersion.isEmpty
+          ? null
+          : SafeArea(
+              child: Padding(
+                padding: const EdgeInsets.only(bottom: 12, right: 16),
+                child: Align(
+                  alignment: Alignment.centerRight,
+                  child: Text(
+                    _appVersion,
+                    style: const TextStyle(
+                      fontSize: 11,
+                      color: Color(0xFFAAAAAA),
+                    ),
+                  ),
+                ),
+              ),
+            ),
     );
   }
 }
