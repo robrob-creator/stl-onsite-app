@@ -83,10 +83,15 @@ class AuthController extends GetxController with WidgetsBindingObserver {
       agentId: agentId,
     );
     if (info == null || !info.updateRequired) return;
-
-    // Already showing a version dialog — don't stack
     if (Get.isDialogOpen ?? false) return;
+    _showUpdateDialog(info, forceUpdate: info.forceUpdate);
+  }
 
+  // Called from login page before authentication — no agent_id scope check.
+  Future<void> checkAppVersionFromLogin(int buildNumber) async {
+    final info = await AppVersionService.check(buildNumber: buildNumber);
+    if (info == null || !info.updateRequired) return;
+    if (Get.isDialogOpen ?? false) return;
     _showUpdateDialog(info, forceUpdate: info.forceUpdate);
   }
 

@@ -21,7 +21,10 @@ class _LoginPageState extends State<LoginPage> {
     super.initState();
     authController = Get.find<AuthController>();
     PackageInfo.fromPlatform().then((info) {
-      if (mounted) setState(() => _appVersion = 'v${info.version}+${info.buildNumber}');
+      if (!mounted) return;
+      setState(() => _appVersion = 'v${info.version}+${info.buildNumber}');
+      final buildNumber = int.tryParse(info.buildNumber) ?? 0;
+      authController.checkAppVersionFromLogin(buildNumber);
     });
   }
 
