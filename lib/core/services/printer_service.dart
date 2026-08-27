@@ -799,32 +799,8 @@ class PrinterService {
     bytes.addAll(generator.hr(ch: '-'));
     infoRow('Gross:', currency(report.grossSales), numeric: true);
     infoRow('Comm:', currency(report.lessCommission), numeric: true);
-    bytes.addAll(
-      generator.row([
-        PosColumn(text: '', width: 1),
-        PosColumn(
-          text: 'Hits:',
-          width: 2,
-          styles: const PosStyles(bold: true),
-        ),
-        PosColumn(
-          text: currency(report.hits),
-          width: 3,
-          styles: const PosStyles(align: PosAlign.right),
-        ),
-        PosColumn(
-          text: 'Net:',
-          width: 2,
-          styles: const PosStyles(bold: true),
-        ),
-        PosColumn(
-          text: currency(report.totalNet),
-          width: 3,
-          styles: const PosStyles(align: PosAlign.right),
-        ),
-        PosColumn(text: '', width: 1),
-      ]),
-    );
+    infoRow('Hits:', currency(report.hits), numeric: true);
+    infoRow('Net:', currency(report.totalNet), numeric: true);
     infoRow('Coll:', currency(report.forCollection), numeric: true);
     infoRow('T-Bets:', report.totalBets.toString(), numeric: true);
 
