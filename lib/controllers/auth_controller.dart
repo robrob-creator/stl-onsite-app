@@ -99,53 +99,135 @@ class AuthController extends GetxController with WidgetsBindingObserver {
     Get.dialog(
       WillPopScope(
         onWillPop: () async => !forceUpdate,
-        child: AlertDialog(
-          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-          title: Text(
-            forceUpdate ? 'Update Required' : 'Update Available',
-            style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 17),
-          ),
-          content: Column(
+        child: Dialog(
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+          clipBehavior: Clip.antiAlias,
+          child: Column(
             mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Text(
-                'Version ${info.versionName} is available.',
-                style: const TextStyle(fontSize: 14, color: Color(0xFF374151)),
-              ),
-              if (info.releaseNotes.isNotEmpty) ...[
-                const SizedBox(height: 10),
-                Text(
-                  info.releaseNotes,
-                  style: const TextStyle(fontSize: 13, color: Color(0xFF6B7280)),
+              // Header
+              Container(
+                width: double.infinity,
+                padding: const EdgeInsets.symmetric(vertical: 28),
+                decoration: const BoxDecoration(
+                  gradient: LinearGradient(
+                    colors: [Color(0xFF1D4ED8), Color(0xFF2563EB)],
+                    begin: Alignment.topLeft,
+                    end: Alignment.bottomRight,
+                  ),
                 ),
-              ],
+                child: Column(
+                  children: [
+                    const Icon(Icons.system_update_rounded,
+                        color: Colors.white, size: 48),
+                    const SizedBox(height: 10),
+                    Text(
+                      forceUpdate ? 'Update Required' : 'Update Available',
+                      style: const TextStyle(
+                        color: Colors.white,
+                        fontSize: 20,
+                        fontWeight: FontWeight.w800,
+                        letterSpacing: 0.2,
+                      ),
+                    ),
+                    const SizedBox(height: 6),
+                    Container(
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: 12, vertical: 4),
+                      decoration: BoxDecoration(
+                        color: Colors.white.withValues(alpha: 0.2),
+                        borderRadius: BorderRadius.circular(20),
+                      ),
+                      child: Text(
+                        'v${info.versionName}',
+                        style: const TextStyle(
+                            color: Colors.white,
+                            fontSize: 13,
+                            fontWeight: FontWeight.w600),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              // Body
+              Padding(
+                padding: const EdgeInsets.fromLTRB(24, 20, 24, 8),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      forceUpdate
+                          ? 'This update is required to continue using the app.'
+                          : 'A new version is ready to install.',
+                      style: const TextStyle(
+                          fontSize: 14, color: Color(0xFF374151), height: 1.4),
+                    ),
+                    if (info.releaseNotes.isNotEmpty) ...[
+                      const SizedBox(height: 12),
+                      Container(
+                        width: double.infinity,
+                        padding: const EdgeInsets.all(12),
+                        decoration: BoxDecoration(
+                          color: const Color(0xFFF0F4FF),
+                          borderRadius: BorderRadius.circular(10),
+                        ),
+                        child: Text(
+                          info.releaseNotes,
+                          style: const TextStyle(
+                              fontSize: 13, color: Color(0xFF4B5563),
+                              height: 1.4),
+                        ),
+                      ),
+                    ],
+                    const SizedBox(height: 20),
+                    // Buttons
+                    SizedBox(
+                      width: double.infinity,
+                      child: ElevatedButton.icon(
+                        style: ElevatedButton.styleFrom(
+                          backgroundColor: const Color(0xFF2563EB),
+                          padding: const EdgeInsets.symmetric(vertical: 14),
+                          shape: RoundedRectangleBorder(
+                              borderRadius: BorderRadius.circular(12)),
+                          elevation: 0,
+                        ),
+                        icon: const Icon(Icons.download_rounded,
+                            color: Colors.white, size: 20),
+                        label: const Text('Update Now',
+                            style: TextStyle(
+                                color: Colors.white,
+                                fontSize: 15,
+                                fontWeight: FontWeight.w700)),
+                        onPressed: () async {
+                          final uri = Uri.parse(info.apkUrl);
+                          if (await canLaunchUrl(uri)) {
+                            await launchUrl(uri,
+                                mode: LaunchMode.externalApplication);
+                          }
+                        },
+                      ),
+                    ),
+                    if (!forceUpdate) ...[
+                      const SizedBox(height: 8),
+                      SizedBox(
+                        width: double.infinity,
+                        child: TextButton(
+                          onPressed: () => Get.back(),
+                          style: TextButton.styleFrom(
+                            padding: const EdgeInsets.symmetric(vertical: 12),
+                          ),
+                          child: const Text('Later',
+                              style: TextStyle(
+                                  color: Color(0xFF6B7280), fontSize: 14)),
+                        ),
+                      ),
+                    ],
+                    const SizedBox(height: 8),
+                  ],
+                ),
+              ),
             ],
           ),
-          actions: [
-            if (!forceUpdate)
-              TextButton(
-                onPressed: () => Get.back(),
-                child: const Text('Later',
-                    style: TextStyle(color: Color(0xFF6B7280))),
-              ),
-            ElevatedButton(
-              style: ElevatedButton.styleFrom(
-                backgroundColor: const Color(0xFF2563EB),
-                shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(10)),
-              ),
-              onPressed: () async {
-                final uri = Uri.parse(info.apkUrl);
-                if (await canLaunchUrl(uri)) {
-                  await launchUrl(uri,
-                      mode: LaunchMode.externalApplication);
-                }
-              },
-              child: const Text('Update Now',
-                  style: TextStyle(color: Colors.white)),
-            ),
-          ],
         ),
       ),
       barrierDismissible: !forceUpdate,
