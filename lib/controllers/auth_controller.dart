@@ -7,14 +7,18 @@ import 'package:flutter/services.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:device_info_plus/device_info_plus.dart';
 import 'package:android_id/android_id.dart';
+import 'package:package_info_plus/package_info_plus.dart';
+import 'package:url_launcher/url_launcher.dart';
 import '../models/login_response.dart';
 import '../core/app_constants.dart';
 import '../core/services/websocket_service.dart';
 import '../core/services/notification_service.dart';
+import '../core/services/app_version_service.dart';
 import '../models/user.dart';
 import 'lottery_controller.dart';
+import '../core/services/profile_service.dart';
 
-class AuthController extends GetxController {
+class AuthController extends GetxController with WidgetsBindingObserver {
   final RxString phoneNumber = ''.obs;
   final RxString imei = ''.obs;
   final RxString deviceImei = ''.obs; // device identifier, never overwritten
@@ -38,12 +42,109 @@ class AuthController extends GetxController {
   @override
   void onInit() {
     super.onInit();
+    WidgetsBinding.instance.addObserver(this);
     _secureStorage = const FlutterSecureStorage();
     _deviceInfo = DeviceInfoPlugin();
     Get.put(WebSocketService());
     _initializeDevice().then((_) {
       restoreSession();
     });
+  }
+
+  @override
+  void onClose() {
+    WidgetsBinding.instance.removeObserver(this);
+    super.onClose();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed && isLoggedIn) {
+      checkAppVersion();
+      _validateSessionStatus();
+    }
+  }
+
+  /// Fetches the user profile to confirm the account is still active/not blocked.
+  /// ProfileService.fetchProfile() already calls logout() on 401.
+  Future<void> _validateSessionStatus() async {
+    try {
+      await ProfileService.fetchProfile();
+    } catch (_) {}
+  }
+
+  Future<void> checkAppVersion() async {
+    final packageInfo = await PackageInfo.fromPlatform();
+    final localCode = int.tryParse(packageInfo.buildNumber) ?? 0;
+    final agentId = currentUser.value?.id;
+
+    final info = await AppVersionService.check(
+      buildNumber: localCode,
+      agentId: agentId,
+    );
+    if (info == null || !info.updateRequired) return;
+
+    // Already showing a version dialog — don't stack
+    if (Get.isDialogOpen ?? false) return;
+
+    _showUpdateDialog(info, forceUpdate: info.forceUpdate);
+  }
+
+  void _showUpdateDialog(AppVersionInfo info, {required bool forceUpdate}) {
+    Get.dialog(
+      WillPopScope(
+        onWillPop: () async => !forceUpdate,
+        child: AlertDialog(
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+          title: Text(
+            forceUpdate ? 'Update Required' : 'Update Available',
+            style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 17),
+          ),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                'Version ${info.versionName} is available.',
+                style: const TextStyle(fontSize: 14, color: Color(0xFF374151)),
+              ),
+              if (info.releaseNotes.isNotEmpty) ...[
+                const SizedBox(height: 10),
+                Text(
+                  info.releaseNotes,
+                  style: const TextStyle(fontSize: 13, color: Color(0xFF6B7280)),
+                ),
+              ],
+            ],
+          ),
+          actions: [
+            if (!forceUpdate)
+              TextButton(
+                onPressed: () => Get.back(),
+                child: const Text('Later',
+                    style: TextStyle(color: Color(0xFF6B7280))),
+              ),
+            ElevatedButton(
+              style: ElevatedButton.styleFrom(
+                backgroundColor: const Color(0xFF2563EB),
+                shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(10)),
+              ),
+              onPressed: () async {
+                final uri = Uri.parse(info.apkUrl);
+                if (await canLaunchUrl(uri)) {
+                  await launchUrl(uri,
+                      mode: LaunchMode.externalApplication);
+                }
+              },
+              child: const Text('Update Now',
+                  style: TextStyle(color: Colors.white)),
+            ),
+          ],
+        ),
+      ),
+      barrierDismissible: !forceUpdate,
+    );
   }
 
   /// Initialize device and get the device identifier.
@@ -111,6 +212,7 @@ class AuthController extends GetxController {
         }
         _connectWebSocket();
         NotificationService.registerDevice();
+        checkAppVersion();
       }
     } catch (e) {
       // Silently fail if restoration fails
@@ -255,6 +357,7 @@ class AuthController extends GetxController {
           try {
             _connectWebSocket();
             NotificationService.registerDevice();
+            checkAppVersion();
           } catch (_) {}
         });
       } else {
@@ -412,6 +515,59 @@ class AuthController extends GetxController {
         colorText: Colors.white,
         duration: const Duration(seconds: 6),
       );
+    });
+
+    wsService.on('user.bulk_status_update', (payload) {
+      final ids = (payload['ids'] as List<dynamic>? ?? [])
+          .map((e) => e.toString())
+          .toList();
+      final myId = currentUser.value?.id ?? '';
+      if (!ids.contains(myId)) return;
+      final isActive = payload['is_active'] as bool? ?? true;
+      if (!isActive) {
+        // Force logout — account deactivated
+        Get.snackbar(
+          'Account Deactivated',
+          'Your account has been deactivated. Please contact your administrator.',
+          snackPosition: SnackPosition.BOTTOM,
+          backgroundColor: const Color(0xFFEF4444),
+          colorText: Colors.white,
+          duration: const Duration(seconds: 5),
+        );
+        Future.delayed(const Duration(seconds: 2), logout);
+      }
+    });
+
+    wsService.on('game.bulk_status_update', (payload) {
+      try {
+        final lc = Get.find<LotteryController>();
+        lc.loadGames();
+      } catch (_) {}
+    });
+
+    wsService.on('draw_time.bulk_status_update', (payload) {
+      try {
+        final lc = Get.find<LotteryController>();
+        lc.loadGames(); // draw times embedded in games response
+      } catch (_) {}
+    });
+
+    wsService.on('app.version_update', (payload) {
+      final appType = payload['app_type'] as String? ?? '';
+      if (appType != 'agent') return;
+
+      // Scope check: if selected, only act when this agent is targeted.
+      final scope = payload['scope'] as String? ?? 'all';
+      if (scope == 'selected') {
+        final targetIds = (payload['target_agent_ids'] as List<dynamic>? ?? [])
+            .map((e) => e.toString())
+            .toList();
+        final myId = currentUser.value?.id ?? '';
+        if (!targetIds.contains(myId)) return;
+      }
+
+      // Re-run version check so the server determines update_required.
+      checkAppVersion();
     });
   }
 

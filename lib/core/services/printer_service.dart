@@ -799,8 +799,32 @@ class PrinterService {
     bytes.addAll(generator.hr(ch: '-'));
     infoRow('Gross:', currency(report.grossSales), numeric: true);
     infoRow('Comm:', currency(report.lessCommission), numeric: true);
-    infoRow('Hits:', currency(report.hits), numeric: true);
-    infoRow('Net:', currency(report.totalNet), numeric: true);
+    bytes.addAll(
+      generator.row([
+        PosColumn(text: '', width: 1),
+        PosColumn(
+          text: 'Hits:',
+          width: 2,
+          styles: const PosStyles(bold: true),
+        ),
+        PosColumn(
+          text: currency(report.hits),
+          width: 3,
+          styles: const PosStyles(align: PosAlign.right),
+        ),
+        PosColumn(
+          text: 'Net:',
+          width: 2,
+          styles: const PosStyles(bold: true),
+        ),
+        PosColumn(
+          text: currency(report.totalNet),
+          width: 3,
+          styles: const PosStyles(align: PosAlign.right),
+        ),
+        PosColumn(text: '', width: 1),
+      ]),
+    );
     infoRow('Coll:', currency(report.forCollection), numeric: true);
     infoRow('T-Bets:', report.totalBets.toString(), numeric: true);
 
@@ -835,28 +859,28 @@ class PrinterService {
             generator.row([
               PosColumn(
                 text: 'Game',
-                width: 3,
-                styles: const PosStyles(bold: true),
+                width: 2,
+                styles: const PosStyles(bold: true, fontType: PosFontType.fontB),
               ),
               PosColumn(
                 text: 'Bets',
                 width: 2,
-                styles: const PosStyles(bold: true, align: PosAlign.right),
+                styles: const PosStyles(bold: true, align: PosAlign.right, fontType: PosFontType.fontB),
               ),
               PosColumn(
                 text: 'Gross',
                 width: 3,
-                styles: const PosStyles(bold: true, align: PosAlign.right),
+                styles: const PosStyles(bold: true, align: PosAlign.right, fontType: PosFontType.fontB),
               ),
               PosColumn(
                 text: 'Hits',
-                width: 2,
-                styles: const PosStyles(bold: true, align: PosAlign.right),
+                width: 3,
+                styles: const PosStyles(bold: true, align: PosAlign.right, fontType: PosFontType.fontB),
               ),
               PosColumn(
                 text: 'Net',
                 width: 2,
-                styles: const PosStyles(bold: true, align: PosAlign.right),
+                styles: const PosStyles(bold: true, align: PosAlign.right, fontType: PosFontType.fontB),
               ),
             ]),
           );
@@ -867,27 +891,28 @@ class PrinterService {
               text: _abbreviateGame(
                 slot.gameName.isEmpty ? 'Game' : slot.gameName,
               ),
-              width: 3,
+              width: 2,
+              styles: const PosStyles(fontType: PosFontType.fontB),
             ),
             PosColumn(
               text: slot.lines.toString(),
               width: 2,
-              styles: const PosStyles(align: PosAlign.right),
+              styles: const PosStyles(align: PosAlign.right, fontType: PosFontType.fontB),
             ),
             PosColumn(
               text: currency(slot.gross),
               width: 3,
-              styles: const PosStyles(align: PosAlign.right),
+              styles: const PosStyles(align: PosAlign.right, fontType: PosFontType.fontB),
             ),
             PosColumn(
               text: currency(slot.payout),
-              width: 2,
-              styles: const PosStyles(align: PosAlign.right),
+              width: 3,
+              styles: const PosStyles(align: PosAlign.right, fontType: PosFontType.fontB),
             ),
             PosColumn(
               text: currency(slot.net),
               width: 2,
-              styles: const PosStyles(align: PosAlign.right),
+              styles: const PosStyles(align: PosAlign.right, fontType: PosFontType.fontB),
             ),
           ]),
         );
@@ -907,28 +932,28 @@ class PrinterService {
         generator.row([
           PosColumn(
             text: 'Game',
-            width: 3,
-            styles: const PosStyles(bold: true),
+            width: 2,
+            styles: const PosStyles(bold: true, fontType: PosFontType.fontB),
           ),
           PosColumn(
             text: 'Bets',
             width: 2,
-            styles: const PosStyles(bold: true, align: PosAlign.right),
+            styles: const PosStyles(bold: true, align: PosAlign.right, fontType: PosFontType.fontB),
           ),
           PosColumn(
             text: 'Gross',
             width: 3,
-            styles: const PosStyles(bold: true, align: PosAlign.right),
+            styles: const PosStyles(bold: true, align: PosAlign.right, fontType: PosFontType.fontB),
           ),
           PosColumn(
             text: 'Hits',
-            width: 2,
-            styles: const PosStyles(bold: true, align: PosAlign.right),
+            width: 3,
+            styles: const PosStyles(bold: true, align: PosAlign.right, fontType: PosFontType.fontB),
           ),
           PosColumn(
             text: 'Net',
             width: 2,
-            styles: const PosStyles(bold: true, align: PosAlign.right),
+            styles: const PosStyles(bold: true, align: PosAlign.right, fontType: PosFontType.fontB),
           ),
         ]),
       );
@@ -938,26 +963,26 @@ class PrinterService {
         );
         bytes.addAll(
           generator.row([
-            PosColumn(text: gameName, width: 3),
+            PosColumn(text: gameName, width: 2, styles: const PosStyles(fontType: PosFontType.fontB)),
             PosColumn(
               text: item.betCount.toString(),
               width: 2,
-              styles: const PosStyles(align: PosAlign.right),
+              styles: const PosStyles(align: PosAlign.right, fontType: PosFontType.fontB),
             ),
             PosColumn(
               text: currency(item.grossSales),
               width: 3,
-              styles: const PosStyles(align: PosAlign.right),
+              styles: const PosStyles(align: PosAlign.right, fontType: PosFontType.fontB),
             ),
             PosColumn(
               text: currency(item.hits),
-              width: 2,
-              styles: const PosStyles(align: PosAlign.right),
+              width: 3,
+              styles: const PosStyles(align: PosAlign.right, fontType: PosFontType.fontB),
             ),
             PosColumn(
               text: currency(item.net),
               width: 2,
-              styles: const PosStyles(align: PosAlign.right),
+              styles: const PosStyles(align: PosAlign.right, fontType: PosFontType.fontB),
             ),
           ]),
         );
