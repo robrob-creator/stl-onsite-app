@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:get/get.dart';
+import 'package:package_info_plus/package_info_plus.dart';
 import 'package:onstite/pages/app/collection_page.dart';
 import 'package:onstite/pages/app/eod_report_page.dart';
 import 'package:onstite/pages/app/summary_report_page.dart';
@@ -57,11 +58,15 @@ class _MainLayoutState extends State<MainLayout> {
   Timer? _disconnectTimer;
   Worker? _wsWorker;
   bool _showDisconnectedBanner = false;
+  String _appVersion = '';
 
   @override
   void initState() {
     super.initState();
     _watchWebSocketConnection();
+    PackageInfo.fromPlatform().then((info) {
+      if (mounted) setState(() => _appVersion = 'v${info.version}+${info.buildNumber}');
+    });
   }
 
   @override
@@ -507,6 +512,19 @@ class _MainLayoutState extends State<MainLayout> {
               ),
               // Spacer
               const Spacer(),
+              // App version
+              if (_appVersion.isNotEmpty)
+                Padding(
+                  padding: const EdgeInsets.only(bottom: 4),
+                  child: Text(
+                    _appVersion,
+                    textAlign: TextAlign.center,
+                    style: const TextStyle(
+                      fontSize: 11,
+                      color: Color(0xFFAAAAAA),
+                    ),
+                  ),
+                ),
               // Logout Button at bottom
               Padding(
                 padding: const EdgeInsets.only(
