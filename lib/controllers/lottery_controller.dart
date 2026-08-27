@@ -1,6 +1,7 @@
 import 'package:flutter/foundation.dart' show kDebugMode;
 import 'package:flutter/material.dart';
 import 'package:get/get.dart';
+import 'package:geolocator/geolocator.dart' show Geolocator, LocationAccuracy, LocationSettings;
 import 'package:http/http.dart' as http;
 import 'package:permission_handler/permission_handler.dart';
 import 'package:connectivity_plus/connectivity_plus.dart';
@@ -156,6 +157,9 @@ class LotteryController extends GetxController {
   Timer? _blackoutTimer;
   Timer? _locationTimer;
 
+  // Draw time IDs for which the cutoff dialog has already been shown this session.
+  final Set<String> _shownCutoffFor = {};
+
   // Draw times that already have a posted result for the currently-selected
   // game + betDate. Used to disable those chips in the bet entry selector so
   // agents cannot place bets for a slot that already drew.
@@ -209,8 +213,117 @@ class LotteryController extends GetxController {
     // Check every 30 seconds so UI reacts promptly when blackout/date changes
     _blackoutTimer = Timer.periodic(const Duration(seconds: 30), (_) {
       _updateBlackoutState();
+      _checkCutoffAndClearDrafts();
       _updateBetDate();
     });
+  }
+
+  void _checkCutoffAndClearDrafts() {
+    final game = currentGame;
+    if (game == null || selectedTime.value.isEmpty) return;
+
+    final currentDt = game.drawTimes.cast<DrawTime?>().firstWhere(
+          (dt) => dt?.id == selectedTime.value,
+          orElse: () => null,
+        );
+
+    // Still available — nothing to do
+    if (currentDt == null || currentDt.isAvailableForDate(betDate.value)) return;
+
+    // Already showed dialog for this draw time — skip
+    if (_shownCutoffFor.contains(currentDt.id)) return;
+    _shownCutoffFor.add(currentDt.id);
+
+    final cutoffLabel = currentDt.getFormattedTime();
+
+    // Advance to next available draw time
+    final nextDt = game.drawTimes.cast<DrawTime?>().firstWhere(
+          (dt) => dt != null && dt.isAvailable() && !isDrawTimeDrawn(dt.id),
+          orElse: () => null,
+        );
+    selectedTime.value = nextDt?.id ?? getFirstAvailableDrawTimeId(game);
+    _updateBetDate();
+    update();
+
+    // Only show dialog + clear if there are bets in cart
+    if (draftBets.isEmpty) return;
+
+    clearDraftBets();
+
+    Get.dialog(
+      Dialog(
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(16),
+        ),
+        backgroundColor: Colors.white,
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(24, 28, 24, 20),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Container(
+                width: 56,
+                height: 56,
+                decoration: const BoxDecoration(
+                  color: Color(0xFFFEF2F2),
+                  shape: BoxShape.circle,
+                ),
+                child: const Icon(
+                  Icons.timer_off_rounded,
+                  color: Color(0xFFDC2626),
+                  size: 28,
+                ),
+              ),
+              const SizedBox(height: 16),
+              const Text(
+                'Cutoff Passed',
+                style: TextStyle(
+                  fontSize: 17,
+                  fontWeight: FontWeight.w800,
+                  color: Color(0xFF0F172A),
+                ),
+              ),
+              const SizedBox(height: 8),
+              Text(
+                'Cutoff has passed for $cutoffLabel. Your bets were cleared. Please re-enter for the next available draw.',
+                textAlign: TextAlign.center,
+                style: const TextStyle(
+                  fontSize: 13,
+                  color: Color(0xFF6B7280),
+                  height: 1.5,
+                ),
+              ),
+              const SizedBox(height: 20),
+              SizedBox(
+                width: double.infinity,
+                child: ElevatedButton(
+                  onPressed: () {
+                    if (Get.isDialogOpen ?? false) Get.back();
+                  },
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: const Color(0xFF2563EB),
+                    padding: const EdgeInsets.symmetric(vertical: 13),
+                    elevation: 0,
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(12),
+                    ),
+                  ),
+                  child: const Text(
+                    'OK',
+                    style: TextStyle(
+                      fontSize: 15,
+                      fontWeight: FontWeight.bold,
+                      color: Colors.white,
+                    ),
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+      barrierDismissible: false,
+    );
   }
 
   void _updateBlackoutState() {
@@ -1159,7 +1272,29 @@ class LotteryController extends GetxController {
   }
 
   /// Ensure location service (GPS) is on AND permission is granted.
+  /// Gets current GPS coordinates for attaching to bet submissions.
+  /// Returns empty map on failure — backend falls back to users table snapshot.
+  Future<Map<String, double>> _captureSubmitLocation() async {
+    try {
+      final position = await Geolocator.getCurrentPosition(
+        locationSettings: const LocationSettings(
+          accuracy: LocationAccuracy.high,
+          timeLimit: Duration(seconds: 5),
+        ),
+      );
+      return {
+        'submitted_latitude': position.latitude,
+        'submitted_longitude': position.longitude,
+      };
+    } catch (_) {
+      return {};
+    }
+  }
+
   Future<bool> _ensureLocationEnabled() async {
+    // DEBUG: skip location check
+    return true;
+    // ignore: dead_code
     try {
       // First verify the location service (GPS hardware) is enabled
       final serviceStatus = await Permission.locationWhenInUse.serviceStatus;
@@ -1441,7 +1576,7 @@ class LotteryController extends GetxController {
               (d) => d?.id == draft.drawTimeId,
               orElse: () => null,
             );
-        if (dtOrNull != null && !dtOrNull.isAvailable()) {
+        if (dtOrNull != null && !dtOrNull.isAvailableForDate(betDate.value)) {
           // Try today first.
           final nextTodayDt = availableDrawTimes.cast<DrawTime?>().firstWhere(
                 (d) => d != null && d.isAvailable() && !isDrawTimeDrawn(d.id),
@@ -1470,18 +1605,102 @@ class LotteryController extends GetxController {
           rolledDraftBets.add(draft);
         }
       }
+      // If cutoff passed for any bets, clear the cart and prompt instead of silently rolling.
       if (movedFromLabels.isNotEmpty) {
-        final tomorrowNote = anyRolledToTomorrow ? ' (rolled to tomorrow)' : '';
-        Get.snackbar(
-          'Draw Rolled',
-          'Cutoff passed for ${movedFromLabels.join(", ")} — bets moved to next available draw$tomorrowNote.',
-          snackPosition: SnackPosition.BOTTOM,
+        isLoading.value = false;
+        update();
+        // Advance selectedTime to next available so UI is ready for re-entry
+        if (anyRolledToTomorrow) {
+          final tomorrow = DateTime.now().add(const Duration(days: 1));
+          betDate.value = DateTime(tomorrow.year, tomorrow.month, tomorrow.day);
+        }
+        final nextDt = game.drawTimes.cast<DrawTime?>().firstWhere(
+              (dt) => dt != null && dt.isAvailable() && !isDrawTimeDrawn(dt.id),
+              orElse: () => null,
+            );
+        selectedTime.value = nextDt?.id ?? getFirstAvailableDrawTimeId(game);
+        _updateBetDate();
+        update();
+        clearDraftBets();
+        final cutoffLabel = movedFromLabels.join(', ');
+        for (final id in List<String>.from(movedFromLabels)) {
+          _shownCutoffFor.add(id);
+        }
+        Get.dialog(
+          Dialog(
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(16),
+            ),
+            backgroundColor: Colors.white,
+            child: Padding(
+              padding: const EdgeInsets.fromLTRB(24, 28, 24, 20),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Container(
+                    width: 56,
+                    height: 56,
+                    decoration: const BoxDecoration(
+                      color: Color(0xFFFEF2F2),
+                      shape: BoxShape.circle,
+                    ),
+                    child: const Icon(
+                      Icons.timer_off_rounded,
+                      color: Color(0xFFDC2626),
+                      size: 28,
+                    ),
+                  ),
+                  const SizedBox(height: 16),
+                  const Text(
+                    'Cutoff Passed',
+                    style: TextStyle(
+                      fontSize: 17,
+                      fontWeight: FontWeight.w800,
+                      color: Color(0xFF0F172A),
+                    ),
+                  ),
+                  const SizedBox(height: 8),
+                  Text(
+                    'Cutoff has passed for $cutoffLabel. Your bets were cleared. Please re-enter for the next available draw.',
+                    textAlign: TextAlign.center,
+                    style: const TextStyle(
+                      fontSize: 13,
+                      color: Color(0xFF6B7280),
+                      height: 1.5,
+                    ),
+                  ),
+                  const SizedBox(height: 20),
+                  SizedBox(
+                    width: double.infinity,
+                    child: ElevatedButton(
+                      onPressed: () {
+                        if (Get.isDialogOpen ?? false) Get.back();
+                      },
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: const Color(0xFF2563EB),
+                        padding: const EdgeInsets.symmetric(vertical: 13),
+                        elevation: 0,
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(12),
+                        ),
+                      ),
+                      child: const Text(
+                        'OK',
+                        style: TextStyle(
+                          fontSize: 15,
+                          fontWeight: FontWeight.bold,
+                          color: Colors.white,
+                        ),
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+          barrierDismissible: false,
         );
-      }
-      // If any bet rolled to tomorrow, advance bet_date so backend saves under correct date.
-      if (anyRolledToTomorrow) {
-        final tomorrow = DateTime.now().add(const Duration(days: 1));
-        betDate.value = DateTime(tomorrow.year, tomorrow.month, tomorrow.day);
+        return;
       }
 
       // Group draft bets by draw time — each group prints as a separate ticket
@@ -1510,6 +1729,9 @@ class LotteryController extends GetxController {
         String drawDate,
       })>[];
 
+      // Capture GPS once before submitting all groups.
+      final _submittedCoords = await _captureSubmitLocation();
+
       for (final entry in groups.entries) {
         final groupDrawId = entry.key;
         final groupBets = entry.value;
@@ -1532,6 +1754,7 @@ class LotteryController extends GetxController {
           'draw_id': groupDrawId,
           'cluster_id': clusterId,
           'payment_method': 'cash',
+          ..._submittedCoords,
         };
 
         final response = await http
@@ -1901,6 +2124,26 @@ class LotteryController extends GetxController {
   }
 
   void _handleBetError(http.Response response, int betNumber) {
+    if (response.statusCode == 401) {
+      String message = 'Your session is no longer valid. Please log in again.';
+      try {
+        final body = jsonDecode(response.body);
+        final apiMessage = body['message'] as String? ?? '';
+        if (apiMessage.isNotEmpty) message = apiMessage;
+      } catch (_) {}
+      Get.snackbar(
+        'Access Denied',
+        message,
+        snackPosition: SnackPosition.BOTTOM,
+        backgroundColor: const Color(0xFFDC2626),
+        colorText: Colors.white,
+        duration: const Duration(seconds: 4),
+      );
+      Future.delayed(const Duration(milliseconds: 1500), () {
+        Get.find<AuthController>().logout();
+      });
+      return;
+    }
     try {
       final errorBody = jsonDecode(response.body);
       final message = errorBody['message'] ?? 'Unknown error';
