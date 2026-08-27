@@ -514,14 +514,16 @@ class _MainLayoutState extends State<MainLayout> {
               const Spacer(),
               // App version
               if (_appVersion.isNotEmpty)
-                Padding(
-                  padding: const EdgeInsets.only(bottom: 4),
-                  child: Text(
-                    _appVersion,
-                    textAlign: TextAlign.center,
-                    style: const TextStyle(
-                      fontSize: 11,
-                      color: Color(0xFFAAAAAA),
+                Align(
+                  alignment: Alignment.bottomRight,
+                  child: Padding(
+                    padding: const EdgeInsets.only(right: 16, bottom: 4),
+                    child: Text(
+                      _appVersion,
+                      style: const TextStyle(
+                        fontSize: 11,
+                        color: Color(0xFFAAAAAA),
+                      ),
                     ),
                   ),
                 ),
