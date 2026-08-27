@@ -377,25 +377,20 @@ class _LoginPageState extends State<LoginPage> {
               ),
             ),
           ),
-        ],
-      ),
-      bottomNavigationBar: _appVersion.isEmpty
-          ? null
-          : SafeArea(
-              child: Padding(
-                padding: const EdgeInsets.only(bottom: 12, right: 16),
-                child: Align(
-                  alignment: Alignment.centerRight,
-                  child: Text(
-                    _appVersion,
-                    style: const TextStyle(
-                      fontSize: 11,
-                      color: Color(0xFFAAAAAA),
-                    ),
-                  ),
+          if (_appVersion.isNotEmpty)
+            Positioned(
+              bottom: 16,
+              right: 16,
+              child: Text(
+                _appVersion,
+                style: const TextStyle(
+                  fontSize: 11,
+                  color: Color(0xFFAAAAAA),
                 ),
               ),
             ),
+        ],
+      ),
     );
   }
 }
