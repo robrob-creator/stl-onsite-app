@@ -29,6 +29,7 @@ class _CollectionPageState extends State<CollectionPage> {
   late Future<List<Collection>> _future;
   List<Claim> _claims = [];
   Worker? _collectionWorker;
+  bool _sortNewestFirst = true;
 
   @override
   void initState() {
@@ -101,6 +102,20 @@ class _CollectionPageState extends State<CollectionPage> {
         surfaceTintColor: Colors.white,
         elevation: 1,
         foregroundColor: Colors.black,
+        actions: [
+          TextButton.icon(
+            onPressed: () => setState(() => _sortNewestFirst = !_sortNewestFirst),
+            icon: Icon(
+              _sortNewestFirst ? Icons.arrow_downward_rounded : Icons.arrow_upward_rounded,
+              size: 16,
+              color: const Color(0xFF2563EB),
+            ),
+            label: Text(
+              _sortNewestFirst ? 'Newest' : 'Oldest',
+              style: const TextStyle(fontSize: 12, color: Color(0xFF2563EB)),
+            ),
+          ),
+        ],
       ),
       body: Column(
         children: [
@@ -185,13 +200,16 @@ class _CollectionPageState extends State<CollectionPage> {
   }
 
   Widget _buildList(List<Collection> items) {
-    // Group by draw_date so the header repeats only when the date changes.
-    // Items are ordered oldest-first (draw_date ASC) so payment allocation
-    // and display both flow from earliest to latest draw.
+    final sorted = [...items]..sort((a, b) {
+        final dateCmp = a.drawDate.compareTo(b.drawDate);
+        final timeCmp = a.drawTime.compareTo(b.drawTime);
+        final cmp = dateCmp != 0 ? dateCmp : timeCmp;
+        return _sortNewestFirst ? -cmp : cmp;
+      });
     final children = <Widget>[_buildTotalsCard(items)];
     String? currentDate;
-    for (var i = 0; i < items.length; i++) {
-      final c = items[i];
+    for (var i = 0; i < sorted.length; i++) {
+      final c = sorted[i];
       if (c.drawDate != currentDate) {
         currentDate = c.drawDate;
         children.add(_buildDateHeader(currentDate));
@@ -698,27 +716,33 @@ class _StatusBadge extends StatelessWidget {
     Color fg;
     final isPartialRemit =
         collection.status == 'paid' && !collection.isFullySettled;
-    switch (isPartialRemit ? 'partial' : collection.status.toLowerCase()) {
-      case 'paid':
-        bg = const Color(0xFFDCFCE7);
-        fg = const Color(0xFF15803D);
-        break;
-      case 'partial':
-        bg = const Color(0xFFFEF3C7);
-        fg = const Color(0xFF92400E);
-        break;
-      case 'tapada':
-        if (collection.tapadaStatus != 'completed') {
-          bg = const Color(0xFFFEF3C7);
-          fg = const Color(0xFF92400E);
-        } else {
+    final label = collection.statusLabel;
+    if (label == 'Remitted') {
+      bg = const Color(0xFFDBEAFE);
+      fg = const Color(0xFF1D4ED8);
+    } else {
+      switch (isPartialRemit ? 'partial' : collection.status.toLowerCase()) {
+        case 'paid':
           bg = const Color(0xFFDCFCE7);
           fg = const Color(0xFF15803D);
-        }
-        break;
-      default:
-        bg = const Color(0xFFE5E7EB);
-        fg = const Color(0xFF374151);
+          break;
+        case 'partial':
+          bg = const Color(0xFFFEF3C7);
+          fg = const Color(0xFF92400E);
+          break;
+        case 'tapada':
+          if (collection.tapadaStatus != 'completed') {
+            bg = const Color(0xFFFEF3C7);
+            fg = const Color(0xFF92400E);
+          } else {
+            bg = const Color(0xFFDCFCE7);
+            fg = const Color(0xFF15803D);
+          }
+          break;
+        default:
+          bg = const Color(0xFFE5E7EB);
+          fg = const Color(0xFF374151);
+      }
     }
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),

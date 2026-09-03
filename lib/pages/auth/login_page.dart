@@ -3,6 +3,7 @@ import 'package:flutter/services.dart';
 import 'package:get/get.dart';
 import 'package:package_info_plus/package_info_plus.dart';
 import '../../controllers/auth_controller.dart';
+import '../../core/app_constants.dart';
 import '../../widgets/custom_pin_input.dart';
 
 class LoginPage extends StatefulWidget {
@@ -29,9 +30,10 @@ class _LoginPageState extends State<LoginPage> {
   }
 
   void _showImeiDialog(BuildContext context, AuthController ctrl) {
-    bool useCustom = ctrl.isUsingCustomImei;
+    String mode = ctrl.isUsingCustomImei ? 'custom' : 'default';
+
     final customCtrl = TextEditingController(
-      text: useCustom ? ctrl.imei.value : '',
+      text: ctrl.isUsingCustomImei ? ctrl.imei.value : '',
     );
 
     showDialog<void>(
@@ -47,108 +49,23 @@ class _LoginPageState extends State<LoginPage> {
             mainAxisSize: MainAxisSize.min,
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              // Switch to default
-              InkWell(
-                borderRadius: BorderRadius.circular(10),
-                onTap: () => setS(() => useCustom = false),
-                child: Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-                  decoration: BoxDecoration(
-                    color: !useCustom
-                        ? const Color(0xFFEFF6FF)
-                        : Colors.grey.shade100,
-                    borderRadius: BorderRadius.circular(10),
-                    border: Border.all(
-                      color: !useCustom
-                          ? const Color(0xFF2563EB)
-                          : Colors.grey.shade300,
-                    ),
-                  ),
-                  child: Row(
-                    children: [
-                      Icon(
-                        Icons.phone_android_rounded,
-                        size: 18,
-                        color: !useCustom
-                            ? const Color(0xFF2563EB)
-                            : Colors.grey,
-                      ),
-                      const SizedBox(width: 10),
-                      Expanded(
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            const Text(
-                              'Default',
-                              style: TextStyle(
-                                fontSize: 13,
-                                fontWeight: FontWeight.w700,
-                              ),
-                            ),
-                            Text(
-                              ctrl.deviceImei.value.isNotEmpty
-                                  ? ctrl.deviceImei.value
-                                  : 'No device ID found',
-                              style: TextStyle(
-                                fontSize: 10,
-                                color: Colors.grey.shade600,
-                                fontFamily: 'RobotoMono',
-                              ),
-                            ),
-                          ],
-                        ),
-                      ),
-                      if (!useCustom)
-                        const Icon(Icons.check_circle,
-                            color: Color(0xFF2563EB), size: 18),
-                    ],
-                  ),
-                ),
+              _imeiOption(
+                icon: Icons.phone_android_rounded,
+                label: 'Default',
+                subtitle: ctrl.deviceImei.value.isNotEmpty
+                    ? ctrl.deviceImei.value
+                    : 'No device ID found',
+                selected: mode == 'default',
+                onTap: () => setS(() => mode = 'default'),
               ),
               const SizedBox(height: 10),
-              // Custom device ID
-              InkWell(
-                borderRadius: BorderRadius.circular(10),
-                onTap: () => setS(() => useCustom = true),
-                child: Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-                  decoration: BoxDecoration(
-                    color: useCustom
-                        ? const Color(0xFFEFF6FF)
-                        : Colors.grey.shade100,
-                    borderRadius: BorderRadius.circular(10),
-                    border: Border.all(
-                      color: useCustom
-                          ? const Color(0xFF2563EB)
-                          : Colors.grey.shade300,
-                    ),
-                  ),
-                  child: Row(
-                    children: [
-                      Icon(
-                        Icons.edit_rounded,
-                        size: 18,
-                        color: useCustom
-                            ? const Color(0xFF2563EB)
-                            : Colors.grey,
-                      ),
-                      const SizedBox(width: 10),
-                      const Text(
-                        'Custom',
-                        style: TextStyle(
-                          fontSize: 13,
-                          fontWeight: FontWeight.w700,
-                        ),
-                      ),
-                      const Spacer(),
-                      if (useCustom)
-                        const Icon(Icons.check_circle,
-                            color: Color(0xFF2563EB), size: 18),
-                    ],
-                  ),
-                ),
+              _imeiOption(
+                icon: Icons.edit_rounded,
+                label: 'Custom',
+                selected: mode == 'custom',
+                onTap: () => setS(() => mode = 'custom'),
               ),
-              if (useCustom) ...[
+              if (mode == 'custom') ...[
                 const SizedBox(height: 12),
                 TextField(
                   controller: customCtrl,
@@ -164,7 +81,7 @@ class _LoginPageState extends State<LoginPage> {
                       color: Colors.grey.shade400,
                     ),
                     contentPadding: const EdgeInsets.symmetric(
-                      horizontal: 12, vertical: 10),
+                        horizontal: 12, vertical: 10),
                     border: OutlineInputBorder(
                       borderRadius: BorderRadius.circular(8),
                     ),
@@ -190,16 +107,148 @@ class _LoginPageState extends State<LoginPage> {
                     borderRadius: BorderRadius.circular(8)),
               ),
               onPressed: () {
-                if (useCustom) {
+                Navigator.pop(ctx);
+                if (mode == 'custom') {
                   final v = customCtrl.text.trim();
                   if (v.isNotEmpty) ctrl.setCustomImei(v);
                 } else {
                   ctrl.resetToDeviceImei();
                 }
-                Navigator.pop(ctx);
               },
               child: const Text('Apply'),
             ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  void _showEnvDialog(BuildContext context, AuthController ctrl) {
+    final isCurrentlyStaging =
+        AppConstants.apiBaseUrl == AppConstants.envStaging;
+    String selected =
+        isCurrentlyStaging ? AppConstants.envStaging : AppConstants.envProduction;
+
+    showDialog<void>(
+      context: context,
+      builder: (ctx) => StatefulBuilder(
+        builder: (ctx, setS) => AlertDialog(
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+          title: const Text(
+            'Environment',
+            style: TextStyle(fontSize: 16, fontWeight: FontWeight.w700),
+          ),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              _imeiOption(
+                icon: Icons.cloud_done_rounded,
+                label: 'Production',
+                subtitle: AppConstants.envProduction,
+                selected: selected == AppConstants.envProduction,
+                onTap: () => setS(() => selected = AppConstants.envProduction),
+              ),
+              const SizedBox(height: 10),
+              _imeiOption(
+                icon: Icons.science_rounded,
+                label: 'Staging',
+                subtitle: AppConstants.envStaging,
+                selected: selected == AppConstants.envStaging,
+                color: const Color(0xFFf97316),
+                onTap: () => setS(() => selected = AppConstants.envStaging),
+              ),
+            ],
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(ctx),
+              child: const Text('Cancel'),
+            ),
+            ElevatedButton(
+              style: ElevatedButton.styleFrom(
+                backgroundColor: selected == AppConstants.envStaging
+                    ? const Color(0xFFf97316)
+                    : const Color(0xFF2563EB),
+                foregroundColor: Colors.white,
+                shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(8)),
+              ),
+              onPressed: () {
+                Navigator.pop(ctx);
+                final switching = selected != AppConstants.apiBaseUrl;
+                if (!switching) return;
+                AppConstants.setEnvironment(selected);
+                ctrl.resetToDeviceImei();
+                ctrl.logout();
+                final label = selected == AppConstants.envStaging
+                    ? 'Staging'
+                    : 'Production';
+                Get.snackbar(
+                  'Switched to $label',
+                  'Please log in again.',
+                  snackPosition: SnackPosition.BOTTOM,
+                  duration: const Duration(seconds: 3),
+                );
+              },
+              child: const Text('Apply'),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _imeiOption({
+    required IconData icon,
+    required String label,
+    String? subtitle,
+    required bool selected,
+    Color color = const Color(0xFF2563EB),
+    required VoidCallback onTap,
+  }) {
+    return InkWell(
+      borderRadius: BorderRadius.circular(10),
+      onTap: onTap,
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+        decoration: BoxDecoration(
+          color: selected ? color.withValues(alpha: 0.08) : Colors.grey.shade100,
+          borderRadius: BorderRadius.circular(10),
+          border: Border.all(
+            color: selected ? color : Colors.grey.shade300,
+          ),
+        ),
+        child: Row(
+          children: [
+            Icon(icon, size: 18, color: selected ? color : Colors.grey),
+            const SizedBox(width: 10),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    label,
+                    style: TextStyle(
+                      fontSize: 13,
+                      fontWeight: FontWeight.w700,
+                      color: selected ? color : null,
+                    ),
+                  ),
+                  if (subtitle != null)
+                    Text(
+                      subtitle,
+                      style: TextStyle(
+                        fontSize: 10,
+                        color: Colors.grey.shade600,
+                        fontFamily: 'RobotoMono',
+                      ),
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                ],
+              ),
+            ),
+            if (selected)
+              Icon(Icons.check_circle, color: color, size: 18),
           ],
         ),
       ),
@@ -230,9 +279,10 @@ class _LoginPageState extends State<LoginPage> {
                     mainAxisAlignment: MainAxisAlignment.start,
                     children: [
                       const SizedBox(height: 40),
-                      // Logo — long-press to override the device ID
+                      // Logo — long-press: custom IMEI; double-tap: switch environment
                       GestureDetector(
                         onLongPress: () => _showImeiDialog(context, authController),
+                        onDoubleTap: () => _showEnvDialog(context, authController),
                         child: Image.asset(
                           'assets/images/logos/logo.png',
                           width: 120,
@@ -380,6 +430,26 @@ class _LoginPageState extends State<LoginPage> {
               ),
             ),
           ),
+          if (AppConstants.apiBaseUrl == AppConstants.envStaging)
+            Positioned(
+              top: 0,
+              left: 0,
+              right: 0,
+              child: Container(
+                padding: const EdgeInsets.symmetric(vertical: 4),
+                color: const Color(0xFFf97316),
+                child: const Text(
+                  'STAGING',
+                  textAlign: TextAlign.center,
+                  style: TextStyle(
+                    color: Colors.white,
+                    fontSize: 11,
+                    fontWeight: FontWeight.bold,
+                    letterSpacing: 2,
+                  ),
+                ),
+              ),
+            ),
           if (_appVersion.isNotEmpty)
             Positioned(
               bottom: 16,

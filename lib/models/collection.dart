@@ -45,7 +45,13 @@ class Collection {
   String get statusLabel {
     if (netAmount < 0 && tapadaStatus != 'completed') return 'Unsettled';
     if (netAmount < 0) return 'Settled';
-    if (isFullySettled) return 'Collected';
+    if (isFullySettled) {
+      final remStatus = remittanceStatus.toLowerCase();
+      if (remStatus == 'paid' || remStatus == 'remitted' || remStatus == 'approved') {
+        return 'Remitted';
+      }
+      return 'Collected';
+    }
     if (agentOutstandingAmount > 0.005) return 'Partial';
     if (status == 'paid') return 'Pending Remittance';
     switch (status.toLowerCase()) {
@@ -62,7 +68,6 @@ class Collection {
             ? 'Uncollected'
             : status[0].toUpperCase() + status.substring(1);
     }
-
   }
 
   bool get isFullySettled {

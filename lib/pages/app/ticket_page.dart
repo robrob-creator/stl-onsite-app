@@ -96,6 +96,13 @@ class _TicketPageState extends State<TicketPage> {
         )) {
           _fetchSetups();
         }
+        // Refresh ticket list when requests (void/reprint approval) or
+        // tickets change so button states update without manual pull-to-refresh.
+        if (endpoints.any(
+          (e) => e.contains('/api/requests') || e.contains('/api/tickets'),
+        )) {
+          _ctrl.fetchTickets(_searchController.text);
+        }
       });
     } catch (_) {}
 
@@ -366,6 +373,17 @@ class _TicketPageState extends State<TicketPage> {
     if (maxP <= 0) return false;
     final cur = ticket.printCount ?? 1;
     return cur < maxP;
+  }
+
+  /// True when all reprint request slots are used up (and no direct prints remain).
+  bool _isReprintClosed(Ticket ticket) {
+    if (_activeReprintSetup == null || !_activeReprintSetup!.isActive)
+      return false;
+    if (_isDirectPrint(ticket)) return false;
+    if (ticket.hasApprovedReprintRequest) return false;
+    final cur = ticket.reprintRequests ?? 0;
+    final maxR = _activeReprintSetup!.maxReprintRequests;
+    return maxR > 0 && cur >= maxR;
   }
 
   bool _canReprint(Ticket ticket) {
@@ -946,6 +964,7 @@ class _TicketPageState extends State<TicketPage> {
             canVoid: _canVoid(t),
             canReprint: _canReprint(t),
             isDirectPrint: _isDirectPrint(t),
+            isReprintClosed: _isReprintClosed(t),
             showVoid: _showVoidButton(t),
             showReprint: _showReprintButton(t),
             expanded: _expandedCards.contains(t.id),
@@ -1007,6 +1026,7 @@ class _TicketCard extends StatelessWidget {
   final bool canVoid;
   final bool canReprint;
   final bool isDirectPrint;
+  final bool isReprintClosed;
   final bool showVoid;
   final bool showReprint;
   final bool expanded;
@@ -1026,6 +1046,7 @@ class _TicketCard extends StatelessWidget {
     required this.canVoid,
     required this.canReprint,
     required this.isDirectPrint,
+    required this.isReprintClosed,
     required this.showVoid,
     required this.showReprint,
     required this.expanded,
@@ -1295,8 +1316,12 @@ class _TicketCard extends StatelessWidget {
                         Expanded(
                           child: _ReprintButton(
                             enabled: canReprint,
-                            label: isDirectPrint ? 'Print' : 'Request Reprint',
+                            label: (isDirectPrint ||
+                                    ticket.hasApprovedReprintRequest)
+                                ? 'Print'
+                                : 'Request Reprint',
                             isDirectPrint: isDirectPrint,
+                            isPrintClosed: isReprintClosed,
                             printTimeLeft: printTimeLeft,
                             fmtClock: fmtClock,
                             onTap: canReprint ? onReprint : null,
@@ -1547,6 +1572,7 @@ class _ReprintButton extends StatelessWidget {
   final bool enabled;
   final String label;
   final bool isDirectPrint;
+  final bool isPrintClosed;
   final Duration? printTimeLeft;
   final String Function(Duration) fmtClock;
   final VoidCallback? onTap;
@@ -1555,6 +1581,7 @@ class _ReprintButton extends StatelessWidget {
     required this.enabled,
     required this.label,
     required this.isDirectPrint,
+    this.isPrintClosed = false,
     required this.printTimeLeft,
     required this.fmtClock,
     this.onTap,
@@ -1576,16 +1603,17 @@ class _ReprintButton extends StatelessWidget {
       pct = 1.0 - (printTimeLeft!.inSeconds / totalSecs).clamp(0.0, 1.0);
     }
 
-    final effectiveEnabled = enabled && !expired;
+    final effectiveEnabled = enabled && !expired && !isPrintClosed;
+    final isClosed = expired || isPrintClosed;
     final borderColor = !effectiveEnabled
         ? _border
-        : expired
+        : isClosed
         ? _red
         : warn
         ? const Color(0xFFDC2626)
         : _blue;
     final textColor = !effectiveEnabled ? _muted2 : borderColor;
-    final bgColor = expired ? _redL : Colors.white;
+    final bgColor = isClosed ? _redL : Colors.white;
 
     return GestureDetector(
       onTap: effectiveEnabled ? onTap : null,
@@ -1615,7 +1643,7 @@ class _ReprintButton extends StatelessWidget {
                 mainAxisSize: MainAxisSize.min,
                 children: [
                   Icon(
-                    expired
+                    isClosed
                         ? Icons.print_disabled_outlined
                         : Icons.print_outlined,
                     size: 14,
@@ -1623,7 +1651,7 @@ class _ReprintButton extends StatelessWidget {
                   ),
                   const SizedBox(width: 6),
                   Text(
-                    expired ? 'Print Closed' : label,
+                    isClosed ? 'Print Closed' : label,
                     style: TextStyle(
                       fontSize: 12.5,
                       fontWeight: FontWeight.w700,

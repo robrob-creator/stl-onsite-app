@@ -1295,6 +1295,203 @@ class _BetEntryPageState extends State<BetEntryPage> {
                                                     ),
                                                   ),
                                                 ),
+                                              // Show available permutations for
+                                              // Target when Rambol is sold out
+                                              if (perm != null)
+                                                Builder(builder: (_) {
+                                                  final digs = _lottoNumbers
+                                                      .split(',')
+                                                      .where(
+                                                        (d) => d.isNotEmpty,
+                                                      )
+                                                      .toList();
+                                                  final isPompyangLocal =
+                                                      digs.length >= 2 &&
+                                                      digs.toSet().length == 1;
+                                                  final rambolSoldOut =
+                                                      !isPompyangLocal &&
+                                                      (perm.rambolDisabled ||
+                                                          !perm.rambol.allowed);
+                                                  if (!rambolSoldOut) {
+                                                    return const SizedBox.shrink();
+                                                  }
+                                                  final availPerms = perm
+                                                      .permutations
+                                                      .where(
+                                                        (p) => !p.isSoldOut,
+                                                      )
+                                                      .toList();
+                                                  if (availPerms.isEmpty) {
+                                                    return const SizedBox.shrink();
+                                                  }
+                                                  return GestureDetector(
+                                                    onTap: () {
+                                                      Get.dialog(
+                                                        Dialog(
+                                                          shape: RoundedRectangleBorder(
+                                                            borderRadius:
+                                                                BorderRadius
+                                                                    .circular(
+                                                                      16,
+                                                                    ),
+                                                          ),
+                                                          backgroundColor:
+                                                              Colors.white,
+                                                          child: Padding(
+                                                            padding:
+                                                                const EdgeInsets.all(
+                                                                  20,
+                                                                ),
+                                                            child: Column(
+                                                              mainAxisSize:
+                                                                  MainAxisSize
+                                                                      .min,
+                                                              children: [
+                                                                Row(
+                                                                  children: [
+                                                                    const Expanded(
+                                                                      child: Text(
+                                                                        'Available for Target',
+                                                                        style: TextStyle(
+                                                                          fontSize:
+                                                                              15,
+                                                                          fontWeight:
+                                                                              FontWeight.w800,
+                                                                          color: Color(
+                                                                            0xFF0F172A,
+                                                                          ),
+                                                                        ),
+                                                                      ),
+                                                                    ),
+                                                                    GestureDetector(
+                                                                      onTap:
+                                                                          () =>
+                                                                              Get.back(),
+                                                                      child: Icon(
+                                                                        Icons
+                                                                            .close,
+                                                                        size:
+                                                                            20,
+                                                                        color: Colors
+                                                                            .grey[600],
+                                                                      ),
+                                                                    ),
+                                                                  ],
+                                                                ),
+                                                                const SizedBox(
+                                                                  height: 6,
+                                                                ),
+                                                                const Align(
+                                                                  alignment:
+                                                                      Alignment
+                                                                          .centerLeft,
+                                                                  child: Text(
+                                                                    'Rambol sold out. Bet these as Target instead.',
+                                                                    style: TextStyle(
+                                                                      fontSize:
+                                                                          12,
+                                                                      color: Color(
+                                                                        0xFF6B7280,
+                                                                      ),
+                                                                      height:
+                                                                          1.4,
+                                                                    ),
+                                                                  ),
+                                                                ),
+                                                                const SizedBox(
+                                                                  height: 14,
+                                                                ),
+                                                                Align(
+                                                                  alignment:
+                                                                      Alignment
+                                                                          .centerLeft,
+                                                                  child: Wrap(
+                                                                    spacing: 8,
+                                                                    runSpacing:
+                                                                        8,
+                                                                    children: availPerms
+                                                                        .map(
+                                                                          (p) =>
+                                                                              Container(
+                                                                                padding: const EdgeInsets.symmetric(
+                                                                                  horizontal:
+                                                                                      14,
+                                                                                  vertical:
+                                                                                      8,
+                                                                                ),
+                                                                                decoration: BoxDecoration(
+                                                                                  color: const Color(
+                                                                                    0xFFEFF6FF,
+                                                                                  ),
+                                                                                  borderRadius:
+                                                                                      BorderRadius.circular(
+                                                                                        10,
+                                                                                      ),
+                                                                                  border:
+                                                                                      Border.all(
+                                                                                        color: const Color(
+                                                                                          0xFFBFDBFE,
+                                                                                        ),
+                                                                                      ),
+                                                                                ),
+                                                                                child: Text(
+                                                                                  p.value
+                                                                                      .split(RegExp(r'[^0-9]'))
+                                                                                      .where((s) => s.isNotEmpty)
+                                                                                      .join('-'),
+                                                                                  style: const TextStyle(
+                                                                                    fontSize:
+                                                                                        15,
+                                                                                    fontWeight:
+                                                                                        FontWeight.w700,
+                                                                                    color: Color(
+                                                                                      0xFF1D4ED8,
+                                                                                    ),
+                                                                                  ),
+                                                                                ),
+                                                                              ),
+                                                                        )
+                                                                        .toList(),
+                                                                  ),
+                                                                ),
+                                                              ],
+                                                            ),
+                                                          ),
+                                                        ),
+                                                      );
+                                                    },
+                                                    child: Padding(
+                                                      padding:
+                                                          const EdgeInsets.only(
+                                                            bottom: 6,
+                                                          ),
+                                                      child: Row(
+                                                        children: [
+                                                          Icon(
+                                                            Icons.info_outline,
+                                                            size: 12,
+                                                            color: Colors
+                                                                .blue[600],
+                                                          ),
+                                                          const SizedBox(
+                                                            width: 4,
+                                                          ),
+                                                          Text(
+                                                            'View available numbers →',
+                                                            style: TextStyle(
+                                                              fontSize: 11,
+                                                              color: Colors
+                                                                  .blue[600],
+                                                              fontWeight:
+                                                                  FontWeight
+                                                                      .w600,
+                                                            ),
+                                                          ),
+                                                        ],
+                                                      ),
+                                                    ),
+                                                  );
+                                                }),
                                               TextField(
                                                 controller:
                                                     _targetAmountController,

@@ -1,7 +1,7 @@
 import 'package:flutter/foundation.dart' show kDebugMode;
 import 'package:flutter/material.dart';
 import 'package:get/get.dart';
-import 'package:geolocator/geolocator.dart' show Geolocator, LocationAccuracy, LocationSettings;
+import 'package:geolocator/geolocator.dart' show Geolocator, LocationAccuracy, LocationPermission, LocationSettings, Position;
 import 'package:http/http.dart' as http;
 import 'package:permission_handler/permission_handler.dart';
 import 'package:connectivity_plus/connectivity_plus.dart';
@@ -1271,20 +1271,49 @@ class LotteryController extends GetxController {
     }
   }
 
-  /// Ensure location service (GPS) is on AND permission is granted.
   /// Gets current GPS coordinates for attaching to bet submissions.
   /// Returns empty map on failure — backend falls back to users table snapshot.
   Future<Map<String, double>> _captureSubmitLocation() async {
     try {
-      final position = await Geolocator.getCurrentPosition(
-        locationSettings: const LocationSettings(
-          accuracy: LocationAccuracy.high,
-          timeLimit: Duration(seconds: 5),
-        ),
-      );
+      final serviceEnabled = await Geolocator.isLocationServiceEnabled();
+      if (!serviceEnabled) return {};
+
+      var permission = await Geolocator.checkPermission();
+      if (permission == LocationPermission.denied) {
+        permission = await Geolocator.requestPermission();
+        if (permission == LocationPermission.denied) return {};
+      }
+      if (permission == LocationPermission.deniedForever) return {};
+
+      Position? position;
+
+      // Try high accuracy first (true GPS). Allow up to 10s for a fix.
+      try {
+        position = await Geolocator.getCurrentPosition(
+          locationSettings: const LocationSettings(
+            accuracy: LocationAccuracy.high,
+            timeLimit: Duration(seconds: 10),
+          ),
+        );
+      } catch (_) {
+        // GPS timed out — fall back to last known position.
+        position = await Geolocator.getLastKnownPosition();
+      }
+
+      if (position == null) return {};
+
+      // Reject coarse integer-level coordinates (cell tower, not GPS).
+      final lat = position.latitude;
+      final lng = position.longitude;
+      if (lat == lat.truncateToDouble() && lng == lng.truncateToDouble()) {
+        log('⚠ _captureSubmitLocation: coarse coords ($lat, $lng) — discarding');
+        return {};
+      }
+
+      log('✓ _captureSubmitLocation: lat=$lat lng=$lng acc=${position.accuracy}m');
       return {
-        'submitted_latitude': position.latitude,
-        'submitted_longitude': position.longitude,
+        'submitted_latitude': lat,
+        'submitted_longitude': lng,
       };
     } catch (_) {
       return {};
@@ -1292,11 +1321,7 @@ class LotteryController extends GetxController {
   }
 
   Future<bool> _ensureLocationEnabled() async {
-    // DEBUG: skip location check
-    return true;
-    // ignore: dead_code
     try {
-      // First verify the location service (GPS hardware) is enabled
       final serviceStatus = await Permission.locationWhenInUse.serviceStatus;
       if (serviceStatus == ServiceStatus.disabled) {
         await _showLocationServicesPrompt();
@@ -1806,7 +1831,7 @@ class LotteryController extends GetxController {
               game: draft.gameName,
               straightBetAmount: draft.straightBetAmount,
               rambleBetAmount: 0,
-              winAmount: draft.straightBetAmount * game.straightMultiplier,
+              winAmount: draft.estPayout,
               digits: List<String>.from(draft.digits),
               combinations: draft.combinations,
             ));
@@ -1817,7 +1842,7 @@ class LotteryController extends GetxController {
               game: draft.gameName,
               straightBetAmount: 0,
               rambleBetAmount: draft.rambleBetAmount,
-              winAmount: (draft.rambleBetAmount / draft.combinations) * (game.rambleMultiplier ?? 0),
+              winAmount: draft.estPayout,
               digits: List<String>.from(draft.digits),
               combinations: draft.combinations,
             ));

@@ -26,6 +26,7 @@ enum PrintError {
 enum PrinterProfile {
   gsV0, // GS v 0 raster — standard ESC/POS printers
   escStar, // ESC * 24-pin — Goojprt PT-210 / MTP-2 series
+  mp58, // MP58-04H — needs extra feed before cut so QR clears cutter
 }
 
 enum PrinterReachabilityStatus {
@@ -54,7 +55,9 @@ class PrinterService {
   static String? get savedName => _storage.read<String>(_nameKey);
   static PrinterProfile get savedProfile {
     final v = _storage.read<String>(_profileKey);
-    return v == 'escStar' ? PrinterProfile.escStar : PrinterProfile.gsV0;
+    if (v == 'escStar') return PrinterProfile.escStar;
+    if (v == 'mp58') return PrinterProfile.mp58;
+    return PrinterProfile.gsV0;
   }
 
   static void savePrinter(String mac, String name) {
@@ -80,6 +83,9 @@ class PrinterService {
         n.contains('pt-2') ||
         n.contains('pt210')) {
       return PrinterProfile.escStar;
+    }
+    if (n.contains('mp58')) {
+      return PrinterProfile.mp58;
     }
     return PrinterProfile.gsV0;
   }
@@ -203,6 +209,28 @@ class PrinterService {
     return mac.replaceAll(RegExp(r'[^0-9A-Fa-f]'), '').toUpperCase();
   }
 
+  /// Sends bytes to the printer. For MP58-04, splits into 512-byte chunks
+  /// with a 20ms delay between each so the printer's receive buffer doesn't
+  /// overflow on large payloads (e.g. raster logo + full receipt text).
+  static Future<bool> _writeBytes(
+    List<int> bytes,
+    PrinterProfile profile,
+  ) async {
+    if (profile == PrinterProfile.mp58) {
+      const chunkSize = 512;
+      for (int i = 0; i < bytes.length; i += chunkSize) {
+        final end = (i + chunkSize < bytes.length) ? i + chunkSize : bytes.length;
+        final ok = await PrintBluetoothThermal.writeBytes(bytes.sublist(i, end));
+        if (!ok) return false;
+        if (i + chunkSize < bytes.length) {
+          await Future.delayed(const Duration(milliseconds: 20));
+        }
+      }
+      return true;
+    }
+    return await PrintBluetoothThermal.writeBytes(bytes);
+  }
+
   /// Attempts to connect with up to [retries] attempts, with a short
   /// delay between each try.
   static Future<bool> _connectWithRetry(
@@ -284,7 +312,7 @@ class PrinterService {
         reprintCount: reprintCount,
       );
 
-      final result = await PrintBluetoothThermal.writeBytes(bytes);
+      final result = await _writeBytes(bytes, savedProfile);
       await _drainDelay(savedProfile);
       try {
         await PrintBluetoothThermal.disconnect;
@@ -362,7 +390,7 @@ class PrinterService {
       }
 
       final bytes = await _buildEodReportBytes(report: report);
-      final result = await PrintBluetoothThermal.writeBytes(bytes);
+      final result = await _writeBytes(bytes, savedProfile);
       await _drainDelay(savedProfile);
       try {
         await PrintBluetoothThermal.disconnect;
@@ -499,8 +527,8 @@ class PrinterService {
       if (decoded != null) {
         // Resize to fit 58mm paper; preserve aspect ratio
         const int targetWidth = 380; // 48mm at 203dpi ≈ 380px
-        final int targetHeight = (decoded.height * targetWidth / decoded.width)
-            .round();
+        final int targetHeight =
+            (decoded.height * targetWidth / decoded.width).round();
         final img.Image resized = img.copyResize(
           decoded,
           width: targetWidth,
@@ -655,6 +683,19 @@ class PrinterService {
 
     // ── QR Code ───────────────────────────────────────────────────
     final encryptedQrData = QrCryptoService.encrypt(ticketNo);
+    if (printerProfile == PrinterProfile.mp58) {
+      // MP58-04 supports native ESC/POS QR — use it directly.
+      bytes.addAll([0x1B, 0x61, 0x01]);
+      bytes.addAll(
+        generator.qrcode(
+          encryptedQrData,
+          align: PosAlign.center,
+          size: QRSize.size4,
+          cor: QRCorrection.M,
+        ),
+      );
+      bytes.addAll([0x1B, 0x61, 0x00]);
+    } else {
     final qrImage = _buildQrImage(encryptedQrData);
     if (qrImage != null) {
       final resizedQr = img.copyResize(
@@ -683,6 +724,14 @@ class PrinterService {
       );
       bytes.addAll([0x1B, 0x61, 0x00]);
     }
+    } // end else (non-mp58 QR path)
+    if (printerProfile == PrinterProfile.mp58) {
+      bytes.addAll(generator.feed(4));
+      bytes.addAll(generator.hr(ch: '-'));
+    } else if (printerProfile == PrinterProfile.gsV0) {
+      bytes.addAll(generator.feed(1));
+    }
+    // escStar: _cutOrFeed already feeds 4 lines — no extra feed needed
     bytes.addAll(_cutOrFeed(generator, printerProfile));
 
     return bytes;
@@ -886,6 +935,7 @@ class PrinterService {
       bytes.addAll(generator.hr(ch: '-'));
     }
 
+    bytes.addAll([0x1B, 0x64, 5]); // feed before cut
     bytes.addAll(_cutOrFeed(generator, printerProfile));
     return bytes;
   }
@@ -1012,7 +1062,7 @@ class PrinterService {
   // PT-210 has no cutter — feed paper so teller can tear cleanly.
   static List<int> _cutOrFeed(Generator generator, PrinterProfile profile) {
     if (profile == PrinterProfile.escStar) {
-      return [0x1B, 0x64, 2]; // ESC d 2 — feed 2 lines (enough to tear)
+      return [0x1B, 0x64, 1]; // ESC d 1 — feed 1 line (enough to tear)
     }
     return generator.cut();
   }

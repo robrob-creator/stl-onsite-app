@@ -10,7 +10,7 @@ class AppConstants {
 
   static String get apiBaseUrl {
     final stored = GetStorage().read<String>(_storageKey);
-    return stored ?? envStaging;
+    return stored ?? envProduction;
   }
 
   static void setEnvironment(String url) {

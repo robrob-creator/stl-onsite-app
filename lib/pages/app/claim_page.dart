@@ -33,6 +33,7 @@ class _ClaimPageState extends State<ClaimPage> {
   bool _isLoadingClaims = false;
   bool _isProcessingClaim = false;
   String? _errorMessage;
+  String _statusFilter = '';
   StreamSubscription? _qrSubscription;
   bool _isScanning = false;
   Map<String, dynamic>? _scannedTicketData;
@@ -52,7 +53,7 @@ class _ClaimPageState extends State<ClaimPage> {
     lotteryController = Get.find<LotteryController>();
     authController = Get.find<AuthController>();
     _filterDate = DateTime.now().toIso8601String().substring(0, 10);
-    _fetchClaims(drawDate: _filterDate);
+    _fetchClaims(drawDate: _filterDate, status: _statusFilter.isNotEmpty ? _statusFilter : null);
     _buildDrawTimeMap();
   }
 
@@ -537,6 +538,13 @@ class _ClaimPageState extends State<ClaimPage> {
     );
   }
 
+  String _maskTicketNo(String? ticketNo, bool isClaimed) {
+    if (ticketNo == null || ticketNo.isEmpty) return 'N/A';
+    if (isClaimed) return ticketNo;
+    if (ticketNo.length <= 6) return '••••••';
+    return '${ticketNo.substring(0, ticketNo.length - 6)}••••••';
+  }
+
   String _fmtShort(String iso) {
     try {
       final d = DateTime.parse('${iso}T00:00:00');
@@ -564,12 +572,12 @@ class _ClaimPageState extends State<ClaimPage> {
     if (picked == null || !mounted) return;
     final iso = picked.toIso8601String().substring(0, 10);
     setState(() => _filterDate = iso);
-    _fetchClaims(drawDate: iso);
+    _fetchClaims(drawDate: iso, status: _statusFilter.isNotEmpty ? _statusFilter : null);
   }
 
   void _clearDateFilter() {
     setState(() => _filterDate = '');
-    _fetchClaims();
+    _fetchClaims(status: _statusFilter.isNotEmpty ? _statusFilter : null);
   }
 
   Future<void> _fetchClaims({
@@ -748,7 +756,7 @@ class _ClaimPageState extends State<ClaimPage> {
                   const SizedBox(height: 12),
                   Text(
                     _claimBeingVerified != null
-                        ? 'Scan the QR code on the physical ticket\n(${_claimBeingVerified!.ticket?.ticketNo ?? ''}) to confirm the claim'
+                        ? 'Scan the QR code on the physical ticket\n(${_maskTicketNo(_claimBeingVerified!.ticket?.ticketNo, false)}) to confirm the claim'
                         : 'Place the QR at the center of your\ncamera and it will be automatically scanned',
                     textAlign: TextAlign.center,
                     style: Theme.of(
@@ -784,8 +792,9 @@ class _ClaimPageState extends State<ClaimPage> {
   }
 
   Widget _buildClaimsList() {
-    // Deduplicate by ticket_id — keep the claim with the highest winning_amount
-    // (handles legacy duplicate records from manual claim creation)
+    // Deduplicate by ticket_id. Prefer pending (actionable) over claimed at
+    // equal amounts — without this the backend's created_at DESC order puts
+    // the claimed record first, displacing the pending one from "All" view.
     final byTicket = <String, Claim>{};
     final noKeyList = <Claim>[];
     for (final c in _claims) {
@@ -794,7 +803,11 @@ class _ClaimPageState extends State<ClaimPage> {
         noKeyList.add(c);
       } else {
         final existing = byTicket[key];
-        if (existing == null || c.winningAmount > existing.winningAmount) {
+        final betterAmount = c.winningAmount > (existing?.winningAmount ?? 0);
+        // Always prefer pending (actionable) over claimed/paid regardless of amount.
+        final preferPending = c.status == 'pending' &&
+            (existing?.status == 'claimed' || existing?.status == 'paid');
+        if (existing == null || betterAmount || preferPending) {
           byTicket[key] = c;
         }
       }
@@ -917,7 +930,52 @@ class _ClaimPageState extends State<ClaimPage> {
               ],
             ),
           ),
-          const SizedBox(height: 16),
+          const SizedBox(height: 10),
+
+          // Status filter chips
+          SingleChildScrollView(
+            scrollDirection: Axis.horizontal,
+            child: Row(
+              children: [
+                for (final entry in [
+                  ('', 'All'),
+                  ('pending', 'Unclaimed'),
+                  ('claimed', 'Claimed'),
+                ])
+                  Padding(
+                    padding: const EdgeInsets.only(right: 8),
+                    child: GestureDetector(
+                      onTap: () {
+                        setState(() => _statusFilter = entry.$1);
+                        _fetchClaims(
+                          drawDate: _filterDate.isNotEmpty ? _filterDate : null,
+                          status: entry.$1.isNotEmpty ? entry.$1 : null,
+                        );
+                      },
+                      child: Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 6),
+                        decoration: BoxDecoration(
+                          color: _statusFilter == entry.$1 ? AppColors.primary : Colors.white,
+                          border: Border.all(
+                            color: _statusFilter == entry.$1 ? AppColors.primary : const Color(0xFFE5E7EB),
+                          ),
+                          borderRadius: BorderRadius.circular(20),
+                        ),
+                        child: Text(
+                          entry.$2,
+                          style: TextStyle(
+                            fontSize: 12,
+                            fontWeight: FontWeight.w500,
+                            color: _statusFilter == entry.$1 ? Colors.white : AppColors.textSecondary,
+                          ),
+                        ),
+                      ),
+                    ),
+                  ),
+              ],
+            ),
+          ),
+          const SizedBox(height: 12),
 
           // Claims list
           Expanded(
@@ -955,13 +1013,11 @@ class _ClaimPageState extends State<ClaimPage> {
   }
 
   Widget _buildClaimCard(BuildContext context, Claim claim) {
-    final isClaimable = claim.status != 'claimed' && claim.status != 'paid';
+    final isClaimed = claim.status == 'claimed' || claim.status == 'paid';
     final bet = claim.bet;
-    final statusColor = claim.status == 'claimed' || claim.status == 'paid'
-        ? Colors.green
-        : claim.status == 'won'
-        ? Colors.green
-        : AppColors.primary;
+    final statusColor = isClaimed ? Colors.green : AppColors.primary;
+    final claimStatusLabel = isClaimed ? 'CLAIMED' : 'UNCLAIMED';
+    final claimStatusColor = isClaimed ? Colors.green : Colors.orange;
 
     return GestureDetector(
       onTap: () {
@@ -979,7 +1035,7 @@ class _ClaimPageState extends State<ClaimPage> {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              // Ticket number
+              // Ticket number + claim status badge
               Row(
                 children: [
                   Image.asset(
@@ -988,12 +1044,29 @@ class _ClaimPageState extends State<ClaimPage> {
                     height: 32,
                   ),
                   const SizedBox(width: 4),
-                  Text(
-                    claim.ticket?.ticketNo ?? 'N/A',
-                    style: const TextStyle(
-                      fontSize: 14,
-                      fontWeight: FontWeight.w500,
-                      color: Colors.black,
+                  Expanded(
+                    child: Text(
+                      _maskTicketNo(claim.ticket?.ticketNo, isClaimed),
+                      style: const TextStyle(
+                        fontSize: 14,
+                        fontWeight: FontWeight.w500,
+                        color: Colors.black,
+                      ),
+                    ),
+                  ),
+                  Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                    decoration: BoxDecoration(
+                      color: claimStatusColor.withValues(alpha: 0.12),
+                      borderRadius: BorderRadius.circular(12),
+                    ),
+                    child: Text(
+                      claimStatusLabel,
+                      style: TextStyle(
+                        fontSize: 10,
+                        fontWeight: FontWeight.w700,
+                        color: claimStatusColor,
+                      ),
                     ),
                   ),
                 ],
@@ -1173,7 +1246,7 @@ class _ClaimPageState extends State<ClaimPage> {
 
               const SizedBox(height: 12),
 
-              // Bet Amount, Status, Price Payout
+              // Bet Amount, Claim Status, Price Payout
               Row(
                 mainAxisAlignment: MainAxisAlignment.spaceBetween,
                 children: [
@@ -1185,9 +1258,7 @@ class _ClaimPageState extends State<ClaimPage> {
                         style: TextStyle(fontSize: 12, color: Colors.grey[600]),
                       ),
                       Text(
-                        (bet?.totalBetAmount ?? claim.amount).toStringAsFixed(
-                          0,
-                        ),
+                        (bet?.totalBetAmount ?? claim.amount).toStringAsFixed(0),
                         style: const TextStyle(
                           fontSize: 16,
                           fontWeight: FontWeight.w600,
@@ -1200,15 +1271,15 @@ class _ClaimPageState extends State<ClaimPage> {
                     crossAxisAlignment: CrossAxisAlignment.center,
                     children: [
                       Text(
-                        'Status',
+                        'Claim Status',
                         style: TextStyle(fontSize: 12, color: Colors.grey[600]),
                       ),
                       Text(
-                        bet != null ? bet.status.toUpperCase() : 'PENDING',
+                        claimStatusLabel,
                         style: TextStyle(
                           fontSize: 14,
                           fontWeight: FontWeight.w600,
-                          color: statusColor,
+                          color: claimStatusColor,
                         ),
                       ),
                     ],
@@ -1231,6 +1302,47 @@ class _ClaimPageState extends State<ClaimPage> {
                   ),
                 ],
               ),
+
+              // Claimed info section (only when claimed)
+              if (isClaimed) ...[
+                const SizedBox(height: 10),
+                Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                  decoration: BoxDecoration(
+                    color: Colors.green[50],
+                    borderRadius: BorderRadius.circular(8),
+                  ),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Row(
+                        children: [
+                          Text('Claim Date: ', style: TextStyle(fontSize: 11, color: Colors.grey[600])),
+                          Text(
+                            _formatTransactionDate(claim.claimedDate ?? claim.updatedAt),
+                            style: const TextStyle(fontSize: 11, fontWeight: FontWeight.w600),
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: 4),
+                      Row(
+                        children: [
+                          Text('Responsible: ', style: TextStyle(fontSize: 11, color: Colors.grey[600])),
+                          Expanded(
+                            child: Text(
+                              claim.isManualClaim
+                                  ? (claim.claimedByName ?? 'Admin')
+                                  : (claim.customerName ?? claim.claimedByName ?? '—'),
+                              style: const TextStyle(fontSize: 11, fontWeight: FontWeight.w600),
+                              overflow: TextOverflow.ellipsis,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ],
+                  ),
+                ),
+              ],
             ],
           ),
         ),
@@ -1340,7 +1452,7 @@ class _ClaimPageState extends State<ClaimPage> {
               const SizedBox(height: 20),
               _buildDetailRow(
                 'Ticket Number:',
-                claim.ticket?.ticketNo ?? 'N/A',
+                _maskTicketNo(claim.ticket?.ticketNo, !isClaimable),
               ),
               _buildDetailRow(
                 'Status:',

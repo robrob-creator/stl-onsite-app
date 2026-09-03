@@ -75,6 +75,10 @@ class Claim {
   final String? createdAt;
   final String? updatedAt;
   final String? deletedAt;
+  final String? claimedDate;
+  final String? claimedByName;
+  final String? customerName;
+  final bool isManualClaim;
   final Bet? bet;
   final Ticket? ticket;
   final double ticketTargetTotal;
@@ -95,6 +99,10 @@ class Claim {
     this.createdAt,
     this.updatedAt,
     this.deletedAt,
+    this.claimedDate,
+    this.claimedByName,
+    this.customerName,
+    this.isManualClaim = false,
     this.bet,
     this.ticket,
     this.ticketTargetTotal = 0.0,
@@ -117,6 +125,10 @@ class Claim {
       createdAt: json['created_at'] as String?,
       updatedAt: json['updated_at'] as String?,
       deletedAt: json['deleted_at'] as String?,
+      claimedDate: json['claimed_date']?.toString(),
+      claimedByName: json['claimed_by_name'] as String?,
+      customerName: json['customer_name'] as String?,
+      isManualClaim: json['is_manual_claim'] as bool? ?? false,
       bet: json['bet'] != null ? Bet.fromJson(json['bet']) : null,
       ticket: json['ticket'] != null ? Ticket.fromJson(json['ticket']) : null,
       ticketTargetTotal: (json['ticket_target_total'] as num?)?.toDouble() ?? 0.0,
