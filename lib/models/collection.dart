@@ -45,6 +45,9 @@ class Collection {
   String get statusLabel {
     if (netAmount < 0 && tapadaStatus != 'completed') return 'Unsettled';
     if (netAmount < 0) return 'Settled';
+    // Partial admin remittance: admin approved only part of what was collected.
+    // Must be checked BEFORE isFullySettled so it never resolves to 'Remitted'.
+    if (remittanceStatus.toLowerCase() == 'partial') return 'Partial Remittance';
     if (isFullySettled) {
       final remStatus = remittanceStatus.toLowerCase();
       if (remStatus == 'paid' || remStatus == 'remitted' || remStatus == 'approved') {
@@ -72,6 +75,8 @@ class Collection {
 
   bool get isFullySettled {
     if (isTapada || netAmount <= 0) return true;
+    // Partial admin remittance → not fully settled regardless of outstanding.
+    if (remittanceStatus.toLowerCase() == 'partial') return false;
     if (agentOutstandingAmount >= 0) {
       return agentOutstandingAmount <= 0.005;
     }
@@ -81,8 +86,7 @@ class Collection {
         remittance == 'settle' ||
         remittance == 'settled' ||
         remittance == 'approved';
-    return approved &&
-        (remittance != 'partial' || remittedAmount >= netAmount - 0.005);
+    return approved;
   }
 
   factory Collection.fromJson(Map<String, dynamic> json) {
