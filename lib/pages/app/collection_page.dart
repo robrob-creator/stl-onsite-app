@@ -256,9 +256,12 @@ class _CollectionPageState extends State<CollectionPage> {
   }
 
   double _displayCollected(Collection c) {
-    // A tapada is a settlement payout to the agent, not agent cash
-    // collected. It must not make the agent's Collection total negative.
-    if (c.isTapada) return 0.0;
+    // A tapada is cash the collector paid OUT to the agent, so it offsets
+    // (nets against) what the agent collected elsewhere — it must not be
+    // excluded outright, or the total overstates by the tapada amount.
+    // netAmount is already negative for a tapada row. The running total is
+    // clamped at the aggregate level so it can never go negative overall.
+    if (c.isTapada) return c.netAmount;
     return c.remittedAmount.clamp(
       0.0,
       c.netAmount.clamp(0.0, double.infinity),
@@ -285,6 +288,7 @@ class _CollectionPageState extends State<CollectionPage> {
       totalCollected += _displayCollected(c);
       balance += c.rawBalance;
     }
+    totalCollected = totalCollected.clamp(0.0, double.infinity);
 
     // Claimed = winnings where QR scan completed (status='claimed').
     // Unclaimed = winnings still pending (status='pending').
