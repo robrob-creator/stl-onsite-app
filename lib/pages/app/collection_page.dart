@@ -283,13 +283,6 @@ class _CollectionPageState extends State<CollectionPage> {
       totalCollected += _displayCollected(c);
     }
     totalCollected = totalCollected.clamp(0.0, double.infinity);
-    // Balance = agent's current wallet balance, same figure shown in the
-    // app's wallet chip. Summing rawBalance across the date-filtered slots
-    // made this look wrong whenever the picked range didn't include every
-    // draw contributing to the balance; the wallet figure is always correct
-    // regardless of the range shown here.
-    final balance = Get.find<LotteryController>().balance.value;
-
     // Claimed = winnings where QR scan completed (status='claimed').
     // Unclaimed = winnings still pending (status='pending').
     final claimAmount = _claims
@@ -332,11 +325,21 @@ class _CollectionPageState extends State<CollectionPage> {
                 ),
               ),
               Expanded(
-                child: _TotalStat(
-                  label: 'Balance',
-                  value: _pesoFmt.format(balance),
-                  emphasize: balance != 0,
-                ),
+                // Wrapped in Obx so this stays live off the same
+                // WebSocket-driven balance.value every other balance display
+                // already reacts to (collection/remittance events call
+                // loadProfile() in LotteryController) — reading
+                // balance.value directly here without Obx meant this stat
+                // only ever showed whatever it was when this widget last
+                // rebuilt, e.g. on page open, not on every live update.
+                child: Obx(() {
+                  final balance = Get.find<LotteryController>().balance.value;
+                  return _TotalStat(
+                    label: 'Balance',
+                    value: _pesoFmt.format(balance),
+                    emphasize: balance != 0,
+                  );
+                }),
               ),
             ],
           ),
