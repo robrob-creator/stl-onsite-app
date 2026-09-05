@@ -58,10 +58,15 @@ class Collection {
     }
     if (isFullySettled) {
       final remStatus = remittanceStatus.toLowerCase();
-      if (remStatus == 'paid' || remStatus == 'remitted' || remStatus == 'approved') {
-        return 'Remitted';
-      }
-      return 'Collected';
+      if (remStatus == 'settle' || remStatus == 'settled') return 'Settled';
+      // agentOutstandingAmount <= 0.005 is what actually made isFullySettled
+      // true here (agentOutstandingAmount is void-aware and nets against
+      // admin-approved sums) — that already means admin has approved enough
+      // to cover the full net amount, i.e. it genuinely has been remitted,
+      // regardless of what the raw remittance_status string still says (it
+      // can be stuck at 'partial' or 'unremitted' even once a re-collection
+      // chain or a later full approval has actually resolved it).
+      return 'Remitted';
     }
     if (agentOutstandingAmount > 0.005) return 'Partial';
     if (status == 'paid') return 'Pending Remittance';
