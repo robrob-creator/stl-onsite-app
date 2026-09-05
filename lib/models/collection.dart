@@ -47,7 +47,15 @@ class Collection {
     if (netAmount < 0) return 'Settled';
     // Partial admin remittance: admin approved only part of what was collected.
     // Must be checked BEFORE isFullySettled so it never resolves to 'Remitted'.
-    if (remittanceStatus.toLowerCase() == 'partial') return 'Partial Remittance';
+    // Gated on a genuine remaining gap (agentOutstandingAmount) — the backend
+    // stamps remittance_status='partial' the instant a remittance is merely
+    // *submitted* (before admin decides) or leaves it stuck there through a
+    // resolved re-collection chain, so the raw string alone doesn't mean
+    // there's still money outstanding.
+    if (remittanceStatus.toLowerCase() == 'partial' &&
+        agentOutstandingAmount > 0.005) {
+      return 'Partial Remittance';
+    }
     if (isFullySettled) {
       final remStatus = remittanceStatus.toLowerCase();
       if (remStatus == 'paid' || remStatus == 'remitted' || remStatus == 'approved') {
@@ -75,11 +83,16 @@ class Collection {
 
   bool get isFullySettled {
     if (isTapada || netAmount <= 0) return true;
-    // Partial admin remittance → not fully settled regardless of outstanding.
-    if (remittanceStatus.toLowerCase() == 'partial') return false;
+    // agentOutstandingAmount is the authoritative, void-aware figure for
+    // whether there's still a genuine gap — check it before trusting the raw
+    // remittance_status string, which can read 'partial' even once a
+    // re-collection chain has fully resolved it, or the instant a remittance
+    // is merely submitted and still awaiting admin's decision.
     if (agentOutstandingAmount >= 0) {
       return agentOutstandingAmount <= 0.005;
     }
+    // Partial admin remittance → not fully settled regardless of outstanding.
+    if (remittanceStatus.toLowerCase() == 'partial') return false;
     final remittance = remittanceStatus.toLowerCase();
     final approved = remittance == 'remitted' ||
         remittance == 'paid' ||
