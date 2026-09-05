@@ -276,19 +276,19 @@ class _CollectionPageState extends State<CollectionPage> {
     double hits = 0;
     double commission = 0;
     double totalCollected = 0;
-    // Balance = what agent still owes to company (official books).
-    // Decreases only when remittance is approved by admin, NOT when the
-    // collector physically takes the cash. A collected-but-unremitted draw
-    // still shows its full net in balance.
-    double balance = 0;
     for (final c in items) {
       gross += _displayGross(c);
       hits += c.hitsAmount;
       commission += c.commissionAmount;
       totalCollected += _displayCollected(c);
-      balance += c.rawBalance;
     }
     totalCollected = totalCollected.clamp(0.0, double.infinity);
+    // Balance = agent's current wallet balance, same figure shown in the
+    // app's wallet chip. Summing rawBalance across the date-filtered slots
+    // made this look wrong whenever the picked range didn't include every
+    // draw contributing to the balance; the wallet figure is always correct
+    // regardless of the range shown here.
+    final balance = Get.find<LotteryController>().balance.value;
 
     // Claimed = winnings where QR scan completed (status='claimed').
     // Unclaimed = winnings still pending (status='pending').
