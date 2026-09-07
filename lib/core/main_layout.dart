@@ -421,6 +421,30 @@ class _MainLayoutState extends State<MainLayout> {
                       dense: true,
                       minLeadingWidth: 0,
                     ),
+                    // Printer Settings
+                    ListTile(
+                      leading: const Icon(
+                        Icons.print_outlined,
+                        color: Color(0xFF222222),
+                      ),
+                      title: const Text(
+                        'Printer Settings',
+                        style: TextStyle(
+                          fontWeight: FontWeight.w500,
+                          color: Color(0xFF222222),
+                        ),
+                      ),
+                      onTap: () {
+                        Navigator.pop(context);
+                        Get.toNamed('/printer-settings');
+                      },
+                      contentPadding: const EdgeInsets.symmetric(
+                        horizontal: 12,
+                        vertical: 0,
+                      ),
+                      dense: true,
+                      minLeadingWidth: 0,
+                    ),
                     // Live Draw
                     Obx(() {
                       final isLive = Get.isRegistered<LiveDrawController>()
