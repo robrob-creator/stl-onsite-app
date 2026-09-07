@@ -47,6 +47,11 @@ class _PrinterSettingsPageState extends State<PrinterSettingsPage> {
     }
   }
 
+  void _setProfile(PrinterProfile profile) {
+    PrinterService.setProfile(profile);
+    setState(() => _savedProfile = profile);
+  }
+
   void _selectPrinter(BluetoothInfo device) {
     PrinterService.savePrinter(device.macAdress, device.name);
     setState(() {
@@ -147,48 +152,62 @@ class _PrinterSettingsPageState extends State<PrinterSettingsPage> {
                       ),
                     ],
                   ),
-                  const Divider(height: 20),
-                  Row(
-                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                    children: [
-                      Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          const Text(
-                            'Goojprt / MTP-2 Mode',
-                            style: TextStyle(
-                              fontSize: 13,
-                              fontWeight: FontWeight.w500,
-                            ),
-                          ),
-                          Text(
-                            _savedProfile == PrinterProfile.escStar
-                                ? 'ESC * (PT-210, MTP-2)'
-                                : 'GS v 0 (standard)',
-                            style: const TextStyle(
-                              fontSize: 11,
-                              color: Colors.grey,
-                            ),
-                          ),
-                        ],
-                      ),
-                      Switch(
-                        value: _savedProfile == PrinterProfile.escStar,
-                        activeThumbColor: const Color(0xFF2563EB),
-                        onChanged: (val) {
-                          final profile = val
-                              ? PrinterProfile.escStar
-                              : PrinterProfile.gsV0;
-                          PrinterService.setProfile(profile);
-                          setState(() => _savedProfile = profile);
-                        },
-                      ),
-                    ],
-                  ),
                 ],
               ),
             ),
           ],
+
+          // Printer profile selector — always available, even before a
+          // printer is paired/selected, so a teller can preset the profile
+          // for a printer that isn't reachable yet.
+          Container(
+            margin: const EdgeInsets.fromLTRB(16, 0, 16, 16),
+            padding: const EdgeInsets.all(16),
+            decoration: BoxDecoration(
+              color: const Color(0xFFF9FAFB),
+              borderRadius: BorderRadius.circular(12),
+              border: Border.all(color: const Color(0xFFE5E7EB)),
+            ),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const Text(
+                  'Printer Profile',
+                  style: TextStyle(fontWeight: FontWeight.bold, fontSize: 14),
+                ),
+                const SizedBox(height: 4),
+                const Text(
+                  'Pick the mode matching your printer model. Wrong mode causes garbled or blank logo prints.',
+                  style: TextStyle(fontSize: 12, color: Colors.grey),
+                ),
+                const SizedBox(height: 12),
+                Wrap(
+                  spacing: 8,
+                  runSpacing: 8,
+                  children: [
+                    _ProfileButton(
+                      label: 'GS v 0',
+                      sublabel: 'Standard',
+                      selected: _savedProfile == PrinterProfile.gsV0,
+                      onTap: () => _setProfile(PrinterProfile.gsV0),
+                    ),
+                    _ProfileButton(
+                      label: 'ESC *',
+                      sublabel: 'Goojprt / MTP-2 / PT-210',
+                      selected: _savedProfile == PrinterProfile.escStar,
+                      onTap: () => _setProfile(PrinterProfile.escStar),
+                    ),
+                    _ProfileButton(
+                      label: 'MP58-04H',
+                      sublabel: 'Extra feed before cut',
+                      selected: _savedProfile == PrinterProfile.mp58,
+                      onTap: () => _setProfile(PrinterProfile.mp58),
+                    ),
+                  ],
+                ),
+              ],
+            ),
+          ),
 
           // Section header
           Padding(
@@ -282,6 +301,59 @@ class _PrinterSettingsPageState extends State<PrinterSettingsPage> {
                   ),
           ),
         ],
+      ),
+    );
+  }
+}
+
+class _ProfileButton extends StatelessWidget {
+  final String label;
+  final String sublabel;
+  final bool selected;
+  final VoidCallback onTap;
+
+  const _ProfileButton({
+    required this.label,
+    required this.sublabel,
+    required this.selected,
+    required this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return InkWell(
+      onTap: onTap,
+      borderRadius: BorderRadius.circular(10),
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+        decoration: BoxDecoration(
+          color: selected ? const Color(0xFF2563EB) : Colors.white,
+          borderRadius: BorderRadius.circular(10),
+          border: Border.all(
+            color: selected ? const Color(0xFF2563EB) : const Color(0xFFD1D5DB),
+          ),
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Text(
+              label,
+              style: TextStyle(
+                fontWeight: FontWeight.bold,
+                fontSize: 13,
+                color: selected ? Colors.white : Colors.black87,
+              ),
+            ),
+            Text(
+              sublabel,
+              style: TextStyle(
+                fontSize: 10,
+                color: selected ? Colors.white70 : Colors.grey,
+              ),
+            ),
+          ],
+        ),
       ),
     );
   }
