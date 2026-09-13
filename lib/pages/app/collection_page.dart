@@ -280,7 +280,14 @@ class _CollectionPageState extends State<CollectionPage> {
       gross += _displayGross(c);
       hits += c.hitsAmount;
       commission += c.commissionAmount;
-      totalCollected += _displayCollected(c);
+      // Tapada is cash the collector paid OUT to the agent, not money
+      // collected FROM them - it's a different cash flow. Netting its raw
+      // (usually large negative) netAmount into this sum floored the total
+      // to 0 for any date range containing a tapada of meaningful size,
+      // even when other draws in the same range were genuinely collected.
+      if (!c.isTapada) {
+        totalCollected += _displayCollected(c);
+      }
     }
     totalCollected = totalCollected.clamp(0.0, double.infinity);
     // Claimed = winnings where QR scan completed (status='claimed').
