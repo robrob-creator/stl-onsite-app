@@ -966,7 +966,7 @@ class PrinterService {
       final qrImage = QrImage(qrCode);
       final int dim = qrImage.moduleCount;
 
-      const int moduleSize = 6; // pixels per QR module — kept an integer so
+      const int moduleSize = 4; // pixels per QR module — kept an integer so
       // no downstream resize is ever needed (see call site).
       const int quietZone = 4; // blank modules around QR
       final int totalModules = dim + quietZone * 2;
