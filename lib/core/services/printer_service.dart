@@ -691,20 +691,18 @@ class PrinterService {
           encryptedQrData,
           align: PosAlign.center,
           size: QRSize.size4,
-          cor: QRCorrection.M,
+          cor: QRCorrection.Q,
         ),
       );
       bytes.addAll([0x1B, 0x61, 0x00]);
     } else {
     final qrImage = _buildQrImage(encryptedQrData);
     if (qrImage != null) {
-      final resizedQr = img.copyResize(
-        qrImage,
-        width: 200,
-        height: 200,
-        interpolation: img.Interpolation.nearest,
-      );
-      bytes.addAll(_encodeImage(resizedQr, printerProfile));
+      // Rendered at native module size below — no resize, so modules stay
+      // crisp squares. A prior fixed 200x200 nearest-neighbor resize scaled
+      // by a non-integer ratio, blurring module edges enough that phone
+      // scanners couldn't lock onto the grid.
+      bytes.addAll(_encodeImage(qrImage, printerProfile));
     } else if (printerProfile == PrinterProfile.escStar) {
       bytes.addAll(
         generator.text(
@@ -719,7 +717,7 @@ class PrinterService {
           encryptedQrData,
           align: PosAlign.center,
           size: QRSize.size4,
-          cor: QRCorrection.M,
+          cor: QRCorrection.Q,
         ),
       );
       bytes.addAll([0x1B, 0x61, 0x00]);
@@ -963,12 +961,13 @@ class PrinterService {
     try {
       final qrCode = QrCode.fromData(
         data: data,
-        errorCorrectLevel: QrErrorCorrectLevel.M,
+        errorCorrectLevel: QrErrorCorrectLevel.Q,
       );
       final qrImage = QrImage(qrCode);
       final int dim = qrImage.moduleCount;
 
-      const int moduleSize = 4; // pixels per QR module
+      const int moduleSize = 6; // pixels per QR module — kept an integer so
+      // no downstream resize is ever needed (see call site).
       const int quietZone = 4; // blank modules around QR
       final int totalModules = dim + quietZone * 2;
       final int size = totalModules * moduleSize;
