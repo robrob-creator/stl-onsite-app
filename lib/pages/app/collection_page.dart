@@ -298,7 +298,10 @@ class _CollectionPageState extends State<CollectionPage> {
     final unclaimAmount = _claims
         .where((c) => c.status == 'pending')
         .fold(0.0, (s, c) => s + c.winningAmount);
-    final hasHits = _claims.isNotEmpty || hits > 0;
+    // Return Amount = cash the collector/admin handed back to this agent
+    // (e.g. a voided remittance) — collections.voided_amount per draw slot.
+    final returnAmount = items.fold(0.0, (s, c) => s + c.voidedAmount);
+    final hasHits = _claims.isNotEmpty || hits > 0 || returnAmount > 0;
 
     return Container(
       margin: const EdgeInsets.fromLTRB(16, 12, 16, 4),
@@ -381,6 +384,11 @@ class _CollectionPageState extends State<CollectionPage> {
                     value: _pesoFmt.format(claimAmount),
                     emphasize: claimAmount > 0,
                     color: const Color(0xFF86EFAC),
+                    onTap: () => _showClaimsBreakdown(
+                      title: 'Claimed Breakdown',
+                      color: const Color(0xFF86EFAC),
+                      claims: _claims.where((c) => c.status == 'claimed').toList(),
+                    ),
                   ),
                 ),
                 Expanded(
@@ -389,6 +397,22 @@ class _CollectionPageState extends State<CollectionPage> {
                     value: _pesoFmt.format(unclaimAmount),
                     emphasize: unclaimAmount > 0,
                     color: const Color(0xFFFCA5A5),
+                    onTap: () => _showClaimsBreakdown(
+                      title: 'Unclaim Breakdown',
+                      color: const Color(0xFFFCA5A5),
+                      claims: _claims.where((c) => c.status == 'pending').toList(),
+                    ),
+                  ),
+                ),
+                Expanded(
+                  child: _TotalStat(
+                    label: 'Return Amount',
+                    value: _pesoFmt.format(returnAmount),
+                    emphasize: returnAmount > 0,
+                    color: const Color(0xFF93C5FD),
+                    onTap: () => _showReturnBreakdown(
+                      items.where((c) => c.voidedAmount > 0).toList(),
+                    ),
                   ),
                 ),
               ],
@@ -396,6 +420,157 @@ class _CollectionPageState extends State<CollectionPage> {
           ],
         ],
       ),
+    );
+  }
+
+  void _showClaimsBreakdown({
+    required String title,
+    required Color color,
+    required List<Claim> claims,
+  }) {
+    final total = claims.fold(0.0, (s, c) => s + c.winningAmount);
+    _showBreakdownSheet(
+      title: title,
+      color: color,
+      total: total,
+      rows: claims.map((c) {
+        final date = c.drawDate != null
+            ? (DateTime.tryParse(c.drawDate!) != null
+                ? _displayDateFmt.format(DateTime.parse(c.drawDate!))
+                : c.drawDate!)
+            : '-';
+        return _BreakdownRow(
+          date: date,
+          subtitle: c.ticket?.ticketNo ?? '-',
+          amount: c.winningAmount,
+        );
+      }).toList(),
+    );
+  }
+
+  void _showReturnBreakdown(List<Collection> collections) {
+    final total = collections.fold(0.0, (s, c) => s + c.voidedAmount);
+    _showBreakdownSheet(
+      title: 'Return Amount Breakdown',
+      color: const Color(0xFF93C5FD),
+      total: total,
+      rows: collections.map((c) {
+        final parsed = DateTime.tryParse(c.drawDate);
+        return _BreakdownRow(
+          date: parsed != null ? _displayDateFmt.format(parsed) : c.drawDate,
+          subtitle: _formatDrawTime(c.drawTime),
+          amount: c.voidedAmount,
+        );
+      }).toList(),
+    );
+  }
+
+  void _showBreakdownSheet({
+    required String title,
+    required Color color,
+    required double total,
+    required List<_BreakdownRow> rows,
+  }) {
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      builder: (context) {
+        return DraggableScrollableSheet(
+          initialChildSize: 0.5,
+          minChildSize: 0.3,
+          maxChildSize: 0.85,
+          expand: false,
+          builder: (context, scrollController) {
+            return Column(
+              children: [
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(20, 16, 20, 8),
+                  child: Row(
+                    children: [
+                      Container(
+                        width: 4,
+                        height: 20,
+                        decoration: BoxDecoration(
+                          color: color,
+                          borderRadius: BorderRadius.circular(2),
+                        ),
+                      ),
+                      const SizedBox(width: 10),
+                      Expanded(
+                        child: Text(
+                          title,
+                          style: const TextStyle(
+                            fontSize: 16,
+                            fontWeight: FontWeight.w700,
+                            color: Color(0xFF1F2937),
+                          ),
+                        ),
+                      ),
+                      Text(
+                        _pesoFmt.format(total),
+                        style: TextStyle(
+                          fontSize: 15,
+                          fontWeight: FontWeight.w700,
+                          color: color,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                const Divider(height: 1),
+                Expanded(
+                  child: rows.isEmpty
+                      ? const Center(
+                          child: Text(
+                            'No records for this period.',
+                            style: TextStyle(color: Color(0xFF6B7280)),
+                          ),
+                        )
+                      : ListView.separated(
+                          controller: scrollController,
+                          padding: const EdgeInsets.symmetric(vertical: 8),
+                          itemCount: rows.length,
+                          separatorBuilder: (_, __) =>
+                              const Divider(height: 1, indent: 20, endIndent: 20),
+                          itemBuilder: (context, i) {
+                            final row = rows[i];
+                            return ListTile(
+                              dense: true,
+                              title: Text(
+                                row.date,
+                                style: const TextStyle(
+                                  fontSize: 13,
+                                  fontWeight: FontWeight.w600,
+                                  color: Color(0xFF1F2937),
+                                ),
+                              ),
+                              subtitle: Text(
+                                row.subtitle,
+                                style: const TextStyle(
+                                  fontSize: 12,
+                                  color: Color(0xFF6B7280),
+                                ),
+                              ),
+                              trailing: Text(
+                                _pesoFmt.format(row.amount),
+                                style: TextStyle(
+                                  fontSize: 13,
+                                  fontWeight: FontWeight.w700,
+                                  color: color,
+                                ),
+                              ),
+                            );
+                          },
+                        ),
+                ),
+              ],
+            );
+          },
+        );
+      },
     );
   }
 
@@ -777,17 +952,31 @@ class _StatusBadge extends StatelessWidget {
   }
 }
 
+class _BreakdownRow {
+  final String date;
+  final String subtitle;
+  final double amount;
+
+  const _BreakdownRow({
+    required this.date,
+    required this.subtitle,
+    required this.amount,
+  });
+}
+
 class _TotalStat extends StatelessWidget {
   final String label;
   final String value;
   final bool emphasize;
   final Color? color;
+  final VoidCallback? onTap;
 
   const _TotalStat({
     required this.label,
     required this.value,
     this.emphasize = false,
     this.color,
+    this.onTap,
   });
 
   @override
@@ -798,17 +987,25 @@ class _TotalStat extends StatelessWidget {
     } else if (emphasize) {
       valueColor = const Color(0xFFFCA5A5);
     }
-    return Column(
+    final content = Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Text(
-          label,
-          style: const TextStyle(
-            fontSize: 10,
-            color: Color(0xFF9CA3AF),
-            fontWeight: FontWeight.w600,
-            letterSpacing: 0.4,
-          ),
+        Row(
+          children: [
+            Text(
+              label,
+              style: const TextStyle(
+                fontSize: 10,
+                color: Color(0xFF9CA3AF),
+                fontWeight: FontWeight.w600,
+                letterSpacing: 0.4,
+              ),
+            ),
+            if (onTap != null) ...[
+              const SizedBox(width: 3),
+              Icon(Icons.chevron_right_rounded, size: 12, color: valueColor),
+            ],
+          ],
         ),
         const SizedBox(height: 4),
         Text(
@@ -820,6 +1017,15 @@ class _TotalStat extends StatelessWidget {
           ),
         ),
       ],
+    );
+    if (onTap == null) return content;
+    return InkWell(
+      onTap: onTap,
+      borderRadius: BorderRadius.circular(8),
+      child: Padding(
+        padding: const EdgeInsets.symmetric(vertical: 2),
+        child: content,
+      ),
     );
   }
 }

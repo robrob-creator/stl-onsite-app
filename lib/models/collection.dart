@@ -19,6 +19,7 @@ class Collection {
   final double rawBalance;
   final String? collectionId;
   final bool isCollected;
+  final double voidedAmount;
 
   Collection({
     required this.drawResultId,
@@ -39,6 +40,7 @@ class Collection {
     required this.rawBalance,
     required this.isCollected,
     this.collectionId,
+    this.voidedAmount = 0.0,
   });
 
   /// Human-facing label rendered inside the status badge on the row.
@@ -130,6 +132,7 @@ class Collection {
       collectionId:
           (rawCollectionId == null || rawCollectionId.isEmpty) ? null : rawCollectionId,
       isCollected: json['is_collected'] as bool? ?? false,
+      voidedAmount: asDouble(json['voided_amount']),
     );
   }
 }
