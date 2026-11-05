@@ -126,8 +126,11 @@ class _LoginPageState extends State<LoginPage> {
   void _showEnvDialog(BuildContext context, AuthController ctrl) {
     final isCurrentlyStaging =
         AppConstants.apiBaseUrl == AppConstants.envStaging;
-    String selected =
-        isCurrentlyStaging ? AppConstants.envStaging : AppConstants.envProduction;
+    String selected = AppConstants.apiBaseUrl == AppConstants.envV2
+        ? AppConstants.envV2
+        : isCurrentlyStaging
+            ? AppConstants.envStaging
+            : AppConstants.envProduction;
 
     showDialog<void>(
       context: context,
@@ -157,6 +160,15 @@ class _LoginPageState extends State<LoginPage> {
                 color: const Color(0xFFf97316),
                 onTap: () => setS(() => selected = AppConstants.envStaging),
               ),
+              const SizedBox(height: 10),
+              _imeiOption(
+                icon: Icons.apartment_rounded,
+                label: 'V2',
+                subtitle: AppConstants.envV2,
+                selected: selected == AppConstants.envV2,
+                color: const Color(0xFF7C3AED),
+                onTap: () => setS(() => selected = AppConstants.envV2),
+              ),
             ],
           ),
           actions: [
@@ -180,9 +192,11 @@ class _LoginPageState extends State<LoginPage> {
                 AppConstants.setEnvironment(selected);
                 ctrl.resetToDeviceImei();
                 ctrl.logout();
-                final label = selected == AppConstants.envStaging
-                    ? 'Staging'
-                    : 'Production';
+                final label = selected == AppConstants.envV2
+                    ? 'V2'
+                    : selected == AppConstants.envStaging
+                        ? 'Staging'
+                        : 'Production';
                 Get.snackbar(
                   'Switched to $label',
                   'Please log in again.',

@@ -7,6 +7,8 @@ class AppConstants {
 
   static const String envStaging = 'https://staging.4play.com.co/api';
   static const String envProduction = 'https://api.4play.com.co/api';
+  // v2 organization: the API pins the org itself, so no extra header is needed.
+  static const String envV2 = 'https://v2-api.4play.com.co/api';
 
   static String get apiBaseUrl {
     final stored = GetStorage().read<String>(_storageKey);

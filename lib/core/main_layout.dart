@@ -650,6 +650,13 @@ class _MainLayoutState extends State<MainLayout> {
                 selected: selected,
                 onTap: () => setState(() => selected = AppConstants.envProduction),
               ),
+              _EnvOption(
+                label: 'V2',
+                subtitle: AppConstants.envV2,
+                value: AppConstants.envV2,
+                selected: selected,
+                onTap: () => setState(() => selected = AppConstants.envV2),
+              ),
             ],
           ),
           actions: [
@@ -664,7 +671,7 @@ class _MainLayoutState extends State<MainLayout> {
                 Get.find<AuthController>().logout();
                 Get.snackbar(
                   'Environment Changed',
-                  'Switched to ${selected.contains('staging') ? 'Staging' : 'Production'}. Please log in again.',
+                  'Switched to ${selected == AppConstants.envV2 ? 'V2' : selected.contains('staging') ? 'Staging' : 'Production'}. Please log in again.',
                   snackPosition: SnackPosition.BOTTOM,
                   duration: const Duration(seconds: 3),
                 );
