@@ -8,6 +8,14 @@ import '../../controllers/auth_controller.dart';
 import '../app_constants.dart';
 
 class LocationService {
+  /// Most recent successful GPS fix, cached so callers that just need a
+  /// "good enough" recent location (e.g. bet submission) don't have to
+  /// block on their own live fetch — this is refreshed every 60s by the
+  /// background timer in LotteryController regardless of what else is
+  /// happening in the app.
+  static Position? lastKnownPosition;
+  static DateTime? lastKnownPositionAt;
+
   /// Gets current device position. Returns null if GPS unavailable or denied.
   static Future<Position?> getCurrentPosition() async {
     try {
@@ -21,12 +29,15 @@ class LocationService {
       }
       if (permission == LocationPermission.deniedForever) return null;
 
-      return await Geolocator.getCurrentPosition(
+      final position = await Geolocator.getCurrentPosition(
         locationSettings: const LocationSettings(
           accuracy: LocationAccuracy.high,
           timeLimit: Duration(seconds: 10),
         ),
       );
+      lastKnownPosition = position;
+      lastKnownPositionAt = DateTime.now();
+      return position;
     } catch (_) {
       return null;
     }

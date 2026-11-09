@@ -594,6 +594,69 @@ class _BetEntryPageState extends State<BetEntryPage> {
                 );
               }),
 
+              // Game-day (day-of-week schedule) banner
+              Obx(() {
+                final ctrl = Get.find<LotteryController>();
+                if (!ctrl.isGameDayUnavailable.value) return const SizedBox.shrink();
+                return Container(
+                  margin: const EdgeInsets.only(bottom: 16),
+                  decoration: BoxDecoration(
+                    color: const Color(0xFFFFF8F0),
+                    borderRadius: BorderRadius.circular(12),
+                    border: Border.all(color: const Color(0xFFFDBA74)),
+                  ),
+                  child: Row(
+                    children: [
+                      Container(
+                        width: 4,
+                        height: 68,
+                        decoration: const BoxDecoration(
+                          color: Color(0xFFF97316),
+                          borderRadius: BorderRadius.only(
+                            topLeft: Radius.circular(12),
+                            bottomLeft: Radius.circular(12),
+                          ),
+                        ),
+                      ),
+                      const SizedBox(width: 12),
+                      const Icon(
+                        Icons.event_busy_rounded,
+                        color: Color(0xFFF97316),
+                        size: 20,
+                      ),
+                      const SizedBox(width: 10),
+                      const Expanded(
+                        child: Padding(
+                          padding: EdgeInsets.symmetric(vertical: 14),
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              Text(
+                                'Not Available Today',
+                                style: TextStyle(
+                                  fontSize: 13,
+                                  fontWeight: FontWeight.w700,
+                                  color: Color(0xFFEA580C),
+                                ),
+                              ),
+                              Text(
+                                'This game is not scheduled for today based on its configured days.',
+                                style: TextStyle(
+                                  fontSize: 11,
+                                  color: Color(0xFF9A3412),
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ),
+                      const SizedBox(width: 12),
+                    ],
+                  ),
+                );
+              }),
+
               // Tomorrow betting banner — only when betting is blocked (no-game day
               // or blackout); post-cutoff advance betting shows no banner
               Obx(() {
@@ -707,6 +770,8 @@ class _BetEntryPageState extends State<BetEntryPage> {
                                           );
                                       ctrl.isBlackoutTime.value =
                                           firstInGroup.isInBlackout;
+                                      ctrl.isGameDayUnavailable.value =
+                                          !firstInGroup.isAvailableToday;
                                       ctrl.updateBetDateForGame(firstInGroup);
                                       ctrl.update();
                                     }
@@ -751,6 +816,7 @@ class _BetEntryPageState extends State<BetEntryPage> {
                           child: Row(
                             children: filteredGames.map((game) {
                               final inBlackout = game.isInBlackout;
+                              final dayUnavailable = !game.isAvailableToday;
                               final isSelected =
                                   ctrl.selectedGameId.value == game.id;
                               return Expanded(
@@ -763,6 +829,8 @@ class _BetEntryPageState extends State<BetEntryPage> {
                                     ctrl.selectedTime.value = ctrl
                                         .getFirstAvailableDrawTimeId(game);
                                     ctrl.isBlackoutTime.value = inBlackout;
+                                    ctrl.isGameDayUnavailable.value =
+                                        dayUnavailable;
                                     ctrl.updateBetDateForGame(game);
                                     ctrl.update();
                                   },
@@ -883,11 +951,13 @@ class _BetEntryPageState extends State<BetEntryPage> {
 
               const SizedBox(height: 24),
 
-              // Form fields — blocked only when selected game is in blackout or no-game day
+              // Form fields — blocked when selected game is in blackout, no-game day,
+              // or not scheduled for today's weekday
               Obx(() {
                 final _ctrl = Get.find<LotteryController>();
-                final _blocked =
-                    _ctrl.isNoGameDay.value || _ctrl.isBlackoutTime.value;
+                final _blocked = _ctrl.isNoGameDay.value ||
+                    _ctrl.isBlackoutTime.value ||
+                    _ctrl.isGameDayUnavailable.value;
                 return IgnorePointer(
                   ignoring: _blocked,
                   child: Opacity(
@@ -1926,6 +1996,23 @@ class _BetEntryPageState extends State<BetEntryPage> {
                                               );
                                               return;
                                             }
+                                            if (game.noRepeat &&
+                                                digits
+                                                        .map(
+                                                          (d) =>
+                                                              int.tryParse(d)
+                                                                  ?.toString() ??
+                                                              d,
+                                                        )
+                                                        .toSet()
+                                                        .length !=
+                                                    digits.length) {
+                                              Get.snackbar(
+                                                'Error',
+                                                'A number cannot be repeated in the same bet',
+                                              );
+                                              return;
+                                            }
                                             final permCount = controller
                                                 .calculateCombinations(digits);
 
@@ -2505,38 +2592,72 @@ class _BetEntryPageState extends State<BetEntryPage> {
                                   borderRadius: BorderRadius.circular(12),
                                 ),
                               ),
-                              child: ctrl.isLoading.value
-                                  ? const SizedBox(
-                                      height: 20,
-                                      width: 20,
-                                      child: CircularProgressIndicator(
-                                        strokeWidth: 2,
-                                        valueColor:
-                                            AlwaysStoppedAnimation<Color>(
-                                              Colors.white,
+                              child: AnimatedSwitcher(
+                                // Crossfade instead of an instant hard cut —
+                                // idle -> loading -> done should read as one
+                                // continuous motion, not three abrupt jumps.
+                                duration: const Duration(milliseconds: 200),
+                                child: !ctrl.isLoading.value
+                                    ? Row(
+                                        key: const ValueKey('idle'),
+                                        mainAxisAlignment:
+                                            MainAxisAlignment.center,
+                                        children: [
+                                          Text(
+                                            'Submit Bet Entry',
+                                            style: TextStyle(
+                                              color: Colors.white,
+                                              fontWeight: FontWeight.bold,
+                                              fontSize: 16,
                                             ),
-                                      ),
-                                    )
-                                  : Row(
-                                      mainAxisAlignment:
-                                          MainAxisAlignment.center,
-                                      children: [
-                                        Text(
-                                          'Submit Bet Entry',
-                                          style: TextStyle(
-                                            color: Colors.white,
-                                            fontWeight: FontWeight.bold,
-                                            fontSize: 16,
                                           ),
+                                          SizedBox(width: 8),
+                                          Image.asset(
+                                            'assets/images/icons/ticket2.png',
+                                            height: 24,
+                                            color: Colors.white,
+                                          ),
+                                        ],
+                                      )
+                                    : Row(
+                                        // Keyed by label too, so each phase
+                                        // change (Checking connection… ->
+                                        // Getting location… -> Submitting
+                                        // bets…) also crossfades instead of
+                                        // snapping to the new text.
+                                        key: ValueKey(
+                                          'loading-${ctrl.submitStatusLabel}',
                                         ),
-                                        SizedBox(width: 8),
-                                        Image.asset(
-                                          'assets/images/icons/ticket2.png',
-                                          height: 24,
-                                          color: Colors.white,
-                                        ),
-                                      ],
-                                    ),
+                                        mainAxisAlignment:
+                                            MainAxisAlignment.center,
+                                        children: [
+                                          const SizedBox(
+                                            height: 20,
+                                            width: 20,
+                                            child: CircularProgressIndicator(
+                                              strokeWidth: 2,
+                                              valueColor:
+                                                  AlwaysStoppedAnimation<
+                                                    Color
+                                                  >(Colors.white),
+                                            ),
+                                          ),
+                                          if (ctrl
+                                              .submitStatusLabel
+                                              .isNotEmpty) ...[
+                                            const SizedBox(width: 10),
+                                            Text(
+                                              ctrl.submitStatusLabel,
+                                              style: const TextStyle(
+                                                color: Colors.white,
+                                                fontWeight: FontWeight.w600,
+                                                fontSize: 14,
+                                              ),
+                                            ),
+                                          ],
+                                        ],
+                                      ),
+                              ),
                             ),
                           ),
                         ),

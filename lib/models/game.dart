@@ -24,6 +24,14 @@ class Game {
   final String createdAt;
   final String? blackoutStartTime; // HH:MM:SS
   final String? blackoutEndTime;   // HH:MM:SS
+  final List<String>? gameDates;   // e.g. ["Mon","Tue",...,"Sun"] — null/empty = every day
+  // 'same_set' (default) or 'subset': a subset game pays the whole Rambol amount x
+  // multiplier when every bet number appears in the result (no split across orderings).
+  final String rambleMatch;
+  // Games that reject a bet using the same number twice.
+  final bool noRepeat;
+
+  bool get isSubsetRamble => rambleMatch == 'subset';
 
   Game({
     required this.id,
@@ -51,6 +59,9 @@ class Game {
     required this.createdAt,
     this.blackoutStartTime,
     this.blackoutEndTime,
+    this.gameDates,
+    this.rambleMatch = 'same_set',
+    this.noRepeat = false,
   });
 
   /// Returns true if current local time falls within this game's blackout window.
@@ -78,7 +89,33 @@ class Game {
     }
   }
 
+  /// Returns true if today's weekday is in this game's configured schedule.
+  /// A null/empty schedule means the game has no day restriction (available every day).
+  bool get isAvailableToday {
+    if (gameDates == null || gameDates!.isEmpty) return true;
+    const weekdayAbbrev = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
+    final todayAbbrev = weekdayAbbrev[DateTime.now().weekday - 1];
+    return gameDates!.contains(todayAbbrev);
+  }
+
   factory Game.fromJson(Map<String, dynamic> json) {
+    // Parse game_dates - handle both string and list formats
+    List<String>? parsedGameDates;
+    if (json['game_dates'] != null) {
+      if (json['game_dates'] is String) {
+        // Format: "{Mon,Tue}" -> ["Mon", "Tue"]
+        String datesStr = (json['game_dates'] as String)
+            .replaceAll('{', '')
+            .replaceAll('}', '')
+            .trim();
+        parsedGameDates = datesStr.isEmpty
+            ? []
+            : datesStr.split(',').map((d) => d.trim()).toList();
+      } else if (json['game_dates'] is List) {
+        parsedGameDates = List<String>.from(json['game_dates']);
+      }
+    }
+
     return Game(
       id: json['id'] as String,
       name: json['name'] as String,
@@ -105,6 +142,8 @@ class Game {
       maxRambleBet: json['max_ramble_bet'] as int?,
       straightMultiplier: json['straight_multiplier'] as int? ?? 0,
       rambleMultiplier: json['ramble_multiplier'] as int?,
+      rambleMatch: json['ramble_match'] as String? ?? 'same_set',
+      noRepeat: json['no_repeat'] as bool? ?? false,
       soldOutAmount: json['sold_out_amount'] as int?,
       drawType: json['draw_type'] as String? ?? 'National',
       imageUrl: json['image_url'] as String?,
@@ -113,6 +152,7 @@ class Game {
       createdAt: json['created_at'] as String? ?? '',
       blackoutStartTime: json['blackout_start_time'] as String?,
       blackoutEndTime: json['blackout_end_time'] as String?,
+      gameDates: parsedGameDates,
     );
   }
 
@@ -135,6 +175,8 @@ class Game {
       'max_ramble_bet': maxRambleBet,
       'straight_multiplier': straightMultiplier,
       'ramble_multiplier': rambleMultiplier,
+      'ramble_match': rambleMatch,
+      'no_repeat': noRepeat,
       'sold_out_amount': soldOutAmount,
       'draw_type': drawType,
       'image_url': imageUrl,
@@ -143,6 +185,7 @@ class Game {
       'created_at': createdAt,
       'blackout_start_time': blackoutStartTime,
       'blackout_end_time': blackoutEndTime,
+      'game_dates': gameDates,
     };
   }
 }

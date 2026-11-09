@@ -133,6 +133,10 @@ class LotteryController extends GetxController {
   final RxList<DraftBet> draftBets = <DraftBet>[].obs;
   final RxDouble balance = 0.0.obs;
   final RxBool isLoading = false.obs;
+  // Short phase label shown next to the Submit button's spinner (e.g.
+  // "Getting location…") so a remaining wait reads as progress rather than
+  // an unexplained hang. Read via GetBuilder, same as isLoading.
+  String submitStatusLabel = '';
   // Increment this tick whenever bets are placed/changed so UI pages (Dashboard)
   // can react and refresh cached draw summaries.
   final RxInt drawRefreshTick = 0.obs;
@@ -155,6 +159,9 @@ class LotteryController extends GetxController {
   // Blackout time restriction (computed from selected game)
   final RxBool isBlackoutTime = false.obs;
   Timer? _blackoutTimer;
+
+  // Day-of-week schedule restriction (computed from selected game's game_dates)
+  final RxBool isGameDayUnavailable = false.obs;
   Timer? _locationTimer;
 
   // Draw time IDs for which the cutoff dialog has already been shown this session.
@@ -329,7 +336,8 @@ class LotteryController extends GetxController {
   void _updateBlackoutState() {
     final game = currentGame;
     isBlackoutTime.value = game?.isInBlackout ?? false;
-    update(); // refresh game chips so per-chip blackout indicators stay current
+    isGameDayUnavailable.value = game != null && !game.isAvailableToday;
+    update(); // refresh game chips so per-chip blackout/day indicators stay current
   }
 
   /// Called from UI when user switches game tab.
@@ -535,7 +543,9 @@ class LotteryController extends GetxController {
               .toList();
         }
 
-        final combinations = digits.isNotEmpty ? calculateCombinations(digits) : 1;
+        final combinations = digits.isNotEmpty
+            ? calculateCombinations(digits, gameId: betJson['game_id'] as String?)
+            : 1;
         final drawId = betJson['draw_id'] as String? ?? '';
         String drawTimeLabel = '';
         if (game != null) {
@@ -680,8 +690,15 @@ class LotteryController extends GetxController {
   /// [2, 2, 3] -> 3!/2! = 3 (one pair)
   /// [1, 2] -> 2! = 2 (both different for 2D)
   /// [2, 2] -> 2!/2! = 1 (both same for 2D)
-  int calculateCombinations(List<String> digits) {
+  int calculateCombinations(List<String> digits, {String? gameId}) {
     if (digits.isEmpty) return 1;
+
+    // A subset game (e.g. Davao PICK3) treats the whole set as one scope: the
+    // Rambol amount is not split across orderings.
+    final id = gameId ?? selectedGameId.value;
+    for (final g in availableGames) {
+      if (g.id == id && g.isSubsetRamble) return 1;
+    }
 
     // Calculate factorial
     int factorial(int n) {
@@ -763,6 +780,14 @@ class LotteryController extends GetxController {
       Get.snackbar(
         'Blackout Period',
         'Betting is temporarily unavailable during the configured blackout period.',
+        snackPosition: SnackPosition.BOTTOM,
+      );
+      return false;
+    }
+    if (isGameDayUnavailable.value) {
+      Get.snackbar(
+        'Betting Unavailable',
+        'This game is not available today based on its configured schedule.',
         snackPosition: SnackPosition.BOTTOM,
       );
       return false;
@@ -974,18 +999,25 @@ class LotteryController extends GetxController {
       clearNumbers();
       targetAmount.value = 0;
       rambolAmount.value = 0;
-      await loadProfile();
+      // Fire-and-forget: adding a draft bet never changes balance (only an
+      // actual submit does — see SubmitDraftBetsHandler), so there's
+      // nothing here for a blocking profile refetch to actually catch.
+      unawaited(loadProfile());
 
-      // Try to force-refresh draw summaries on the server so Dashboard shows
-      // updated gross/totalBet values as soon as possible.
-      try {
-        final gameId = game.id;
-        final drawDate = ManilaTime.dateString();
-        await DrawResultsService.getLatestResultsByGameAndDate(
-          gameId: gameId,
-          drawDate: drawDate,
-        );
-      } catch (_) {}
+      // Fire-and-forget: this is a pure read (no server-side write/cache
+      // warm-up) whose result addBet() doesn't even use — it exists only
+      // to nudge the Dashboard to refetch sooner. Not worth blocking Add
+      // Bet's own spinner on a 30s-timeout request for that.
+      unawaited(() async {
+        try {
+          final gameId = game.id;
+          final drawDate = ManilaTime.dateString();
+          await DrawResultsService.getLatestResultsByGameAndDate(
+            gameId: gameId,
+            drawDate: drawDate,
+          );
+        } catch (_) {}
+      }());
 
       // Notify interested UI (Dashboard) to refresh draw summaries/gross totals
       try {
@@ -1224,13 +1256,16 @@ class LotteryController extends GetxController {
         debugPrint('LotteryController: Connectivity check failed: $e');
       }
 
-      // 2) Quick reachability check against API ping endpoint (longer timeout)
+      // 2) Quick reachability check against API ping endpoint.
+      // Timeouts trimmed from the original 5s/3s/3s (11s worst case) down
+      // to 3s/2s/2s (7s worst case) — same fallback chain, just less time
+      // spent waiting on each rung before trying the next one.
       try {
         var uri = Uri.parse(AppConstants.apiPing);
         if ((uri.host == '127.0.0.1' || uri.host == 'localhost') && Platform.isAndroid) {
           uri = uri.replace(host: '10.0.2.2');
         }
-        final resp = await http.get(uri).timeout(const Duration(seconds: 5));
+        final resp = await http.get(uri).timeout(const Duration(seconds: 3));
         if (resp.statusCode >= 200 && resp.statusCode < 500) return true;
       } on TimeoutException catch (e) {
         // Ping timed out — try health endpoint as a slightly heavier fallback
@@ -1240,7 +1275,7 @@ class LotteryController extends GetxController {
           if ((uri.host == '127.0.0.1' || uri.host == 'localhost') && Platform.isAndroid) {
             uri = uri.replace(host: '10.0.2.2');
           }
-          final resp = await http.get(uri).timeout(const Duration(seconds: 3));
+          final resp = await http.get(uri).timeout(const Duration(seconds: 2));
           if (resp.statusCode >= 200 && resp.statusCode < 500) return true;
         } catch (e) {
           try {
@@ -1257,7 +1292,7 @@ class LotteryController extends GetxController {
 
       // 3) DNS lookup fallback
       try {
-        final lookup = await InternetAddress.lookup('example.com').timeout(const Duration(seconds: 3));
+        final lookup = await InternetAddress.lookup('example.com').timeout(const Duration(seconds: 2));
         return lookup.isNotEmpty;
       } catch (e) {
         try {
@@ -1287,17 +1322,47 @@ class LotteryController extends GetxController {
 
       Position? position;
 
-      // Try high accuracy first (true GPS). Allow up to 10s for a fix.
-      try {
-        position = await Geolocator.getCurrentPosition(
-          locationSettings: const LocationSettings(
-            accuracy: LocationAccuracy.high,
-            timeLimit: Duration(seconds: 10),
-          ),
-        );
-      } catch (_) {
-        // GPS timed out — fall back to last known position.
-        position = await Geolocator.getLastKnownPosition();
+      // Reuse the background 60s location-timer's last fix if it's fresh
+      // enough — avoids blocking Submit on a live GPS read when we already
+      // have a good-enough one. This is the fix for "add bet is fast but
+      // place bet is slow": adding a bet never took a live GPS reading,
+      // submit always did (up to a 10s wait), even indoors with a weak fix.
+      const freshWindow = Duration(seconds: 90);
+      final cached = LocationService.lastKnownPosition;
+      final cachedAt = LocationService.lastKnownPositionAt;
+      if (cached != null && cachedAt != null && DateTime.now().difference(cachedAt) < freshWindow) {
+        position = cached;
+      } else {
+        // No fresh cache from our own 60s timer — try the OS's own
+        // last-known fix next. This returns instantly (no satellite wait,
+        // no timeout) and is what we reach for when GPS never resolves
+        // indoors, which is exactly the condition that made the live fetch
+        // below eat its full timeout on every single submit.
+        const osFixMaxAge = Duration(minutes: 10);
+        final osLastKnown = await Geolocator.getLastKnownPosition();
+        if (osLastKnown != null && DateTime.now().difference(osLastKnown.timestamp) < osFixMaxAge) {
+          position = osLastKnown;
+        } else {
+          // Nothing usable cached anywhere — attempt one short live fix.
+          // Capped well below the old 10s: the backend already falls back
+          // to the agent's stored location snapshot if this also fails, so
+          // there's little value in blocking Submit any longer than this
+          // to chase a satellite fix that may never come indoors.
+          try {
+            position = await Geolocator.getCurrentPosition(
+              locationSettings: const LocationSettings(
+                accuracy: LocationAccuracy.high,
+                timeLimit: Duration(seconds: 3),
+              ),
+            );
+            LocationService.lastKnownPosition = position;
+            LocationService.lastKnownPositionAt = DateTime.now();
+          } catch (_) {
+            // Live fix also failed — use whatever OS last-known we had,
+            // even if stale, rather than nothing.
+            position = osLastKnown;
+          }
+        }
       }
 
       if (position == null) return {};
@@ -1512,8 +1577,168 @@ class LotteryController extends GetxController {
     } catch (_) {}
   }
 
+  /// Submits one draw-time group's bets to `POST /bets/submit-draft` and
+  /// builds its print-queue entry. Extracted out of [submitBets] so groups
+  /// can be submitted concurrently via `Future.wait` instead of one at a
+  /// time — each group is an independent server-side transaction (a
+  /// different draw time's bets), so there's no correctness reason to
+  /// serialize them, only avoidable latency for multi-draw-time carts.
+  /// Never throws — failures are reported via the `success`/`errorResponse`
+  /// fields so one group's rejection doesn't derail `Future.wait` for the
+  /// others.
+  Future<({
+    bool success,
+    http.Response? errorResponse,
+    Map<String, dynamic> teller,
+    double? balance,
+    List<BetEntry> printEntries,
+    double groupTotal,
+    String ticketNo,
+    String groupDrawTimeLabel,
+    String groupGameName,
+  })> _submitBetGroup({
+    required String groupDrawId,
+    required List<DraftBet> groupBets,
+    required String clusterId,
+    required String clusterCode,
+    required Map<String, double> submittedCoords,
+    required String token,
+    required Game game,
+  }) async {
+    try {
+      final now = ManilaTime.now();
+      final uniqueTimestamp =
+          '${now.hour.toString().padLeft(2, '0')}${now.minute.toString().padLeft(2, '0')}${now.second.toString().padLeft(2, '0')}${now.millisecond.toString().padLeft(3, '0')}';
+      final batchTicketNo =
+          'TKT-$clusterCode-${now.year}-${now.month.toString().padLeft(2, '0')}-${now.day.toString().padLeft(2, '0')}-$uniqueTimestamp';
+
+      final betIds = groupBets
+          .map((d) => d.id)
+          .where((id) => id.isNotEmpty)
+          .toSet()
+          .toList();
+
+      final payload = {
+        'bet_ids': betIds,
+        'ticket_no': batchTicketNo,
+        'draw_id': groupDrawId,
+        'cluster_id': clusterId,
+        'payment_method': 'cash',
+        ...submittedCoords,
+      };
+
+      final response = await http
+          .post(
+            Uri.parse('${AppConstants.apiBaseUrl}/bets/submit-draft'),
+            headers: {
+              'Content-Type': 'application/json',
+              'Authorization': 'Bearer $token',
+            },
+            body: jsonEncode(payload),
+          )
+          .timeout(const Duration(seconds: 30));
+
+      if (response.statusCode != 200 && response.statusCode != 201) {
+        return (
+          success: false,
+          errorResponse: response,
+          teller: <String, dynamic>{},
+          balance: null,
+          printEntries: <BetEntry>[],
+          groupTotal: 0.0,
+          ticketNo: '',
+          groupDrawTimeLabel: '',
+          groupGameName: '',
+        );
+      }
+
+      final responseBody = jsonDecode(response.body);
+      final responseData = responseBody['data'] as Map<String, dynamic>? ?? {};
+      final teller = responseData['teller'] as Map<String, dynamic>? ?? {};
+      final responseBalance =
+          (teller['balance'] as num?)?.toDouble() ??
+          (responseData['balance'] as num?)?.toDouble();
+
+      final ticketNo = (responseData['ticket_no'] as String?)?.isNotEmpty == true
+          ? responseData['ticket_no'] as String
+          : batchTicketNo;
+      final groupTotal = groupBets.fold<double>(0, (s, d) => s + d.totalBetAmount);
+
+      // Resolve draw time label for this group
+      final groupDt = currentDrawTimes.cast<DrawTime?>().firstWhere(
+        (d) => d?.id == groupDrawId, orElse: () => null);
+      final groupDrawTimeLabel = groupBets.isNotEmpty && groupBets[0].drawTimeLabel.isNotEmpty
+          ? groupBets[0].drawTimeLabel
+          : (groupDt?.getFormattedTime() ?? '');
+
+      final groupGameName = groupBets.isNotEmpty ? groupBets[0].gameName : game.name;
+
+      final printEntries = groupBets.expand((draft) {
+        final entries = <BetEntry>[];
+        if (draft.straightBetAmount > 0) {
+          entries.add(BetEntry(
+            betNumber: 0,
+            game: draft.gameName,
+            straightBetAmount: draft.straightBetAmount,
+            rambleBetAmount: 0,
+            winAmount: draft.estPayout,
+            digits: List<String>.from(draft.digits),
+            combinations: draft.combinations,
+          ));
+        }
+        if (draft.rambleBetAmount > 0) {
+          entries.add(BetEntry(
+            betNumber: 0,
+            game: draft.gameName,
+            straightBetAmount: 0,
+            rambleBetAmount: draft.rambleBetAmount,
+            winAmount: draft.estPayout,
+            digits: List<String>.from(draft.digits),
+            combinations: draft.combinations,
+          ));
+        }
+        return entries;
+      }).toList();
+
+      return (
+        success: true,
+        errorResponse: null,
+        teller: teller,
+        balance: responseBalance,
+        printEntries: printEntries,
+        groupTotal: groupTotal,
+        ticketNo: ticketNo,
+        groupDrawTimeLabel: groupDrawTimeLabel,
+        groupGameName: groupGameName,
+      );
+    } catch (e) {
+      return (
+        success: false,
+        errorResponse: null,
+        teller: <String, dynamic>{},
+        balance: null,
+        printEntries: <BetEntry>[],
+        groupTotal: 0.0,
+        ticketNo: '',
+        groupDrawTimeLabel: '',
+        groupGameName: '',
+      );
+    }
+  }
+
   Future<void> submitBets() async {
+    // Flip the spinner on immediately so the Submit button visibly reacts
+    // to the tap instead of looking unresponsive during the checks below —
+    // previously isLoading stayed false through all of these, so a slow
+    // connectivity check could look like a dead button, not a busy one.
+    isLoading.value = true;
+    submitStatusLabel = 'Checking status…';
+    update();
+
     if (isNoGameDay.value) {
+      isLoading.value = false;
+      submitStatusLabel = '';
+      update();
       Get.snackbar(
         'Betting Unavailable',
         noGameDayDescription.value.isNotEmpty
@@ -1524,6 +1749,9 @@ class LotteryController extends GetxController {
       return;
     }
     if (isBlackoutTime.value) {
+      isLoading.value = false;
+      submitStatusLabel = '';
+      update();
       Get.snackbar(
         'Blackout Period',
         'Betting is temporarily unavailable during the configured blackout period.',
@@ -1531,9 +1759,25 @@ class LotteryController extends GetxController {
       );
       return;
     }
+    if (isGameDayUnavailable.value) {
+      isLoading.value = false;
+      submitStatusLabel = '';
+      update();
+      Get.snackbar(
+        'Betting Unavailable',
+        'This game is not available today based on its configured schedule.',
+        snackPosition: SnackPosition.BOTTOM,
+      );
+      return;
+    }
 
     // Verify internet connectivity before submitting bets
+    submitStatusLabel = 'Checking connection…';
+    update();
     if (!await _hasInternetConnection()) {
+      isLoading.value = false;
+      submitStatusLabel = '';
+      update();
       Get.snackbar(
         'No internet connection',
         'No internet connection. Please check your network connection and try again.',
@@ -1544,6 +1788,9 @@ class LotteryController extends GetxController {
 
     // Ensure location/GPS permission is granted before submitting
     if (!await _ensureLocationEnabled()) {
+      isLoading.value = false;
+      submitStatusLabel = '';
+      update();
       Get.snackbar(
         'Location Required',
         'Location/GPS is required to submit bets. Please enable location services and grant permission.',
@@ -1553,11 +1800,14 @@ class LotteryController extends GetxController {
     }
 
     if (draftBets.isEmpty) {
+      isLoading.value = false;
+      submitStatusLabel = '';
+      update();
       Get.snackbar('Error', 'Please add at least one bet');
       return;
     }
 
-    isLoading.value = true;
+    submitStatusLabel = 'Submitting…';
     update();
 
     try {
@@ -1735,7 +1985,6 @@ class LotteryController extends GetxController {
         groups.putIfAbsent(key, () => []).add(draft);
       }
 
-      Map<String, dynamic> lastTeller = {};
       double? lastBalance;
 
       // Capture betDate now before it may change after submission
@@ -1755,108 +2004,52 @@ class LotteryController extends GetxController {
       })>[];
 
       // Capture GPS once before submitting all groups.
+      submitStatusLabel = 'Getting location…';
+      update();
       final _submittedCoords = await _captureSubmitLocation();
 
-      for (final entry in groups.entries) {
-        final groupDrawId = entry.key;
-        final groupBets = entry.value;
+      submitStatusLabel = 'Submitting bets…';
+      update();
 
-        final now = ManilaTime.now();
-        final uniqueTimestamp =
-            '${now.hour.toString().padLeft(2, '0')}${now.minute.toString().padLeft(2, '0')}${now.second.toString().padLeft(2, '0')}${now.millisecond.toString().padLeft(3, '0')}';
-        final batchTicketNo =
-            'TKT-$clusterCode-${now.year}-${now.month.toString().padLeft(2, '0')}-${now.day.toString().padLeft(2, '0')}-$uniqueTimestamp';
+      // Submit every draw-time group concurrently instead of one at a time —
+      // each is an independent server-side transaction, so a multi-draw-time
+      // cart no longer pays each group's network+DB latency back-to-back.
+      final groupResults = await Future.wait(
+        groups.entries.map(
+          (entry) => _submitBetGroup(
+            groupDrawId: entry.key,
+            groupBets: entry.value,
+            clusterId: clusterId,
+            clusterCode: clusterCode,
+            submittedCoords: _submittedCoords,
+            token: token,
+            game: game,
+          ),
+        ),
+      );
 
-        final betIds = groupBets
-            .map((d) => d.id)
-            .where((id) => id.isNotEmpty)
-            .toSet()
-            .toList();
-
-        final payload = {
-          'bet_ids': betIds,
-          'ticket_no': batchTicketNo,
-          'draw_id': groupDrawId,
-          'cluster_id': clusterId,
-          'payment_method': 'cash',
-          ..._submittedCoords,
-        };
-
-        final response = await http
-            .post(
-              Uri.parse('${AppConstants.apiBaseUrl}/bets/submit-draft'),
-              headers: {
-                'Content-Type': 'application/json',
-                'Authorization': 'Bearer $token',
-              },
-              body: jsonEncode(payload),
-            )
-            .timeout(const Duration(seconds: 30));
-
-        if (response.statusCode != 200 && response.statusCode != 201) {
-          _handleBetError(response, 0);
-          return;
+      final failedResults = groupResults.where((r) => !r.success);
+      if (failedResults.isNotEmpty) {
+        final failedResult = failedResults.first;
+        if (failedResult.errorResponse != null) {
+          _handleBetError(failedResult.errorResponse!, 0);
+        } else {
+          Get.snackbar('Error', 'Failed to submit bets', snackPosition: SnackPosition.BOTTOM);
         }
+        return;
+      }
 
-        final responseBody = jsonDecode(response.body);
-        final responseData = responseBody['data'] as Map<String, dynamic>? ?? {};
-        final teller = responseData['teller'] as Map<String, dynamic>? ?? {};
-        final responseBalance =
-            (teller['balance'] as num?)?.toDouble() ??
-            (responseData['balance'] as num?)?.toDouble();
-        if (responseBalance != null) {
-          lastBalance = responseBalance;
+      for (final result in groupResults) {
+        if (result.balance != null) {
+          lastBalance = result.balance;
         }
-        lastTeller = teller;
-
-        final ticketNo = (responseData['ticket_no'] as String?)?.isNotEmpty == true
-            ? responseData['ticket_no'] as String
-            : batchTicketNo;
-        final groupTotal = groupBets.fold<double>(0, (s, d) => s + d.totalBetAmount);
-
-        // Resolve draw time label for this group
-        final groupDt = currentDrawTimes.cast<DrawTime?>().firstWhere(
-          (d) => d?.id == groupDrawId, orElse: () => null);
-        final groupDrawTimeLabel = groupBets.isNotEmpty && groupBets[0].drawTimeLabel.isNotEmpty
-            ? groupBets[0].drawTimeLabel
-            : (groupDt?.getFormattedTime() ?? '');
-
-        final groupGameName = groupBets.isNotEmpty ? groupBets[0].gameName : game.name;
-
-        final printEntries = groupBets.expand((draft) {
-          final entries = <BetEntry>[];
-          if (draft.straightBetAmount > 0) {
-            entries.add(BetEntry(
-              betNumber: 0,
-              game: draft.gameName,
-              straightBetAmount: draft.straightBetAmount,
-              rambleBetAmount: 0,
-              winAmount: draft.estPayout,
-              digits: List<String>.from(draft.digits),
-              combinations: draft.combinations,
-            ));
-          }
-          if (draft.rambleBetAmount > 0) {
-            entries.add(BetEntry(
-              betNumber: 0,
-              game: draft.gameName,
-              straightBetAmount: 0,
-              rambleBetAmount: draft.rambleBetAmount,
-              winAmount: draft.estPayout,
-              digits: List<String>.from(draft.digits),
-              combinations: draft.combinations,
-            ));
-          }
-          return entries;
-        }).toList();
-
         printQueue.add((
-          betEntries: printEntries,
-          totalAmount: groupTotal,
-          ticketNo: ticketNo,
-          teller: Map<String, dynamic>.from(lastTeller),
-          gameName: groupGameName,
-          drawTimeLabel: groupDrawTimeLabel,
+          betEntries: result.printEntries,
+          totalAmount: result.groupTotal,
+          ticketNo: result.ticketNo,
+          teller: Map<String, dynamic>.from(result.teller),
+          gameName: result.groupGameName,
+          drawTimeLabel: result.groupDrawTimeLabel,
           drawDate: betDateStr,
         ));
       }
@@ -1866,7 +2059,10 @@ class LotteryController extends GetxController {
         authController.updateCurrentUserBalance(lastBalance!);
       }
 
-      await loadProfile();
+      // Fire-and-forget: the balance shown above already comes straight
+      // from the submit response, so there's no need to block "done" on a
+      // second full profile round trip.
+      unawaited(loadProfile());
 
       draftBets.clear();
       selectedNumbers.clear();
@@ -1875,6 +2071,9 @@ class LotteryController extends GetxController {
 
       // Signal Dashboard to re-fetch gross amounts after bets are finalized
       drawRefreshTick.value = drawRefreshTick.value + 1;
+
+      // Tactile confirmation for a busy agent who isn't watching the screen.
+      HapticFeedback.lightImpact();
 
       Get.snackbar(
         'Success',
@@ -1889,6 +2088,7 @@ class LotteryController extends GetxController {
       // Submission is complete once the API accepted the bets. Do not keep
       // the Submit button spinning while Bluetooth printing is in progress.
       isLoading.value = false;
+      submitStatusLabel = '';
       update();
 
       // Print tickets sequentially — one Bluetooth job at a time.
@@ -1911,6 +2111,7 @@ class LotteryController extends GetxController {
       );
     } finally {
       isLoading.value = false;
+      submitStatusLabel = '';
       update();
     }
   }
@@ -2171,7 +2372,7 @@ class LotteryController extends GetxController {
     }
     try {
       final errorBody = jsonDecode(response.body);
-      final message = errorBody['message'] ?? 'Unknown error';
+      final message = errorBody['message'] ?? errorBody['error'] ?? 'Unknown error';
 
       if (betNumber == 0) {
         Get.snackbar(
